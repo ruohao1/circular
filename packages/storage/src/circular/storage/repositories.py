@@ -35,6 +35,43 @@ class WorkspaceContainerIdConflictError(ValueError):
         self.requested = requested
 
 
+async def _lock_run(session: AsyncSession, run_id: UUID) -> RunRecord:
+    """Acquire the first row lock for any write owned by a Run."""
+    run = await session.scalar(select(RunRecord).where(RunRecord.id == run_id).with_for_update())
+    if run is None:
+        raise RunNotFoundError(str(run_id))
+    return run
+
+
+async def _append_event_for_locked_run(
+    session: AsyncSession,
+    run: RunRecord,
+    envelope: EventEnvelope,
+) -> EventRecord:
+    """Allocate a sequence after `_lock_run` has serialized this Run's writers."""
+    if run.id != envelope.run_id:
+        raise ValueError("event run does not match the locked run")
+
+    last_sequence = await session.scalar(
+        select(func.coalesce(func.max(EventRecord.sequence), 0)).where(
+            EventRecord.run_id == envelope.run_id
+        )
+    )
+    record = EventRecord(
+        id=envelope.id,
+        run_id=envelope.run_id,
+        sequence=int(last_sequence or 0) + 1,
+        type=envelope.type.value,
+        source=envelope.source,
+        data=envelope.data,
+        raw=envelope.raw,
+        occurred_at=envelope.occurred_at,
+    )
+    session.add(record)
+    await session.flush()
+    return record
+
+
 class RunEventReader:
     """Read ordered Run events without exposing session lifetime to callers."""
 
@@ -96,11 +133,7 @@ class RunStore:
         *,
         error: str | None = None,
     ) -> RunRecord:
-        run = await session.scalar(
-            select(RunRecord).where(RunRecord.id == run_id).with_for_update()
-        )
-        if run is None:
-            raise RunNotFoundError(str(run_id))
+        run = await _lock_run(session, run_id)
 
         RunLifecycle.validate(RunStatus(run.status), target)
         run.status = target.value
@@ -115,35 +148,15 @@ class RunStore:
 
     async def append_event(self, session: AsyncSession, envelope: EventEnvelope) -> EventRecord:
         # Locking the owning Run serializes sequence allocation without a second queue system.
-        run = await session.scalar(
-            select(RunRecord.id).where(RunRecord.id == envelope.run_id).with_for_update()
-        )
-        if run is None:
-            raise RunNotFoundError(str(envelope.run_id))
-        last_sequence = await session.scalar(
-            select(func.coalesce(func.max(EventRecord.sequence), 0)).where(
-                EventRecord.run_id == envelope.run_id
-            )
-        )
-        record = EventRecord(
-            id=envelope.id,
-            run_id=envelope.run_id,
-            sequence=int(last_sequence or 0) + 1,
-            type=envelope.type.value,
-            source=envelope.source,
-            data=envelope.data,
-            raw=envelope.raw,
-            occurred_at=envelope.occurred_at,
-        )
-        session.add(record)
-        await session.flush()
-        return record
+        run = await _lock_run(session, envelope.run_id)
+        return await _append_event_for_locked_run(session, run, envelope)
 
 
 class WorkspaceStore:
     """Persist Workspace lifecycle facts inside a caller-owned transaction.
 
-    Writes are flushed for immediate use but this store never commits or rolls back.
+    Writes lock the owning Run first and flush for immediate use, but this store never
+    commits or rolls back.
     """
 
     _transition_events = {
@@ -152,9 +165,6 @@ class WorkspaceStore:
         WorkspaceStatus.FAILED: EventType.WORKSPACE_FAILED,
     }
 
-    def __init__(self) -> None:
-        self._runs = RunStore()
-
     async def create(
         self,
         session: AsyncSession,
@@ -162,7 +172,11 @@ class WorkspaceStore:
         *,
         source: str,
     ) -> Workspace:
-        WorkspaceLifecycle.validate_initial(workspace.status)
+        WorkspaceLifecycle.validate_initial(
+            workspace.status,
+            container_id=workspace.container_id,
+        )
+        run = await _lock_run(session, workspace.run_id)
         statement = (
             insert(WorkspaceRecord)
             .values(
@@ -178,8 +192,9 @@ class WorkspaceStore:
         record = (await session.scalars(statement)).one_or_none()
         if record is None:
             raise WorkspaceAlreadyExistsError(workspace.run_id)
-        await self._runs.append_event(
+        await _append_event_for_locked_run(
             session,
+            run,
             EventEnvelope(
                 run_id=workspace.run_id,
                 type=EventType.WORKSPACE_PROVISIONING,
@@ -227,6 +242,12 @@ class WorkspaceStore:
         source: str,
         container_id: str | None = None,
     ) -> Workspace:
+        run_id = await session.scalar(
+            select(WorkspaceRecord.run_id).where(WorkspaceRecord.id == workspace_id)
+        )
+        if run_id is None:
+            raise WorkspaceNotFoundError(str(workspace_id))
+        run = await _lock_run(session, run_id)
         record = await session.scalar(
             select(WorkspaceRecord).where(WorkspaceRecord.id == workspace_id).with_for_update()
         )
@@ -250,8 +271,9 @@ class WorkspaceStore:
         event_data = {"status": target.value, "workspace_id": str(record.id)}
         if record.container_id is not None:
             event_data["container_id"] = record.container_id
-        await self._runs.append_event(
+        await _append_event_for_locked_run(
             session,
+            run,
             EventEnvelope(
                 run_id=record.run_id,
                 type=self._transition_events[target],
@@ -275,11 +297,9 @@ class WorkspaceStore:
 class ArtifactStore:
     """Append and read Run artifacts inside a caller-owned transaction.
 
-    Writes are flushed for immediate use but this store never commits or rolls back.
+    Writes lock the owning Run first and flush for immediate use, but this store never
+    commits or rolls back.
     """
-
-    def __init__(self) -> None:
-        self._runs = RunStore()
 
     async def append(
         self,
@@ -288,6 +308,7 @@ class ArtifactStore:
         *,
         source: str,
     ) -> Artifact:
+        run = await _lock_run(session, artifact.run_id)
         record = ArtifactRecord(
             id=artifact.id,
             run_id=artifact.run_id,
@@ -297,8 +318,9 @@ class ArtifactStore:
         )
         session.add(record)
         await session.flush()
-        await self._runs.append_event(
+        await _append_event_for_locked_run(
             session,
+            run,
             EventEnvelope(
                 run_id=artifact.run_id,
                 type=EventType.ARTIFACT_CREATED,

@@ -25,7 +25,9 @@ PostgreSQL is the source of truth. A worker claims a queued run with `FOR UPDATE
 LOCKED` and changes it to `provisioning` in the same transaction. State changes pass
 through the orchestration transition policy. Events are append-only and have both a
 global database sequence and a per-run sequence. SSE uses the per-run sequence as its
-resume cursor.
+resume cursor. Writes spanning a Run-owned resource and its Event lock the owning Run
+first, then the resource row. The storage implementation reuses that Run lock for event
+sequence allocation so Workspace and Artifact writes share one deterministic lock order.
 
 ## Isolation seam
 

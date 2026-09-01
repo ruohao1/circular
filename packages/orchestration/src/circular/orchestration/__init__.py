@@ -3,6 +3,7 @@ from circular.orchestration.run_lifecycle import (
     RunLifecycle,
 )
 from circular.orchestration.workspace_lifecycle import (
+    InvalidWorkspaceInitialContainer,
     InvalidWorkspaceInitialStatus,
     InvalidWorkspaceTransition,
     WorkspaceLifecycle,
@@ -10,6 +11,7 @@ from circular.orchestration.workspace_lifecycle import (
 
 __all__ = [
     "InvalidRunTransition",
+    "InvalidWorkspaceInitialContainer",
     "InvalidWorkspaceInitialStatus",
     "InvalidWorkspaceTransition",
     "RunLifecycle",

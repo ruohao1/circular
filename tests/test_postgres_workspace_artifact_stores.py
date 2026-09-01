@@ -1,17 +1,23 @@
+import asyncio
 import os
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, replace
 from uuid import UUID, uuid4
 
 import pytest
-from circular.domain import Artifact, Workspace, WorkspaceStatus
-from circular.orchestration import InvalidWorkspaceInitialStatus, InvalidWorkspaceTransition
+from circular.domain import Artifact, RunStatus, Workspace, WorkspaceStatus
+from circular.orchestration import (
+    InvalidWorkspaceInitialContainer,
+    InvalidWorkspaceInitialStatus,
+    InvalidWorkspaceTransition,
+)
 from circular.storage import (
     AgentRecord,
     ArtifactStore,
     ProjectRecord,
     RunEventReader,
     RunRecord,
+    RunStore,
     TaskRecord,
     WorkspaceAlreadyExistsError,
     WorkspaceContainerIdConflictError,
@@ -20,7 +26,7 @@ from circular.storage import (
     create_engine,
     create_session_factory,
 )
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 database_url = os.getenv("TEST_DATABASE_URL")
@@ -239,6 +245,30 @@ async def test_create_rejects_a_workspace_that_bypasses_the_initial_state(
             await store.load(session, workspace.id)
     events = await RunEventReader(store_fixture.sessions).read_after(store_fixture.run_id, 0)
     assert exc_info.value.status is WorkspaceStatus.READY
+    assert events == ()
+
+
+async def test_create_rejects_an_initial_container_without_persisting_anything(
+    store_fixture: StoreFixture,
+) -> None:
+    store = WorkspaceStore()
+    workspace = Workspace(
+        id=uuid4(),
+        run_id=store_fixture.run_id,
+        worktree_path="/worktrees/premature-container",
+        container_id="premature-container",
+    )
+
+    with pytest.raises(InvalidWorkspaceInitialContainer) as exc_info:
+        async with store_fixture.sessions.begin() as session:
+            await store.create(session, workspace, source="test-worker")
+
+    async with store_fixture.sessions() as session:
+        with pytest.raises(WorkspaceNotFoundError):
+            await store.load(session, workspace.id)
+    events = await RunEventReader(store_fixture.sessions).read_after(store_fixture.run_id, 0)
+
+    assert exc_info.value.container_id == "premature-container"
     assert events == ()
 
 
@@ -518,4 +548,91 @@ async def test_transition_rejects_replacing_an_existing_container_id(
     assert [event.type for event in events] == [
         "workspace.provisioning",
         "workspace.ready",
+    ]
+
+
+async def wait_until_backend_is_blocked(
+    sessions: async_sessionmaker[AsyncSession],
+    backend_pid: int,
+) -> None:
+    async with asyncio.timeout(2):
+        while True:
+            async with sessions() as session:
+                blockers = await session.scalar(select(func.pg_blocking_pids(backend_pid)))
+            if blockers:
+                return
+            await asyncio.sleep(0.01)
+
+
+async def test_workspace_operations_lock_run_before_workspace(
+    store_fixture: StoreFixture,
+) -> None:
+    workspace_store = WorkspaceStore()
+    run_store = RunStore()
+    workspace = Workspace(
+        id=uuid4(),
+        run_id=store_fixture.run_id,
+        worktree_path="/worktrees/lock-order",
+    )
+    async with store_fixture.sessions.begin() as session:
+        await workspace_store.create(session, workspace, source="test-worker")
+
+    run_locked = asyncio.Event()
+    continue_run_owner = asyncio.Event()
+    contender_pid: asyncio.Future[int] = asyncio.get_running_loop().create_future()
+
+    async def transition_run_then_workspace() -> Workspace:
+        async with store_fixture.sessions.begin() as session:
+            await run_store.transition(session, store_fixture.run_id, RunStatus.PROVISIONING)
+            run_locked.set()
+            await continue_run_owner.wait()
+            return await workspace_store.transition(
+                session,
+                workspace.id,
+                WorkspaceStatus.READY,
+                source="run-owner",
+            )
+
+    async def transition_competing_workspace() -> Workspace:
+        async with store_fixture.sessions.begin() as session:
+            pid = await session.scalar(select(func.pg_backend_pid()))
+            assert pid is not None
+            contender_pid.set_result(pid)
+            return await workspace_store.transition(
+                session,
+                workspace.id,
+                WorkspaceStatus.FAILED,
+                source="contender",
+            )
+
+    owner_task = asyncio.create_task(transition_run_then_workspace())
+    contender_task: asyncio.Task[Workspace] | None = None
+    try:
+        async with asyncio.timeout(5):
+            await run_locked.wait()
+            contender_task = asyncio.create_task(transition_competing_workspace())
+            await wait_until_backend_is_blocked(
+                store_fixture.sessions,
+                await contender_pid,
+            )
+            continue_run_owner.set()
+            owner_workspace, contender_workspace = await asyncio.gather(
+                owner_task,
+                contender_task,
+            )
+    finally:
+        continue_run_owner.set()
+        tasks = [owner_task, *([contender_task] if contender_task is not None else [])]
+        for task in tasks:
+            if not task.done():
+                task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
+
+    events = await RunEventReader(store_fixture.sessions).read_after(store_fixture.run_id, 0)
+    assert owner_workspace.status is WorkspaceStatus.READY
+    assert contender_workspace.status is WorkspaceStatus.FAILED
+    assert [(event.type, event.source) for event in events] == [
+        ("workspace.provisioning", "test-worker"),
+        ("workspace.ready", "run-owner"),
+        ("workspace.failed", "contender"),
     ]

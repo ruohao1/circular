@@ -16,6 +16,15 @@ class InvalidWorkspaceInitialStatus(ValueError):
         self.status = status
 
 
+class InvalidWorkspaceInitialContainer(ValueError):
+    def __init__(self, container_id: str) -> None:
+        super().__init__(
+            f"workspace cannot start with container {container_id}; "
+            "record it when the workspace becomes ready or failed"
+        )
+        self.container_id = container_id
+
+
 class WorkspaceLifecycle:
     """Single authority for deterministic Workspace lifecycle transitions."""
 
@@ -27,9 +36,16 @@ class WorkspaceLifecycle:
     }
 
     @classmethod
-    def validate_initial(cls, status: WorkspaceStatus) -> None:
+    def validate_initial(
+        cls,
+        status: WorkspaceStatus,
+        *,
+        container_id: str | None = None,
+    ) -> None:
         if status is not WorkspaceStatus.PENDING:
             raise InvalidWorkspaceInitialStatus(status)
+        if container_id is not None:
+            raise InvalidWorkspaceInitialContainer(container_id)
 
     @classmethod
     def allowed_targets(cls, current: WorkspaceStatus) -> frozenset[WorkspaceStatus]:

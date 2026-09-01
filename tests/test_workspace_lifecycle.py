@@ -1,6 +1,7 @@
 import pytest
 from circular.domain import WorkspaceStatus
 from circular.orchestration import (
+    InvalidWorkspaceInitialContainer,
     InvalidWorkspaceInitialStatus,
     InvalidWorkspaceTransition,
     WorkspaceLifecycle,
@@ -20,6 +21,16 @@ def test_every_other_initial_workspace_state_is_invalid(status: WorkspaceStatus)
         WorkspaceLifecycle.validate_initial(status)
 
     assert exc_info.value.status is status
+
+
+def test_initial_workspace_cannot_already_have_a_container() -> None:
+    with pytest.raises(InvalidWorkspaceInitialContainer) as exc_info:
+        WorkspaceLifecycle.validate_initial(
+            WorkspaceStatus.PENDING,
+            container_id="premature-container",
+        )
+
+    assert exc_info.value.container_id == "premature-container"
 
 
 def test_pending_workspace_can_become_ready() -> None:
