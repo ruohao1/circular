@@ -24,7 +24,8 @@ One concrete execution attempt of a task by an agent using a selected backend.
 _Avoid_: Agent, job
 
 **Workspace**:
-The isolated checkout and runtime allocation assigned to one run.
+The managed resource allocation owned by one Run, including its isolated checkout and runtime.
+Its lifecycle describes resource ownership and release, not whether the Run succeeded or failed.
 _Avoid_: Sandbox
 
 **Event**:
