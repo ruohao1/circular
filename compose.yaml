@@ -47,6 +47,17 @@ services:
     environment:
       DATABASE_URL: postgresql+psycopg://circular:circular@postgres:5432/circular
       CIRCULAR_POLL_INTERVAL_SECONDS: ${CIRCULAR_POLL_INTERVAL_SECONDS:-1}
+      CIRCULAR_REPOSITORY_CACHE_ROOT: /var/lib/circular/repositories
+      CIRCULAR_WORKTREE_ROOT: /var/lib/circular/worktrees
+      CIRCULAR_ARTIFACT_ROOT: /var/lib/circular/artifacts
+      CIRCULAR_DOCKER_WORKTREE_ROOT: ${CIRCULAR_DOCKER_WORKTREE_ROOT:-${CIRCULAR_EXECUTION_HOST_ROOT:-${PWD}/.circular}/worktrees}
+      CIRCULAR_RUNNER_IMAGE: ${CIRCULAR_RUNNER_IMAGE:-circular-runner:dev}
+      CIRCULAR_RUNNER_CPU_LIMIT: ${CIRCULAR_RUNNER_CPU_LIMIT:-1}
+      CIRCULAR_RUNNER_MEMORY_LIMIT_MB: ${CIRCULAR_RUNNER_MEMORY_LIMIT_MB:-2048}
+    volumes:
+      - type: bind
+        source: ${CIRCULAR_EXECUTION_HOST_ROOT:-${PWD}/.circular}
+        target: /var/lib/circular
     depends_on:
       migrate:
         condition: service_completed_successfully

@@ -1,6 +1,7 @@
 .git
 .env
 .venv
+.circular
 node_modules
 **/node_modules
 **/dist

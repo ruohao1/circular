@@ -29,4 +29,6 @@ uv run circular-worker
 ```
 
 See [docs/architecture/foundation.md](docs/architecture/foundation.md) for the package
-map and intentionally deferred work.
+map and intentionally deferred work. Worker-owned filesystem roots and their local and
+Compose mappings are documented in
+[docs/development/execution-directories.md](docs/development/execution-directories.md).

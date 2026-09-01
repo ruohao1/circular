@@ -11,7 +11,8 @@ worker compose the same domain packages but do not call one another in-process.
 - `events`: normalized event names and backend-neutral event envelopes.
 - `agents`: backend capability contract plus the deterministic fake adapter.
 - `storage`: SQLAlchemy mappings, repositories, event persistence, and queue claiming.
-- `runners`: execution coordination across backend, workspace, and event seams.
+- `runners`: execution coordination across backend, workspace, and event seams, including
+  safe managed execution-path derivation.
 - `runtimes`: container-runtime interface and per-run container specification.
 - `git`: worktree-provisioning interface.
 - `integrations`: reserved adapters for Linear and GitHub; domain code never imports them.
@@ -31,6 +32,13 @@ defines the runtime and worktree interfaces but the fake backend runs in the wor
 process so tests and development need no privileged Docker access. A future Docker
 adapter must mount only the run worktree and explicitly scoped secrets; it must not
 mount the Docker socket, host SSH directory, or platform credentials.
+
+Repository caches, worktrees, and artifacts are derived from internal UUIDs beneath
+worker-owned roots. The `runners` path module validates containment and translates a
+worker-visible worktree into the equivalent Docker-host-visible source path. Process-
+specific environment parsing remains in `apps/worker`. See
+[execution-directories.md](../development/execution-directories.md) for the concrete
+local and Compose mappings.
 
 ## Deliberately deferred
 

@@ -1,31 +1,13 @@
 import asyncio
 import logging
-import socket
 from contextlib import suppress
 
 from circular.agents import FakeAgentBackend
 from circular.runners import RunExecutor
 from circular.storage import RunStore, create_engine, create_session_factory
-from pydantic import Field
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from circular.worker.config import Settings
 
 logger = logging.getLogger(__name__)
-
-
-class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
-
-    database_url: str = Field(
-        default="postgresql+psycopg://circular:circular@localhost:5432/circular",
-        validation_alias="DATABASE_URL",
-    )
-    poll_interval_seconds: float = Field(
-        default=1.0, validation_alias="CIRCULAR_POLL_INTERVAL_SECONDS"
-    )
-    fake_delay_seconds: float = Field(default=0.05, validation_alias="CIRCULAR_FAKE_DELAY_SECONDS")
-    worker_id: str = Field(
-        default_factory=socket.gethostname, validation_alias="CIRCULAR_WORKER_ID"
-    )
 
 
 async def worker_loop(settings: Settings, stop: asyncio.Event | None = None) -> None:
