@@ -1,3 +1,4 @@
+import io
 import json
 import subprocess
 import sys
@@ -5,6 +6,7 @@ import time
 from typing import Any
 
 import pytest
+from circular.fake_agent_workload.cli import main as run_workload
 
 RUN_ID = "00000000-0000-4000-8000-000000000170"
 
@@ -36,6 +38,17 @@ def _run_raw_workload(raw_input: str) -> subprocess.CompletedProcess[str]:
         check=False,
         text=True,
     )
+
+
+def _input_with_unknown_surrogate_field() -> str:
+    document = _valid_input()
+    document["\ud800"] = "do-not-print"
+    return json.dumps(document)
+
+
+def _input_with_duplicate_surrogate_field() -> str:
+    valid_input = json.dumps(_valid_input())
+    return '{"\\ud800": 0, "\\ud800": 1, ' + valid_input[1:]
 
 
 def test_success_emits_the_exact_versioned_backend_event_stream() -> None:
@@ -172,6 +185,45 @@ def test_duplicate_json_fields_are_rejected() -> None:
     )
 
 
+@pytest.mark.parametrize(
+    ("raw_input", "message"),
+    [
+        (
+            _input_with_unknown_surrogate_field(),
+            r"input contains unsupported fields: \ud800",
+        ),
+        (
+            _input_with_duplicate_surrogate_field(),
+            r"input contains duplicate field: \ud800",
+        ),
+    ],
+)
+def test_surrogate_field_names_emit_safe_errors_with_strict_utf8_streams(
+    monkeypatch: pytest.MonkeyPatch, raw_input: str, message: str
+) -> None:
+    stdout_bytes = io.BytesIO()
+    stderr_bytes = io.BytesIO()
+    monkeypatch.setattr(sys, "stdin", io.StringIO(raw_input))
+    monkeypatch.setattr(
+        sys,
+        "stdout",
+        io.TextIOWrapper(stdout_bytes, encoding="utf-8", errors="strict", write_through=True),
+    )
+    monkeypatch.setattr(
+        sys,
+        "stderr",
+        io.TextIOWrapper(stderr_bytes, encoding="utf-8", errors="strict", write_through=True),
+    )
+
+    exit_code = run_workload()
+
+    assert exit_code == 2
+    assert stdout_bytes.getvalue() == b""
+    assert stderr_bytes.getvalue().decode() == (
+        f'{{"error":{{"code":"invalid_input","message":"{message}"}},"protocol_version":1}}\n'
+    )
+
+
 def test_run_context_rejects_platform_credentials_without_echoing_them() -> None:
     document = _valid_input()
     document["run"]["platform_credentials"] = {"token": "do-not-print"}
@@ -262,6 +314,21 @@ def test_run_text_fields_are_strictly_typed(field: str, value: object, message: 
     assert result.stdout == ""
     assert result.stderr == (
         f'{{"error":{{"code":"invalid_input","message":"{message}"}},"protocol_version":1}}\n'
+    )
+
+
+@pytest.mark.parametrize("field", ["task_title", "task_description", "instructions"])
+def test_run_text_fields_reject_lone_surrogates_before_emitting_output(field: str) -> None:
+    document = _valid_input()
+    document["run"][field] = "\ud800"
+
+    result = _run_workload(document)
+
+    assert result.returncode == 2
+    assert result.stdout == ""
+    assert result.stderr == (
+        f'{{"error":{{"code":"invalid_input",'
+        f'"message":"run.{field} must be valid Unicode text"}},"protocol_version":1}}\n'
     )
 
 

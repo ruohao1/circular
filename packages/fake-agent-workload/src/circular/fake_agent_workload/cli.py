@@ -2,6 +2,7 @@ import json
 import sys
 import time
 from dataclasses import dataclass
+from enum import StrEnum
 from typing import Any, TextIO
 from uuid import UUID
 
@@ -9,7 +10,6 @@ PROTOCOL_VERSION = 1
 SOURCE = "fake-container-workload"
 INVALID_INPUT_EXIT = 2
 INJECTED_FAILURE_EXIT = 20
-SUPPORTED_FAILURES = ("none", "before_events", "after_first_event")
 
 
 class InvalidInput(ValueError):
@@ -20,6 +20,12 @@ class DuplicateField(ValueError):
     def __init__(self, field: str) -> None:
         super().__init__(field)
         self.field = field
+
+
+class FailureMode(StrEnum):
+    NONE = "none"
+    BEFORE_EVENTS = "before_events"
+    AFTER_FIRST_EVENT = "after_first_event"
 
 
 @dataclass(frozen=True, slots=True)
@@ -33,7 +39,7 @@ class RunContext:
 @dataclass(frozen=True, slots=True)
 class Behavior:
     delay_seconds: float
-    failure: str
+    failure: FailureMode
 
 
 @dataclass(frozen=True, slots=True)
@@ -43,7 +49,7 @@ class WorkloadRequest:
 
 
 def _write_json_line(stream: TextIO, payload: dict[str, Any]) -> None:
-    stream.write(json.dumps(payload, ensure_ascii=False, separators=(",", ":"), sort_keys=True))
+    stream.write(json.dumps(payload, ensure_ascii=True, separators=(",", ":"), sort_keys=True))
     stream.write("\n")
     stream.flush()
 
@@ -109,6 +115,11 @@ def _parse_run(value: Any) -> RunContext:
     for field in ("task_description", "instructions"):
         if not isinstance(value[field], str):
             raise InvalidInput(f"run.{field} must be a string")
+    for field in ("task_title", "task_description", "instructions"):
+        try:
+            value[field].encode("utf-8")
+        except UnicodeEncodeError:
+            raise InvalidInput(f"run.{field} must be valid Unicode text") from None
 
     return RunContext(
         id=run_id,
@@ -127,8 +138,12 @@ def _parse_behavior(value: Any) -> Behavior:
     if type(delay_ms) is not int or not 0 <= delay_ms <= 10_000:
         raise InvalidInput("behavior.delay_ms must be an integer from 0 through 10000")
 
-    failure = value["failure"]
-    if not isinstance(failure, str) or failure not in SUPPORTED_FAILURES:
+    raw_failure = value["failure"]
+    try:
+        failure = FailureMode(raw_failure) if isinstance(raw_failure, str) else None
+    except ValueError:
+        failure = None
+    if failure is None:
         raise InvalidInput(
             "behavior.failure must be one of: none, before_events, after_first_event"
         )
@@ -181,7 +196,7 @@ def _events(request: WorkloadRequest) -> tuple[dict[str, Any], ...]:
 def _run(request: WorkloadRequest) -> int:
     run_id = request.run.id
     behavior = request.behavior
-    if behavior.failure == "before_events":
+    if behavior.failure is FailureMode.BEFORE_EVENTS:
         _write_json_line(
             sys.stderr,
             _error(
@@ -195,7 +210,7 @@ def _run(request: WorkloadRequest) -> int:
     for index, event in enumerate(_events(request)):
         time.sleep(behavior.delay_seconds)
         _write_json_line(sys.stdout, event)
-        if behavior.failure == "after_first_event" and index == 0:
+        if behavior.failure is FailureMode.AFTER_FIRST_EVENT and index == 0:
             _write_json_line(
                 sys.stderr,
                 _error(

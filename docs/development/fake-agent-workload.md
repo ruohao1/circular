@@ -32,8 +32,9 @@ Close standard input after writing exactly one object:
 
 Every object has an exact field set; unknown, missing, and duplicate fields are rejected.
 `run.id` is a canonical UUID, `task_title` is non-empty, and the other Run text fields are
-strings. `delay_ms` is an integer from `0` through `10000` and is applied before every
-emitted event. `failure` is one of:
+strings. Every Run text field must be valid Unicode text that can be encoded as UTF-8;
+lone UTF-16 surrogates are rejected before any output is emitted. `delay_ms` is an integer
+from `0` through `10000` and is applied before every emitted event. `failure` is one of:
 
 - `none`: emit the complete success stream;
 - `before_events`: fail before writing an event;
@@ -50,7 +51,9 @@ Success writes four canonical JSON Lines records to standard output in this orde
 
 Each event contains exactly `protocol_version`, `run_id`, `source`, `type`, and `data`.
 There are deliberately no generated IDs or timestamps, so identical input produces
-identical output. Every record is flushed before the next delay or injected failure.
+identical output. JSON strings are ASCII-escaped so every record is valid UTF-8 regardless
+of the process stream's encoding error policy. Every record is flushed before the next
+delay or injected failure.
 
 Invalid input writes one record to standard error with code `invalid_input` and exits `2`.
 Validation messages identify field names but never echo field values. An injected failure
