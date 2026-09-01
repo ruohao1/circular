@@ -3,17 +3,26 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from pathlib import Path
 from typing import Protocol, runtime_checkable
+from uuid import UUID
 
 
 @dataclass(frozen=True, slots=True)
 class ContainerSpec:
+    """Backend-neutral request for one Run-owned container execution.
+
+    ``stdin`` is written exactly once and then closed. Runtime adapters validate
+    their own isolation policy before accepting the remaining configuration.
+    """
+
+    run_id: UUID
     image: str
     worktree: Path
     command: tuple[str, ...]
+    stdin: bytes
+    cpu_limit: float
+    memory_limit_mb: int
     environment: dict[str, str] = field(default_factory=dict)
     network_enabled: bool = False
-    cpu_limit: float | None = None
-    memory_limit_mb: int | None = None
 
 
 @dataclass(frozen=True, slots=True)

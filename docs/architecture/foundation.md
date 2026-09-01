@@ -31,11 +31,13 @@ sequence allocation so Workspace and Artifact writes share one deterministic loc
 
 ## Isolation seam
 
-The intended execution chain is Run → container → Git worktree → backend. This scaffold
-defines the runtime and worktree interfaces but the fake backend runs in the worker
-process so tests and development need no privileged Docker access. A future Docker
-adapter must mount only the run worktree and explicitly scoped secrets; it must not
-mount the Docker socket, host SSH directory, or platform credentials.
+The intended execution chain is Run → container → Git worktree → backend. The
+`DockerRuntime` adapter translates the backend-neutral runtime interface into hardened,
+argv-only Docker CLI operations: one Run worktree is mounted read-write at `/workspace`,
+the container root is read-only, and network, capabilities, resource limits, user, and
+environment policy are explicit. The adapter never mounts the Docker socket, host SSH
+directory, Repository cache, Artifact root, or control-plane credentials. It is not yet
+wired into the worker; the in-process fake backend remains the development default.
 
 Repository caches, worktrees, and artifacts are derived from internal UUIDs beneath
 worker-owned roots. The `runners` path module validates containment and translates a
@@ -46,8 +48,10 @@ local and Compose mappings.
 
 ## Deliberately deferred
 
-Real agent backends, Docker/worktree adapters, authentication and RBAC, approval UI,
+Real agent backends, worker-to-Docker composition, authentication and RBAC, approval UI,
 recursive delegation, Linear/GitHub adapters, LISTEN/NOTIFY wakeups, generated frontend
 contracts, billing, and distributed runners are not implemented. The fake workload image
-proves the process contract but is not wired into the worker or runtime. These have explicit
-seams or storage fields where needed, but no speculative framework.
+proves the process and Docker runtime contracts but is not wired into the worker. These
+have explicit seams or storage fields where needed, but no speculative framework.
+Cross-process container recovery and retained-container cleanup also remain worker
+lifecycle work.

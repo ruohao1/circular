@@ -3,6 +3,7 @@ from abc import ABC, abstractmethod
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from pathlib import Path
+from uuid import UUID
 
 from circular.runtimes import (
     CompletionReason,
@@ -166,9 +167,13 @@ class TestFakeRuntime(RuntimeContract):
         return RuntimeCase(
             runtime=runtime,
             spec=ContainerSpec(
+                run_id=UUID("00000000-0000-4000-8000-000000000171"),
                 image="runtime-contract",
                 worktree=Path("/workspace"),
                 command=("contract-command",),
+                stdin=b"contract input",
+                cpu_limit=1.0,
+                memory_limit_mb=128,
             ),
         )
 

@@ -46,9 +46,11 @@ absolute directory when the data should live elsewhere. If the worker and Docker
 do not share a host filesystem, bind-path translation is insufficient; a remote-volume
 adapter would be a separate execution model.
 
-The later Docker adapter will decide the worktree's destination inside a Run container.
-This mapping supplies only the validated host source and does not widen the intended
-rule that an agent container receives its own worktree and explicitly scoped secrets.
+`DockerRuntime` fixes the worktree's destination inside a Run container at `/workspace`.
+The adapter validates that the source is the direct canonical UUID child beneath this
+Docker-host root. The host path may be daemon-visible without existing in the worker's
+filesystem namespace; known local symlinks are rejected, while the trusted worker remains
+responsible for provisioning the corresponding host path before launch.
 
 ## Local Repository cache
 
@@ -111,5 +113,6 @@ stale metadata. ISQ-167 owns interrupted cleanup recovery and reconciliation.
 | `CIRCULAR_RUNNER_CPU_LIMIT` | `1` CPU |
 | `CIRCULAR_RUNNER_MEMORY_LIMIT_MB` | `2048` MiB |
 
-The image and resource values are configuration defaults only. Until the Docker runtime
-adapter is implemented, the in-process fake backend does not consume them.
+The image and resource values are configuration defaults for the later worker composition
+slice. `DockerRuntime` accepts the resolved values in `ContainerSpec`; the in-process fake
+backend still does not consume them.
