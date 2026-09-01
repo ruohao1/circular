@@ -69,8 +69,11 @@ class Runtime(Protocol):
 
     ``output`` yields stdout and stderr chunks in the order the adapter observes
     them. ``wait`` returns the same result after completion, regardless of how
-    often it is called. ``stop`` requests cancellation and must be safe to call
-    repeatedly or after the execution has already completed.
+    often it is called. ``stop`` must terminate the execution before returning;
+    adapters may attempt a bounded graceful stop before forcing termination. Once
+    it returns, ``output`` reaches EOF and ``wait`` returns a stable result. It is
+    safe to call repeatedly or after natural completion, whose result wins a race
+    with cancellation.
     """
 
     async def start(self, spec: ContainerSpec) -> ContainerHandle: ...

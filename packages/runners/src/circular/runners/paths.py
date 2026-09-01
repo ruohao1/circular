@@ -40,6 +40,16 @@ class ExecutionDirectories:
             root = _canonical_root(getattr(self, field_name), field_name)
             object.__setattr__(self, field_name, root)
 
+        worker_roots = (
+            ("repository_cache_root", self.repository_cache_root),
+            ("worktree_root", self.worktree_root),
+            ("artifact_root", self.artifact_root),
+        )
+        for index, (left_name, left_root) in enumerate(worker_roots):
+            for right_name, right_root in worker_roots[index + 1 :]:
+                if left_root.is_relative_to(right_root) or right_root.is_relative_to(left_root):
+                    raise InvalidExecutionPath(f"{left_name} and {right_name} must not overlap")
+
     def repository_cache_path(self, repository_id: UUID) -> Path:
         return _uuid_child(self.repository_cache_root, repository_id)
 
@@ -54,16 +64,22 @@ class ExecutionDirectories:
     def docker_host_path(self, worker_worktree_path: Path) -> Path:
         """Translate a worker-visible worktree path for the Docker daemon.
 
-        Only descendants of the configured worker worktree root can cross this
-        mapping. Canonicalization also rejects ``..`` traversal and existing
-        symlinks that leave the root.
+        Only the direct, canonical UUID child representing one Run can cross
+        this mapping. The shared root, nested descendants, path traversal, and
+        existing symlinks that leave the root are rejected.
         """
 
         worker_path = _canonical_absolute(worker_worktree_path, "worker worktree path")
         relative_path = _relative_to_root(worker_path, self.worktree_root)
-        docker_path = (self.docker_worktree_root / relative_path).resolve(strict=False)
-        _relative_to_root(docker_path, self.docker_worktree_root)
-        return docker_path
+        if len(relative_path.parts) != 1:
+            raise InvalidExecutionPath("path must identify one UUID-owned Run worktree")
+        try:
+            run_id = UUID(relative_path.name)
+        except ValueError as error:
+            raise InvalidExecutionPath("path must identify one UUID-owned Run worktree") from error
+        if relative_path.name != str(run_id):
+            raise InvalidExecutionPath("path must identify one UUID-owned Run worktree")
+        return _uuid_child(self.docker_worktree_root, run_id)
 
 
 def _uuid_child(root: Path, identifier: UUID) -> Path:

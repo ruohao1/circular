@@ -61,22 +61,24 @@ class RuntimeContract(ABC):
         result_task = asyncio.create_task(case.runtime.wait(handle))
         await asyncio.sleep(0)
 
-        await case.runtime.stop(handle)
-
-        assert await output_task == []
-        assert await result_task == RuntimeResult.stopped()
+        async with asyncio.timeout(1):
+            await case.runtime.stop(handle)
+            assert await output_task == []
+            assert await result_task == RuntimeResult.stopped()
 
     async def test_stop_is_idempotent_and_wait_is_stable(self) -> None:
         case = self.make_case(waits_for_stop=True)
         handle = await case.runtime.start(case.spec)
 
-        await case.runtime.stop(handle)
-        await case.runtime.stop(handle)
-        first_result = await case.runtime.wait(handle)
-        await case.runtime.stop(handle)
+        async with asyncio.timeout(1):
+            await case.runtime.stop(handle)
+            await case.runtime.stop(handle)
+            first_result = await case.runtime.wait(handle)
+            await case.runtime.stop(handle)
 
         assert first_result == RuntimeResult.stopped()
-        assert await case.runtime.wait(handle) == first_result
+        async with asyncio.timeout(1):
+            assert await case.runtime.wait(handle) == first_result
 
     async def test_stop_after_natural_completion_is_a_noop(self) -> None:
         case = self.make_case(exit_code=7)
