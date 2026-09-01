@@ -4,7 +4,6 @@ import asyncio
 import fcntl
 import math
 import os
-import shutil
 import signal
 import tempfile
 from collections.abc import AsyncIterator
@@ -12,6 +11,8 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Protocol
 from uuid import UUID
+
+_CLONE_CLEANUP_TIMEOUT_SECONDS = 5.0
 
 
 class _RepositoryPathPolicy(Protocol):
@@ -30,6 +31,7 @@ class RepositoryCacheError(RuntimeError):
     def __init__(self, repository_id: UUID, path: Path, message: str) -> None:
         self.repository_id = repository_id
         self.path = path
+        self.cleanup_error: RepositoryCloneCleanupError | None = None
         super().__init__(message)
 
 
@@ -72,6 +74,19 @@ class RepositoryFetchError(RepositoryCacheError):
             repository_id,
             path,
             f"Repository {repository_id} refresh failed at {path} ({result})",
+        )
+
+
+class RepositoryCloneCleanupError(RepositoryCacheError):
+    """A failed first checkout could not remove its private staging directory."""
+
+    def __init__(self, repository_id: UUID, path: Path, *, timed_out: bool = False) -> None:
+        self.timed_out = timed_out
+        outcome = "timed out" if timed_out else "failed"
+        super().__init__(
+            repository_id,
+            path,
+            f"Repository {repository_id} clone staging cleanup {outcome} at {path}",
         )
 
 
@@ -203,6 +218,7 @@ class LocalRepositoryCache:
             ) from error
 
         published = False
+        primary_error: BaseException | None = None
         try:
             try:
                 _, returncode = await _run_git(
@@ -227,9 +243,19 @@ class LocalRepositoryCache:
                     repository_id, target, None, filesystem_error=True
                 ) from error
             published = True
+        except BaseException as error:
+            primary_error = error
+            raise
         finally:
             if not published:
-                shutil.rmtree(staging, ignore_errors=True)
+                try:
+                    await _remove_clone_staging(repository_id, target, staging)
+                except RepositoryCloneCleanupError as cleanup_error:
+                    if primary_error is None:
+                        raise
+                    primary_error.add_note(str(cleanup_error))
+                    if isinstance(primary_error, RepositoryCacheError):
+                        primary_error.cleanup_error = cleanup_error
         return target
 
     async def _refresh_command(self, repository_id: UUID, target: Path, *arguments: str) -> bytes:
@@ -250,6 +276,11 @@ class LocalRepositoryCache:
                 "-C", str(target), "rev-parse", "--is-inside-work-tree"
             )
             valid_layout = returncode == 0 and inside.strip() == b"true"
+        if valid_layout:
+            head, returncode = await _run_git(
+                "-C", str(target), "rev-parse", "--verify", "HEAD^{commit}"
+            )
+            valid_layout = returncode == 0 and bool(head.strip())
         if not valid_layout:
             error_path = reported_path or target
             raise _invalid_cache(repository_id, error_path)
@@ -271,6 +302,48 @@ def _has_valid_git_layout(target: Path) -> bool:
         and not git_directory.is_symlink()
         and git_directory.resolve().is_relative_to(target.resolve())
     )
+
+
+async def _remove_clone_staging(repository_id: UUID, target: Path, staging: Path) -> None:
+    expected_prefix = f".{target.name}.clone-"
+    if staging.parent != target.parent or not staging.name.startswith(expected_prefix):
+        raise RepositoryCloneCleanupError(repository_id, target)
+
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + _CLONE_CLEANUP_TIMEOUT_SECONDS
+    try:
+        await _remove_tree_incrementally(staging, deadline=deadline)
+    except TimeoutError as error:
+        raise RepositoryCloneCleanupError(repository_id, target, timed_out=True) from error
+    except OSError as error:
+        raise RepositoryCloneCleanupError(repository_id, target) from error
+
+
+async def _remove_tree_incrementally(path: Path, *, deadline: float) -> None:
+    loop = asyncio.get_running_loop()
+    if loop.time() >= deadline:
+        raise TimeoutError
+    try:
+        iterator = os.scandir(path)
+    except FileNotFoundError:
+        return
+
+    with iterator:
+        for entry in iterator:
+            if loop.time() >= deadline:
+                raise TimeoutError
+            if entry.is_dir(follow_symlinks=False):
+                await _remove_tree_incrementally(Path(entry.path), deadline=deadline)
+            else:
+                try:
+                    os.unlink(entry.path)
+                except FileNotFoundError:
+                    pass
+            await asyncio.sleep(0)
+    try:
+        os.rmdir(path)
+    except FileNotFoundError:
+        pass
 
 
 @asynccontextmanager
@@ -316,6 +389,7 @@ async def _repository_lock(
 
 async def _run_git(*arguments: str) -> tuple[bytes, int]:
     environment = os.environ.copy()
+    environment["GIT_ALLOW_PROTOCOL"] = "file:https"
     environment["GIT_TERMINAL_PROMPT"] = "0"
     environment["GCM_INTERACTIVE"] = "Never"
     try:

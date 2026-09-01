@@ -132,6 +132,54 @@ async def test_clone_failure_is_typed_and_does_not_disclose_the_url(tmp_path: Pa
 
 
 @pytest.mark.asyncio
+async def test_hostile_git_configuration_cannot_enable_ext_transport(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repository_id = uuid4()
+    directories = _directories(tmp_path)
+    marker = tmp_path / "ext-transport-executed"
+    helper = tmp_path / "credential-secret-ext-helper"
+    helper.write_text('#!/bin/sh\n: > "$CIRCULAR_TEST_EXT_MARKER"\nexit 1\n')
+    helper.chmod(0o700)
+    git_config = tmp_path / "hostile-git-config"
+    _set_git_config(git_config, "protocol.ext.allow", "always")
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(git_config))
+    monkeypatch.setenv("GIT_ALLOW_PROTOCOL", "ext")
+    monkeypatch.setenv("CIRCULAR_TEST_EXT_MARKER", str(marker))
+    clone_url = f"ext::{helper}"
+
+    with pytest.raises(RepositoryCloneError) as caught:
+        await LocalRepositoryCache(directories).checkout(repository_id, clone_url)
+
+    assert not marker.exists()
+    assert clone_url not in str(caught.value)
+    assert "credential-secret-ext-helper" not in str(caught.value)
+
+
+@pytest.mark.asyncio
+async def test_empty_repository_is_not_published_and_can_be_retried(tmp_path: Path) -> None:
+    source = tmp_path / "empty-source"
+    source.mkdir()
+    _git(source, "init", "--initial-branch=main")
+    repository_id = uuid4()
+    directories = _directories(tmp_path)
+    cache = LocalRepositoryCache(directories)
+
+    with pytest.raises(InvalidRepositoryCache):
+        await cache.checkout(repository_id, str(source))
+
+    target = directories.repository_cache_path(repository_id)
+    assert not target.exists()
+    assert not list(directories.repository_cache_root.glob(f".{repository_id}.clone-*"))
+
+    _configure_author(source)
+    (source / "README.md").write_text("now initialized\n")
+    _git(source, "add", "README.md")
+    _git(source, "commit", "--message=initialize")
+    assert await cache.checkout(repository_id, str(source)) == target
+
+
+@pytest.mark.asyncio
 async def test_fetch_failure_is_typed_and_does_not_disclose_the_remote(tmp_path: Path) -> None:
     source = _create_repository(tmp_path / "source")
     repository_id = uuid4()
@@ -165,6 +213,7 @@ async def test_failed_clone_does_not_poison_the_next_attempt(tmp_path: Path) -> 
         await cache.checkout(repository_id, str(source))
 
     assert not directories.repository_cache_path(repository_id).exists()
+    assert not list(directories.repository_cache_root.glob(f".{repository_id}.clone-*"))
     _create_repository(source)
     checkout = await cache.checkout(repository_id, str(source))
 
@@ -283,12 +332,16 @@ def _directories(tmp_path: Path) -> ExecutionDirectories:
 def _create_repository(path: Path) -> Path:
     path.mkdir()
     _git(path, "init", "--initial-branch=main")
-    _git(path, "config", "user.name", "Circular Tests")
-    _git(path, "config", "user.email", "circular@example.invalid")
+    _configure_author(path)
     (path / "README.md").write_text("first\n")
     _git(path, "add", "README.md")
     _git(path, "commit", "--message=first")
     return path
+
+
+def _configure_author(repository: Path) -> None:
+    _git(repository, "config", "user.name", "Circular Tests")
+    _git(repository, "config", "user.email", "circular@example.invalid")
 
 
 def _git(repository: Path, *arguments: str) -> str:
