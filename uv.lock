@@ -9,6 +9,7 @@ members = [
     "circular-api",
     "circular-domain",
     "circular-events",
+    "circular-fake-agent-workload",
     "circular-git",
     "circular-integrations",
     "circular-orchestration",
@@ -138,6 +139,11 @@ source = { editable = "packages/domain" }
 name = "circular-events"
 version = "0.1.0"
 source = { editable = "packages/events" }
+
+[[package]]
+name = "circular-fake-agent-workload"
+version = "0.1.0"
+source = { editable = "packages/fake-agent-workload" }
 
 [[package]]
 name = "circular-git"

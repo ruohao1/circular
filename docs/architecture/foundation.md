@@ -10,6 +10,8 @@ worker compose the same domain packages but do not call one another in-process.
 - `orchestration`: the deterministic Run lifecycle and transition policy.
 - `events`: normalized event names and backend-neutral event envelopes.
 - `agents`: backend capability contract plus the deterministic fake adapter.
+- `fake-agent-workload`: isolated deterministic process fixture for the future container
+  execution path; it is not another control-plane process.
 - `storage`: SQLAlchemy mappings, repositories, event persistence, and queue claiming.
 - `runners`: execution coordination across backend, workspace, and event seams, including
   safe managed execution-path derivation.
@@ -44,5 +46,6 @@ local and Compose mappings.
 
 Real agent backends, Docker/worktree adapters, authentication and RBAC, approval UI,
 recursive delegation, Linear/GitHub adapters, LISTEN/NOTIFY wakeups, generated frontend
-contracts, billing, and distributed runners are not implemented. These have explicit
+contracts, billing, and distributed runners are not implemented. The fake workload image
+proves the process contract but is not wired into the worker or runtime. These have explicit
 seams or storage fields where needed, but no speculative framework.
