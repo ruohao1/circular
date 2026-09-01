@@ -1,16 +1,20 @@
 from __future__ import annotations
 
 import asyncio
-import fcntl
 import math
 import os
-import signal
 import tempfile
-from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Protocol
 from uuid import UUID
+
+from circular.git._local import (
+    GitLaunchError,
+    has_valid_primary_checkout,
+    remove_owned_tree,
+    repository_lock,
+    run_git,
+)
 
 _CLONE_CLEANUP_TIMEOUT_SECONDS = 5.0
 
@@ -19,10 +23,6 @@ class _RepositoryPathPolicy(Protocol):
     repository_cache_root: Path
 
     def repository_cache_path(self, repository_id: UUID) -> Path: ...
-
-
-class _GitLaunchError(RuntimeError):
-    pass
 
 
 class RepositoryCacheError(RuntimeError):
@@ -134,8 +134,12 @@ class LocalRepositoryCache:
             target.parent.mkdir(parents=True, exist_ok=True)
         except OSError as error:
             raise RepositoryLockError(repository_id, target) from error
-        async with _repository_lock(
-            repository_id, target, timeout_seconds=self._lock_timeout_seconds
+        async with repository_lock(
+            target,
+            timeout_seconds=self._lock_timeout_seconds,
+            error_factory=lambda timed_out: RepositoryLockError(
+                repository_id, target, timed_out=timed_out
+            ),
         ):
             return await self._checkout_locked(repository_id, target, clone_url)
 
@@ -143,7 +147,7 @@ class LocalRepositoryCache:
         if target.exists():  # noqa: ASYNC240 - worker-owned local filesystem metadata
             try:
                 await self._validate(repository_id, target)
-            except _GitLaunchError as error:
+            except GitLaunchError as error:
                 raise RepositoryFetchError(repository_id, target, None) from error
             previous_origin = await self._refresh_command(
                 repository_id,
@@ -221,20 +225,20 @@ class LocalRepositoryCache:
         primary_error: BaseException | None = None
         try:
             try:
-                _, returncode = await _run_git(
+                _, returncode = await run_git(
                     "clone",
                     "--no-checkout",
                     "--",
                     clone_url,
                     str(staging),
                 )
-            except _GitLaunchError as error:
+            except GitLaunchError as error:
                 raise RepositoryCloneError(repository_id, target, None) from error
             if returncode:
                 raise RepositoryCloneError(repository_id, target, returncode)
             try:
                 await self._validate(repository_id, staging, reported_path=target)
-            except _GitLaunchError as error:
+            except GitLaunchError as error:
                 raise RepositoryCloneError(repository_id, target, None) from error
             try:
                 staging.rename(target)  # noqa: ASYNC240 - same local filesystem
@@ -260,8 +264,8 @@ class LocalRepositoryCache:
 
     async def _refresh_command(self, repository_id: UUID, target: Path, *arguments: str) -> bytes:
         try:
-            stdout, returncode = await _run_git(*arguments)
-        except _GitLaunchError as error:
+            stdout, returncode = await run_git(*arguments)
+        except GitLaunchError as error:
             raise RepositoryFetchError(repository_id, target, None) from error
         if returncode:
             raise RepositoryFetchError(repository_id, target, returncode)
@@ -270,14 +274,14 @@ class LocalRepositoryCache:
     async def _validate(
         self, repository_id: UUID, target: Path, *, reported_path: Path | None = None
     ) -> None:
-        valid_layout = _has_valid_git_layout(target)
+        valid_layout = has_valid_primary_checkout(target)
         if valid_layout:
-            inside, returncode = await _run_git(
+            inside, returncode = await run_git(
                 "-C", str(target), "rev-parse", "--is-inside-work-tree"
             )
             valid_layout = returncode == 0 and inside.strip() == b"true"
         if valid_layout:
-            head, returncode = await _run_git(
+            head, returncode = await run_git(
                 "-C", str(target), "rev-parse", "--verify", "HEAD^{commit}"
             )
             valid_layout = returncode == 0 and bool(head.strip())
@@ -294,16 +298,6 @@ def _invalid_cache(repository_id: UUID, path: Path) -> InvalidRepositoryCache:
     )
 
 
-def _has_valid_git_layout(target: Path) -> bool:
-    git_directory = target / ".git"
-    return (
-        target.is_dir()
-        and git_directory.is_dir()
-        and not git_directory.is_symlink()
-        and git_directory.resolve().is_relative_to(target.resolve())
-    )
-
-
 async def _remove_clone_staging(repository_id: UUID, target: Path, staging: Path) -> None:
     expected_prefix = f".{target.name}.clone-"
     if staging.parent != target.parent or not staging.name.startswith(expected_prefix):
@@ -312,134 +306,8 @@ async def _remove_clone_staging(repository_id: UUID, target: Path, staging: Path
     loop = asyncio.get_running_loop()
     deadline = loop.time() + _CLONE_CLEANUP_TIMEOUT_SECONDS
     try:
-        await _remove_tree_incrementally(staging, deadline=deadline)
+        await remove_owned_tree(staging, deadline=deadline)
     except TimeoutError as error:
         raise RepositoryCloneCleanupError(repository_id, target, timed_out=True) from error
     except OSError as error:
         raise RepositoryCloneCleanupError(repository_id, target) from error
-
-
-async def _remove_tree_incrementally(path: Path, *, deadline: float) -> None:
-    loop = asyncio.get_running_loop()
-    if loop.time() >= deadline:
-        raise TimeoutError
-    try:
-        iterator = os.scandir(path)
-    except FileNotFoundError:
-        return
-
-    with iterator:
-        for entry in iterator:
-            if loop.time() >= deadline:
-                raise TimeoutError
-            if entry.is_dir(follow_symlinks=False):
-                await _remove_tree_incrementally(Path(entry.path), deadline=deadline)
-            else:
-                try:
-                    os.unlink(entry.path)
-                except FileNotFoundError:
-                    pass
-            await asyncio.sleep(0)
-    try:
-        os.rmdir(path)
-    except FileNotFoundError:
-        pass
-
-
-@asynccontextmanager
-async def _repository_lock(
-    repository_id: UUID, target: Path, *, timeout_seconds: float
-) -> AsyncIterator[None]:
-    lock_path = target.with_name(f".{target.name}.lock")
-    flags = os.O_CLOEXEC | os.O_CREAT | os.O_RDWR
-    if hasattr(os, "O_NOFOLLOW"):
-        flags |= os.O_NOFOLLOW
-    try:
-        descriptor = os.open(lock_path, flags, 0o600)
-    except OSError as error:
-        raise RepositoryLockError(repository_id, target) from error
-    loop = asyncio.get_running_loop()
-    deadline = loop.time() + timeout_seconds
-    try:
-        while True:
-            try:
-                fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
-                break
-            except BlockingIOError:
-                remaining = deadline - loop.time()
-                if remaining <= 0:
-                    raise RepositoryLockError(repository_id, target, timed_out=True) from None
-                await asyncio.sleep(min(0.01, remaining))
-            except OSError as error:
-                raise RepositoryLockError(repository_id, target) from error
-        yield
-    finally:
-        release_error: OSError | None = None
-        try:
-            fcntl.flock(descriptor, fcntl.LOCK_UN)
-        except OSError as error:
-            release_error = error
-        try:
-            os.close(descriptor)
-        except OSError as error:
-            release_error = release_error or error
-        if release_error is not None:
-            raise RepositoryLockError(repository_id, target) from release_error
-
-
-async def _run_git(*arguments: str) -> tuple[bytes, int]:
-    environment = os.environ.copy()
-    environment["GIT_ALLOW_PROTOCOL"] = "file:https"
-    environment["GIT_TERMINAL_PROMPT"] = "0"
-    environment["GCM_INTERACTIVE"] = "Never"
-    try:
-        process = await asyncio.create_subprocess_exec(
-            "git",
-            "-c",
-            "protocol.allow=never",
-            "-c",
-            "protocol.file.allow=always",
-            "-c",
-            "protocol.https.allow=always",
-            *arguments,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-            env=environment,
-            start_new_session=True,
-        )
-    except OSError as error:
-        raise _GitLaunchError from error
-    try:
-        stdout, _ = await process.communicate()
-    except asyncio.CancelledError:
-        cleanup = asyncio.create_task(_terminate_git_process(process))
-        while not cleanup.done():
-            try:
-                await asyncio.shield(cleanup)
-            except asyncio.CancelledError:
-                continue
-        await cleanup
-        raise
-    return stdout, process.returncode or 0
-
-
-async def _terminate_git_process(process: asyncio.subprocess.Process) -> None:
-    if process.returncode is not None:
-        await process.wait()
-        return
-
-    try:
-        os.killpg(process.pid, signal.SIGTERM)
-    except ProcessLookupError:
-        await process.wait()
-        return
-
-    wait_task = asyncio.create_task(process.wait())
-    try:
-        await asyncio.wait_for(asyncio.shield(wait_task), timeout=1)
-    except TimeoutError:
-        try:
-            os.killpg(process.pid, signal.SIGKILL)
-        except ProcessLookupError:
-            pass
-        await wait_task

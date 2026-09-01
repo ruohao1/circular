@@ -77,6 +77,28 @@ asynchronous. Each Git command runs in its own process group; caller cancellatio
 and awaits that group before the cache lock is released. Agent containers do not
 receive the Repository cache root.
 
+## Local Run worktrees
+
+`LocalWorktreeManager` provisions one linked worktree at
+`<worktree root>/<Run UUID>` on the deterministic branch
+`circular/run/<Run UUID>`. The requested base ref is resolved to a commit before
+the branch is created; ref text never becomes a path or branch fragment. A
+private same-root staging worktree is published with `git worktree move` and
+only then exposed at the Run path. Provision rollback uses Git-aware removal and
+pruning for only the staging or final paths the call can verify it owns, and
+compare-deletes only its unchanged new branch.
+
+Repository-cache refresh and worktree metadata changes use the same bounded,
+cross-process Repository lock. A separate Run-path lock prevents two
+Repositories from claiming the same Run target. Platform-owned Git commands
+disable Repository hooks, run with argv, and terminate and await their process
+group on cancellation before either lock is released.
+
+The initial `release` operation is intentionally narrow: it removes a present,
+valid, clean linked worktree and preserves the Run branch for later diff,
+commit, and artifact handling. It is not idempotent and does not prune or repair
+stale metadata. ISQ-167 owns interrupted cleanup recovery and reconciliation.
+
 ## Worker settings
 
 | Environment variable | Local default |

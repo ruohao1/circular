@@ -7,16 +7,39 @@ from circular.git.cache import (
     RepositoryFetchError,
     RepositoryLockError,
 )
-from circular.git.worktrees import ProvisionedWorktree, WorktreeManager
+from circular.git.worktrees import (
+    InvalidWorktreePath,
+    InvalidWorktreeRepository,
+    LocalWorktreeManager,
+    ProvisionedWorktree,
+    WorktreeCleanupError,
+    WorktreeConflictError,
+    WorktreeError,
+    WorktreeLockError,
+    WorktreeManager,
+    WorktreeProvisionError,
+    WorktreeRefError,
+    WorktreeReleaseError,
+)
 
 __all__ = [
     "InvalidRepositoryCache",
+    "InvalidWorktreePath",
+    "InvalidWorktreeRepository",
     "LocalRepositoryCache",
+    "LocalWorktreeManager",
     "ProvisionedWorktree",
     "RepositoryCacheError",
     "RepositoryCloneError",
     "RepositoryCloneCleanupError",
     "RepositoryFetchError",
     "RepositoryLockError",
+    "WorktreeCleanupError",
+    "WorktreeConflictError",
+    "WorktreeError",
+    "WorktreeLockError",
     "WorktreeManager",
+    "WorktreeProvisionError",
+    "WorktreeRefError",
+    "WorktreeReleaseError",
 ]
