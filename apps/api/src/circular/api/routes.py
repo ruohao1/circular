@@ -4,7 +4,7 @@ from collections.abc import AsyncIterator
 from uuid import UUID
 
 from circular.api.config import get_settings
-from circular.api.dependencies import get_session, session_factory
+from circular.api.dependencies import get_run_event_reader, get_session
 from circular.api.schemas import (
     AgentCreate,
     AgentRead,
@@ -25,6 +25,7 @@ from circular.storage import (
     EventRecord,
     ProjectRecord,
     RepositoryRecord,
+    RunEventReader,
     RunRecord,
     TaskRecord,
 )
@@ -202,35 +203,45 @@ async def list_run_events(
     return list(await session.scalars(statement))
 
 
+async def _parse_last_event_id(
+    last_event_id: str | None = Header(default=None, alias="Last-Event-ID"),
+) -> int:
+    if last_event_id is None:
+        return 0
+    try:
+        cursor = int(last_event_id)
+    except ValueError as error:
+        raise HTTPException(
+            status_code=400,
+            detail="Last-Event-ID must be a non-negative integer",
+        ) from error
+    if cursor < 0:
+        raise HTTPException(
+            status_code=400,
+            detail="Last-Event-ID must be a non-negative integer",
+        )
+    return cursor
+
+
 @router.get("/runs/{run_id}/events/stream")
 async def stream_run_events(
     run_id: UUID,
     request: Request,
-    last_event_id: int | None = Header(default=None, alias="Last-Event-ID"),
+    last_event_id: int = Depends(_parse_last_event_id),
+    events: RunEventReader = Depends(get_run_event_reader),
 ) -> StreamingResponse:
-    async with session_factory() as session:
-        await _require(session, RunRecord, run_id, "run")
+    if not await events.run_exists(run_id):
+        raise HTTPException(status_code=404, detail="run not found")
 
     async def stream() -> AsyncIterator[str]:
-        cursor = last_event_id or 0
+        cursor = last_event_id
         while not await request.is_disconnected():
-            async with session_factory() as session:
-                events = list(
-                    await session.scalars(
-                        select(EventRecord)
-                        .where(
-                            EventRecord.run_id == run_id,
-                            EventRecord.sequence > cursor,
-                        )
-                        .order_by(EventRecord.sequence)
-                        .limit(200)
-                    )
-                )
-            if not events:
+            records = await events.read_after(run_id, cursor)
+            if not records:
                 yield ": keep-alive\n\n"
                 await asyncio.sleep(get_settings().sse_poll_interval_seconds)
                 continue
-            for event in events:
+            for event in records:
                 cursor = event.sequence
                 payload = EventRead.model_validate(event).model_dump(mode="json")
                 yield f"id: {cursor}\nevent: {event.type}\ndata: {json.dumps(payload)}\n\n"

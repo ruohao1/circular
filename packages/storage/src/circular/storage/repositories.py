@@ -6,11 +6,38 @@ from circular.events import EventEnvelope
 from circular.orchestration import RunLifecycle
 from circular.storage.models import EventRecord, RunRecord
 from sqlalchemy import func, select
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 
 class RunNotFoundError(LookupError):
     pass
+
+
+class RunEventReader:
+    """Read ordered Run events without exposing session lifetime to callers."""
+
+    def __init__(self, sessions: async_sessionmaker[AsyncSession]) -> None:
+        self._sessions = sessions
+
+    async def run_exists(self, run_id: UUID) -> bool:
+        async with self._sessions() as session:
+            return await session.get(RunRecord, run_id) is not None
+
+    async def read_after(
+        self,
+        run_id: UUID,
+        after: int,
+        *,
+        limit: int = 200,
+    ) -> tuple[EventRecord, ...]:
+        statement = (
+            select(EventRecord)
+            .where(EventRecord.run_id == run_id, EventRecord.sequence > after)
+            .order_by(EventRecord.sequence)
+            .limit(limit)
+        )
+        async with self._sessions() as session:
+            return tuple(await session.scalars(statement))
 
 
 class RunStore:

@@ -8,7 +8,7 @@ from circular.storage.models import (
     RunRecord,
     TaskRecord,
 )
-from circular.storage.repositories import RunStore
+from circular.storage.repositories import RunEventReader, RunStore
 
 __all__ = [
     "AgentRecord",
@@ -17,6 +17,7 @@ __all__ = [
     "ProjectRecord",
     "RepositoryRecord",
     "RunRecord",
+    "RunEventReader",
     "RunStore",
     "TaskRecord",
     "create_engine",
