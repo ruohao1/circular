@@ -1,4 +1,5 @@
 import os
+from uuid import UUID
 
 import pytest
 from circular.events import EventEnvelope, EventType
@@ -12,6 +13,7 @@ from circular.storage import (
     create_engine,
     create_session_factory,
 )
+from sqlalchemy import delete, select
 
 database_url = os.getenv("TEST_DATABASE_URL")
 pytestmark = pytest.mark.skipif(not database_url, reason="TEST_DATABASE_URL is not set")
@@ -23,11 +25,13 @@ async def test_run_event_reader_returns_a_bounded_page_after_the_cursor_in_order
     sessions = create_session_factory(engine)
     store = RunStore()
     reader = RunEventReader(sessions)
+    project_id: UUID | None = None
     try:
         async with sessions.begin() as session:
             project = ProjectRecord(name="Event reader integration test")
             session.add(project)
             await session.flush()
+            project_id = project.id
             agent = AgentRecord(project_id=project.id, name="Test engineer", backend="fake")
             task = TaskRecord(project_id=project.id, title="Read ordered events")
             session.add_all([agent, task])
@@ -63,4 +67,18 @@ async def test_run_event_reader_returns_a_bounded_page_after_the_cursor_in_order
             (4, "tool.execution.completed")
         ]
     finally:
-        await engine.dispose()
+        try:
+            if project_id is not None:
+                async with sessions.begin() as session:
+                    await session.execute(
+                        delete(RunRecord).where(
+                            RunRecord.task_id.in_(
+                                select(TaskRecord.id).where(TaskRecord.project_id == project_id)
+                            )
+                        )
+                    )
+                    await session.execute(
+                        delete(ProjectRecord).where(ProjectRecord.id == project_id)
+                    )
+        finally:
+            await engine.dispose()
