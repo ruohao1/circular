@@ -16,7 +16,7 @@ worker compose the same domain packages but do not call one another in-process.
 - `runners`: execution coordination across backend, workspace, and event seams, including
   safe managed execution-path derivation.
 - `runtimes`: container-runtime interface and per-run container specification.
-- `git`: worktree-provisioning interface.
+- `git`: the local Repository checkout cache and worktree-provisioning interface.
 - `integrations`: reserved adapters for Linear and GitHub; domain code never imports them.
 - `apps/api`: HTTP/OpenAPI/SSE composition root.
 - `apps/worker`: durable queue consumer composition root.

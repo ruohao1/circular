@@ -50,6 +50,33 @@ The later Docker adapter will decide the worktree's destination inside a Run con
 This mapping supplies only the validated host source and does not widen the intended
 rule that an agent container receives its own worktree and explicitly scoped secrets.
 
+## Local Repository cache
+
+`LocalRepositoryCache` accepts a Repository UUID and its registered clone URL, then
+returns the validated checkout at the path derived by `ExecutionDirectories`. Clone
+URLs, Repository names, and remote ref names never become path fragments. A first
+checkout is cloned with no working-tree files into a same-root staging directory,
+validated, and atomically renamed into the UUID target. The result can be used as the
+source for linked Git worktrees.
+
+Reuse updates `origin` to the current registered URL, runs `fetch --prune`, and advances
+the checkout's local default branch so `HEAD` resolves to the fetched commit. If that
+fetch fails after the URL change, the cache attempts to restore the prior origin before
+raising a credential-free `RepositoryFetchError`. Git runs as argv without a shell.
+The MVP permits only local-file and HTTPS transports; other Git protocol helpers,
+including `ext`, are disabled.
+
+Updates are serialized per Repository with an advisory `fcntl.flock` and a bounded
+30-second default acquisition timeout. Separate Repository UUIDs use separate lock
+files and can proceed independently. This is deliberately a Linux/POSIX, worker-local
+filesystem implementation: every worker sharing a cache root must cooperate with the
+same locks, and network filesystems whose advisory-lock or atomic-rename semantics are
+unreliable are unsupported. Cache filesystem metadata operations are short synchronous
+operations against this trusted local root; Git processes and lock waits remain
+asynchronous. Each Git command runs in its own process group; caller cancellation stops
+and awaits that group before the cache lock is released. Agent containers do not
+receive the Repository cache root.
+
 ## Worker settings
 
 | Environment variable | Local default |
