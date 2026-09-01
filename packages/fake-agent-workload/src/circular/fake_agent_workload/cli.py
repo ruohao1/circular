@@ -3,7 +3,7 @@ import sys
 import time
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import Any, TextIO
+from typing import Any, BinaryIO
 from uuid import UUID
 
 PROTOCOL_VERSION = 1
@@ -48,9 +48,14 @@ class WorkloadRequest:
     behavior: Behavior
 
 
-def _write_json_line(stream: TextIO, payload: dict[str, Any]) -> None:
-    stream.write(json.dumps(payload, ensure_ascii=True, separators=(",", ":"), sort_keys=True))
-    stream.write("\n")
+def _write_json_line(stream: BinaryIO, payload: dict[str, Any]) -> None:
+    line = json.dumps(
+        payload,
+        ensure_ascii=True,
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode("utf-8")
+    stream.write(line + b"\n")
     stream.flush()
 
 
@@ -150,9 +155,14 @@ def _parse_behavior(value: Any) -> Behavior:
     return Behavior(delay_seconds=delay_ms / 1000, failure=failure)
 
 
-def _read_request(stream: TextIO) -> WorkloadRequest:
+def _read_request(stream: BinaryIO) -> WorkloadRequest:
     try:
-        document = json.load(stream, object_pairs_hook=_object_without_duplicates)
+        raw_input = stream.read().decode("utf-8")
+    except UnicodeDecodeError:
+        raise InvalidInput("stdin must be valid UTF-8 JSON") from None
+
+    try:
+        document = json.loads(raw_input, object_pairs_hook=_object_without_duplicates)
     except DuplicateField as error:
         raise InvalidInput(f"input contains duplicate field: {error.field}") from None
     except json.JSONDecodeError:
@@ -193,12 +203,12 @@ def _events(request: WorkloadRequest) -> tuple[dict[str, Any], ...]:
     )
 
 
-def _run(request: WorkloadRequest) -> int:
+def _run(request: WorkloadRequest, stdout: BinaryIO, stderr: BinaryIO) -> int:
     run_id = request.run.id
     behavior = request.behavior
     if behavior.failure is FailureMode.BEFORE_EVENTS:
         _write_json_line(
-            sys.stderr,
+            stderr,
             _error(
                 "injected_failure",
                 "injected failure before emitting events",
@@ -209,10 +219,10 @@ def _run(request: WorkloadRequest) -> int:
 
     for index, event in enumerate(_events(request)):
         time.sleep(behavior.delay_seconds)
-        _write_json_line(sys.stdout, event)
+        _write_json_line(stdout, event)
         if behavior.failure is FailureMode.AFTER_FIRST_EVENT and index == 0:
             _write_json_line(
-                sys.stderr,
+                stderr,
                 _error(
                     "injected_failure",
                     "injected failure after first event",
@@ -223,10 +233,17 @@ def _run(request: WorkloadRequest) -> int:
     return 0
 
 
-def main() -> int:
+def main(
+    stdin: BinaryIO | None = None,
+    stdout: BinaryIO | None = None,
+    stderr: BinaryIO | None = None,
+) -> int:
+    input_stream = sys.stdin.buffer if stdin is None else stdin
+    output_stream = sys.stdout.buffer if stdout is None else stdout
+    error_stream = sys.stderr.buffer if stderr is None else stderr
     try:
-        request = _read_request(sys.stdin)
+        request = _read_request(input_stream)
     except InvalidInput as error:
-        _write_json_line(sys.stderr, _error("invalid_input", str(error)))
+        _write_json_line(error_stream, _error("invalid_input", str(error)))
         return INVALID_INPUT_EXIT
-    return _run(request)
+    return _run(request, output_stream, error_stream)

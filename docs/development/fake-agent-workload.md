@@ -5,8 +5,9 @@ future Run → container → worktree → backend execution path. It is not a co
 process, a fourth Compose service, or the in-worker `FakeAgentBackend`. The worker does not
 launch it yet.
 
-Its only interface is a single JSON object on standard input, JSON Lines on standard output
-and standard error, and the process exit code. The process reads no environment-based
+Its only interface is one UTF-8 encoded JSON object on standard input, UTF-8 JSON Lines on
+standard output and standard error, and the process exit code. The byte encoding is explicit
+and does not change with `PYTHONIOENCODING`. The process reads no environment-based
 configuration and does not need or accept a database URL, platform credentials, or the
 control-plane source tree.
 
@@ -51,14 +52,14 @@ Success writes four canonical JSON Lines records to standard output in this orde
 
 Each event contains exactly `protocol_version`, `run_id`, `source`, `type`, and `data`.
 There are deliberately no generated IDs or timestamps, so identical input produces
-identical output. JSON strings are ASCII-escaped so every record is valid UTF-8 regardless
-of the process stream's encoding error policy. Every record is flushed before the next
-delay or injected failure.
+identical output. JSON strings are ASCII-escaped and records are written directly as UTF-8
+bytes. Every record is flushed before the next delay or injected failure.
 
 Invalid input writes one record to standard error with code `invalid_input` and exits `2`.
-Validation messages identify field names but never echo field values. An injected failure
-writes one `injected_failure` record to standard error and exits `20`; its record includes
-the Run ID. Success leaves standard error empty and exits `0`.
+Malformed UTF-8 is invalid input and never produces a Python traceback. Validation messages
+identify field names but never echo field values. An injected failure writes one
+`injected_failure` record to standard error and exits `20`; its record includes the Run ID.
+Success leaves standard error empty and exits `0`.
 
 The later container adapter will translate these records into `EventEnvelope` values and
 preserve the raw lines. That integration is intentionally deferred.

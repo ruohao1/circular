@@ -1,5 +1,6 @@
 import io
 import json
+import os
 import subprocess
 import sys
 import time
@@ -40,6 +41,22 @@ def _run_raw_workload(raw_input: str) -> subprocess.CompletedProcess[str]:
     )
 
 
+def _run_raw_workload_bytes(
+    raw_input: bytes,
+    *,
+    python_io_encoding: str,
+) -> subprocess.CompletedProcess[bytes]:
+    environment = os.environ.copy()
+    environment["PYTHONIOENCODING"] = python_io_encoding
+    return subprocess.run(
+        [sys.executable, "-m", "circular.fake_agent_workload"],
+        input=raw_input,
+        capture_output=True,
+        env=environment,
+        check=False,
+    )
+
+
 def _input_with_unknown_surrogate_field() -> str:
     document = _valid_input()
     document["\ud800"] = "do-not-print"
@@ -70,6 +87,35 @@ def test_success_emits_the_exact_versioned_backend_event_stream() -> None:
         f'"protocol_version":1,"run_id":"{RUN_ID}",'
         '"source":"fake-container-workload","type":"usage.updated"}',
     ]
+
+
+def test_process_uses_utf8_bytes_independent_of_python_io_encoding() -> None:
+    document = _valid_input()
+    document["run"]["task_title"] = "Café 🧪"
+    expected = _run_workload(document)
+
+    result = _run_raw_workload_bytes(
+        json.dumps(document, ensure_ascii=False).encode("utf-8"),
+        python_io_encoding="utf-16",
+    )
+
+    assert result.returncode == 0
+    assert result.stderr == b""
+    assert result.stdout == expected.stdout.encode("utf-8")
+
+
+def test_malformed_utf8_emits_one_exact_sanitized_error() -> None:
+    result = _run_raw_workload_bytes(
+        b'{"protocol_version": 1, "run": \xff}',
+        python_io_encoding="utf-16",
+    )
+
+    assert result.returncode == 2
+    assert result.stdout == b""
+    assert result.stderr == (
+        b'{"error":{"code":"invalid_input","message":"stdin must be valid UTF-8 JSON"},'
+        b'"protocol_version":1}\n'
+    )
 
 
 def test_configured_delay_preserves_the_stream_and_delays_each_event() -> None:
@@ -199,23 +245,16 @@ def test_duplicate_json_fields_are_rejected() -> None:
     ],
 )
 def test_surrogate_field_names_emit_safe_errors_with_strict_utf8_streams(
-    monkeypatch: pytest.MonkeyPatch, raw_input: str, message: str
+    raw_input: str, message: str
 ) -> None:
     stdout_bytes = io.BytesIO()
     stderr_bytes = io.BytesIO()
-    monkeypatch.setattr(sys, "stdin", io.StringIO(raw_input))
-    monkeypatch.setattr(
-        sys,
-        "stdout",
-        io.TextIOWrapper(stdout_bytes, encoding="utf-8", errors="strict", write_through=True),
-    )
-    monkeypatch.setattr(
-        sys,
-        "stderr",
-        io.TextIOWrapper(stderr_bytes, encoding="utf-8", errors="strict", write_through=True),
-    )
 
-    exit_code = run_workload()
+    exit_code = run_workload(
+        stdin=io.BytesIO(raw_input.encode("utf-8")),
+        stdout=stdout_bytes,
+        stderr=stderr_bytes,
+    )
 
     assert exit_code == 2
     assert stdout_bytes.getvalue() == b""
