@@ -1,0 +1,11 @@
+{
+  "name": "circular",
+  "private": true,
+  "packageManager": "pnpm@10.15.1",
+  "scripts": {
+    "dev": "pnpm --filter @circular/web dev",
+    "build": "pnpm --filter @circular/web build",
+    "test": "pnpm --filter @circular/web test",
+    "typecheck": "pnpm --filter @circular/web typecheck"
+  }
+}

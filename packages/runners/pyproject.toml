@@ -1,0 +1,23 @@
+[project]
+name = "circular-runners"
+version = "0.1.0"
+requires-python = ">=3.12"
+dependencies = [
+  "circular-agents",
+  "circular-domain",
+  "circular-events",
+  "circular-storage",
+]
+
+[tool.uv.sources]
+circular-agents = { workspace = true }
+circular-domain = { workspace = true }
+circular-events = { workspace = true }
+circular-storage = { workspace = true }
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/circular"]
