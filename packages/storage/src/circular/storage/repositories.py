@@ -1,16 +1,38 @@
 from datetime import UTC, datetime
 from uuid import UUID
 
-from circular.domain import RunStatus
-from circular.events import EventEnvelope
-from circular.orchestration import RunLifecycle
-from circular.storage.models import EventRecord, RunRecord
+from circular.domain import Artifact, RunStatus, Workspace, WorkspaceStatus
+from circular.events import EventEnvelope, EventType
+from circular.orchestration import RunLifecycle, WorkspaceLifecycle
+from circular.storage.models import ArtifactRecord, EventRecord, RunRecord, WorkspaceRecord
 from sqlalchemy import func, select
+from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 
 class RunNotFoundError(LookupError):
     pass
+
+
+class WorkspaceNotFoundError(LookupError):
+    pass
+
+
+class WorkspaceAlreadyExistsError(ValueError):
+    def __init__(self, run_id: UUID) -> None:
+        super().__init__(f"run {run_id} already owns a workspace")
+        self.run_id = run_id
+
+
+class WorkspaceContainerIdConflictError(ValueError):
+    def __init__(self, workspace_id: UUID, existing: str, requested: str) -> None:
+        super().__init__(
+            f"workspace {workspace_id} already records container {existing}; "
+            f"cannot replace it with {requested}"
+        )
+        self.workspace_id = workspace_id
+        self.existing = existing
+        self.requested = requested
 
 
 class RunEventReader:
@@ -116,3 +138,199 @@ class RunStore:
         session.add(record)
         await session.flush()
         return record
+
+
+class WorkspaceStore:
+    """Persist Workspace lifecycle facts inside a caller-owned transaction.
+
+    Writes are flushed for immediate use but this store never commits or rolls back.
+    """
+
+    _transition_events = {
+        WorkspaceStatus.READY: EventType.WORKSPACE_READY,
+        WorkspaceStatus.RELEASED: EventType.WORKSPACE_RELEASED,
+        WorkspaceStatus.FAILED: EventType.WORKSPACE_FAILED,
+    }
+
+    def __init__(self) -> None:
+        self._runs = RunStore()
+
+    async def create(
+        self,
+        session: AsyncSession,
+        workspace: Workspace,
+        *,
+        source: str,
+    ) -> Workspace:
+        WorkspaceLifecycle.validate_initial(workspace.status)
+        statement = (
+            insert(WorkspaceRecord)
+            .values(
+                id=workspace.id,
+                run_id=workspace.run_id,
+                worktree_path=workspace.worktree_path,
+                container_id=workspace.container_id,
+                status=workspace.status.value,
+            )
+            .on_conflict_do_nothing(index_elements=[WorkspaceRecord.run_id])
+            .returning(WorkspaceRecord)
+        )
+        record = (await session.scalars(statement)).one_or_none()
+        if record is None:
+            raise WorkspaceAlreadyExistsError(workspace.run_id)
+        await self._runs.append_event(
+            session,
+            EventEnvelope(
+                run_id=workspace.run_id,
+                type=EventType.WORKSPACE_PROVISIONING,
+                source=source,
+                data={"status": WorkspaceStatus.PENDING.value, "workspace_id": str(workspace.id)},
+            ),
+        )
+        return self._to_domain(record)
+
+    async def load(self, session: AsyncSession, workspace_id: UUID) -> Workspace:
+        record = await session.get(WorkspaceRecord, workspace_id)
+        if record is None:
+            raise WorkspaceNotFoundError(str(workspace_id))
+        return self._to_domain(record)
+
+    async def load_for_run(self, session: AsyncSession, run_id: UUID) -> Workspace:
+        record = await session.scalar(
+            select(WorkspaceRecord).where(WorkspaceRecord.run_id == run_id)
+        )
+        if record is None:
+            raise WorkspaceNotFoundError(str(run_id))
+        return self._to_domain(record)
+
+    async def list(
+        self,
+        session: AsyncSession,
+        *,
+        status: WorkspaceStatus | None = None,
+    ) -> tuple[Workspace, ...]:
+        """Return Workspaces oldest first, breaking timestamp ties by identifier."""
+        statement = select(WorkspaceRecord)
+        if status is not None:
+            statement = statement.where(WorkspaceRecord.status == status.value)
+        records = await session.scalars(
+            statement.order_by(WorkspaceRecord.created_at, WorkspaceRecord.id)
+        )
+        return tuple(self._to_domain(record) for record in records)
+
+    async def transition(
+        self,
+        session: AsyncSession,
+        workspace_id: UUID,
+        target: WorkspaceStatus,
+        *,
+        source: str,
+        container_id: str | None = None,
+    ) -> Workspace:
+        record = await session.scalar(
+            select(WorkspaceRecord).where(WorkspaceRecord.id == workspace_id).with_for_update()
+        )
+        if record is None:
+            raise WorkspaceNotFoundError(str(workspace_id))
+
+        WorkspaceLifecycle.validate(WorkspaceStatus(record.status), target)
+        if container_id is not None:
+            if target not in {WorkspaceStatus.READY, WorkspaceStatus.FAILED}:
+                raise ValueError(
+                    "container_id can only be recorded when a workspace becomes ready or failed"
+                )
+            if record.container_id is not None and record.container_id != container_id:
+                raise WorkspaceContainerIdConflictError(
+                    record.id,
+                    record.container_id,
+                    container_id,
+                )
+            record.container_id = container_id
+        record.status = target.value
+        event_data = {"status": target.value, "workspace_id": str(record.id)}
+        if record.container_id is not None:
+            event_data["container_id"] = record.container_id
+        await self._runs.append_event(
+            session,
+            EventEnvelope(
+                run_id=record.run_id,
+                type=self._transition_events[target],
+                source=source,
+                data=event_data,
+            ),
+        )
+        return self._to_domain(record)
+
+    @staticmethod
+    def _to_domain(record: WorkspaceRecord) -> Workspace:
+        return Workspace(
+            id=record.id,
+            run_id=record.run_id,
+            worktree_path=record.worktree_path,
+            container_id=record.container_id,
+            status=WorkspaceStatus(record.status),
+        )
+
+
+class ArtifactStore:
+    """Append and read Run artifacts inside a caller-owned transaction.
+
+    Writes are flushed for immediate use but this store never commits or rolls back.
+    """
+
+    def __init__(self) -> None:
+        self._runs = RunStore()
+
+    async def append(
+        self,
+        session: AsyncSession,
+        artifact: Artifact,
+        *,
+        source: str,
+    ) -> Artifact:
+        record = ArtifactRecord(
+            id=artifact.id,
+            run_id=artifact.run_id,
+            kind=artifact.kind,
+            uri=artifact.uri,
+            artifact_metadata=dict(artifact.metadata),
+        )
+        session.add(record)
+        await session.flush()
+        await self._runs.append_event(
+            session,
+            EventEnvelope(
+                run_id=artifact.run_id,
+                type=EventType.ARTIFACT_CREATED,
+                source=source,
+                data={
+                    "artifact_id": str(artifact.id),
+                    "kind": artifact.kind,
+                    "uri": artifact.uri,
+                },
+            ),
+        )
+        return self._to_domain(record)
+
+    async def list_for_run(
+        self,
+        session: AsyncSession,
+        run_id: UUID,
+    ) -> tuple[Artifact, ...]:
+        """Return a Run's Artifacts oldest first, breaking timestamp ties by identifier."""
+        records = await session.scalars(
+            select(ArtifactRecord)
+            .where(ArtifactRecord.run_id == run_id)
+            .order_by(ArtifactRecord.created_at, ArtifactRecord.id)
+        )
+        return tuple(self._to_domain(record) for record in records)
+
+    @staticmethod
+    def _to_domain(record: ArtifactRecord) -> Artifact:
+        return Artifact(
+            id=record.id,
+            run_id=record.run_id,
+            kind=record.kind,
+            uri=record.uri,
+            metadata=dict(record.artifact_metadata),
+        )

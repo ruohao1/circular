@@ -1,6 +1,25 @@
 import pytest
 from circular.domain import WorkspaceStatus
-from circular.orchestration import InvalidWorkspaceTransition, WorkspaceLifecycle
+from circular.orchestration import (
+    InvalidWorkspaceInitialStatus,
+    InvalidWorkspaceTransition,
+    WorkspaceLifecycle,
+)
+
+
+def test_pending_is_the_only_valid_initial_workspace_state() -> None:
+    WorkspaceLifecycle.validate_initial(WorkspaceStatus.PENDING)
+
+
+@pytest.mark.parametrize(
+    "status",
+    [WorkspaceStatus.READY, WorkspaceStatus.RELEASED, WorkspaceStatus.FAILED],
+)
+def test_every_other_initial_workspace_state_is_invalid(status: WorkspaceStatus) -> None:
+    with pytest.raises(InvalidWorkspaceInitialStatus) as exc_info:
+        WorkspaceLifecycle.validate_initial(status)
+
+    assert exc_info.value.status is status
 
 
 def test_pending_workspace_can_become_ready() -> None:

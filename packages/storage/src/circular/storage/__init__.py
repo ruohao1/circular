@@ -8,10 +8,19 @@ from circular.storage.models import (
     RunRecord,
     TaskRecord,
 )
-from circular.storage.repositories import RunEventReader, RunStore
+from circular.storage.repositories import (
+    ArtifactStore,
+    RunEventReader,
+    RunStore,
+    WorkspaceAlreadyExistsError,
+    WorkspaceContainerIdConflictError,
+    WorkspaceNotFoundError,
+    WorkspaceStore,
+)
 
 __all__ = [
     "AgentRecord",
+    "ArtifactStore",
     "Base",
     "EventRecord",
     "ProjectRecord",
@@ -20,6 +29,10 @@ __all__ = [
     "RunEventReader",
     "RunStore",
     "TaskRecord",
+    "WorkspaceAlreadyExistsError",
+    "WorkspaceContainerIdConflictError",
+    "WorkspaceNotFoundError",
+    "WorkspaceStore",
     "create_engine",
     "create_session_factory",
 ]
