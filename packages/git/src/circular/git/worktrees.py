@@ -4,11 +4,14 @@ import asyncio
 import math
 import os
 import re
+import stat
 import tempfile
+from collections.abc import Coroutine
+from contextlib import AbstractAsyncContextManager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Protocol
-from uuid import UUID
+from typing import Any, Protocol
+from uuid import UUID, uuid4
 
 from circular.git._local import (
     GitLaunchError,
@@ -20,6 +23,7 @@ from circular.git._local import (
 
 _CLEANUP_TIMEOUT_SECONDS = 5.0
 _COMMIT_PATTERN = re.compile(rb"(?:[0-9a-fA-F]{40}|[0-9a-fA-F]{64})")
+_OWNERSHIP_MARKER_MAGIC = b"circular-worktree-owner\0\x01"
 
 
 @dataclass(frozen=True, slots=True)
@@ -125,7 +129,7 @@ class WorktreeLockError(WorktreeError):
 
 
 class WorktreeReleaseError(WorktreeError):
-    """The basic clean-worktree release operation failed."""
+    """A Run-owned worktree could not be safely released or reconciled."""
 
     def __init__(self, run_id: UUID, path: Path, exit_code: int | None = None) -> None:
         self.exit_code = exit_code
@@ -136,11 +140,29 @@ class WorktreeReleaseError(WorktreeError):
 @dataclass(frozen=True, slots=True)
 class _LinkedWorktree:
     repository_path: Path
-    branch_ref: str
+    branch_ref: bytes
     commit: str
 
 
+@dataclass(frozen=True, slots=True)
+class _RegisteredWorktree:
+    path: bytes
+    branch_ref: bytes | None
+    commit: bytes
+    prunable: bool
+
+
+@dataclass(frozen=True, slots=True)
+class _OwnershipMarker:
+    marker_identity: tuple[int, int]
+    target_identity: tuple[int, int]
+
+
 class _InvalidLinkedWorktree(RuntimeError):
+    pass
+
+
+class _InvalidOwnershipMarker(RuntimeError):
     pass
 
 
@@ -151,9 +173,9 @@ class LocalWorktreeManager:
     from the higher-level runners package. Repository cache refresh and worktree
     metadata changes share the same cross-process Repository lock.
 
-    ``release`` intentionally supports only a present, valid, clean linked
-    worktree and preserves its Run branch. Idempotence, stale metadata recovery,
-    and interrupted-cleanup reconciliation belong to ISQ-167.
+    ``release`` preserves the Run branch, refuses dirty live worktrees, and
+    reconciles interrupted directory or Git-metadata cleanup using only
+    ownership evidence rooted in these managed paths.
     """
 
     def __init__(
@@ -174,20 +196,28 @@ class LocalWorktreeManager:
         self._ensure_worktree_root(run_id, target)
         repository_id = self._repository_id(run_id, target, repository_path)
         branch = f"circular/run/{run_id}"
+        ownership_marker = _ownership_marker_path(target, run_id)
 
-        if _path_exists(target):
+        if _path_exists(target) or _path_exists(ownership_marker):
             raise _conflict(run_id, target)
 
         async with self._lock(run_id, target):
-            if _path_exists(target):
+            if _path_exists(target) or _path_exists(ownership_marker):
                 raise _conflict(run_id, target)
             async with self._lock(run_id, repository_path):
                 await self._validate_repository(run_id, target, repository_id, repository_path)
-                if _path_exists(target):
+                if _path_exists(target) or _path_exists(ownership_marker):
                     raise _conflict(run_id, target)
                 await self._require_absent_branch(run_id, target, repository_path, branch)
                 commit = await self._resolve_ref(run_id, target, repository_path, base_ref)
-                return await self._provision_locked(run_id, target, repository_path, branch, commit)
+                return await self._provision_locked(
+                    run_id,
+                    target,
+                    repository_id,
+                    repository_path,
+                    branch,
+                    commit,
+                )
 
     async def release(self, worktree: ProvisionedWorktree) -> None:
         try:
@@ -196,7 +226,7 @@ class LocalWorktreeManager:
             raw_target = Path(self._directories.worktree_root) / str(worktree.run_id)
             raise WorktreeReleaseError(worktree.run_id, raw_target) from error
         expected_branch = f"circular/run/{worktree.run_id}"
-        if worktree.path != target or worktree.branch != expected_branch or not target.exists():
+        if worktree.path != target or worktree.branch != expected_branch:
             raise WorktreeReleaseError(worktree.run_id, target)
         repository_id = self._release_repository_id(worktree, target)
 
@@ -208,14 +238,54 @@ class LocalWorktreeManager:
                     repository_id,
                     worktree.repository_path,
                 )
+                marker_present = self._ownership_marker_present(
+                    worktree.run_id, target, repository_id
+                )
+                if not _path_exists(target):
+                    await self._remove_stale_registration(
+                        worktree.run_id,
+                        target,
+                        worktree.repository_path,
+                        expected_branch,
+                        marker_present=marker_present,
+                    )
+                    if marker_present:
+                        self._remove_ownership_marker(worktree.run_id, target, repository_id)
+                    return
                 try:
                     linked = await _inspect_linked_worktree(target)
-                except (GitLaunchError, _InvalidLinkedWorktree) as error:
-                    raise WorktreeReleaseError(worktree.run_id, target) from error
+                except (GitLaunchError, _InvalidLinkedWorktree):
+                    try:
+                        await self._remove_stale_directory(
+                            worktree.run_id,
+                            target,
+                            repository_id,
+                            worktree.repository_path,
+                            expected_branch,
+                            marker_present=marker_present,
+                        )
+                    except WorktreeReleaseError:
+                        raise
+                    except (
+                        GitLaunchError,
+                        OSError,
+                        TimeoutError,
+                        _InvalidLinkedWorktree,
+                    ) as cleanup_error:
+                        raise WorktreeReleaseError(worktree.run_id, target) from cleanup_error
+                    return
                 if (
                     linked.repository_path != worktree.repository_path
-                    or linked.branch_ref != f"refs/heads/{expected_branch}"
+                    or linked.branch_ref != os.fsencode(f"refs/heads/{expected_branch}")
                 ):
+                    raise WorktreeReleaseError(worktree.run_id, target)
+                if not marker_present:
+                    self._create_ownership_marker(worktree.run_id, target, repository_id)
+                try:
+                    preserved_changes = await _worktree_has_preserved_changes(target)
+                except (GitLaunchError, _InvalidLinkedWorktree) as error:
+                    raise WorktreeReleaseError(worktree.run_id, target) from error
+                if preserved_changes:
                     raise WorktreeReleaseError(worktree.run_id, target)
                 try:
                     _, returncode = await run_git(
@@ -229,6 +299,109 @@ class LocalWorktreeManager:
                     raise WorktreeReleaseError(worktree.run_id, target) from error
                 if returncode:
                     raise WorktreeReleaseError(worktree.run_id, target, returncode)
+                if _path_exists(target):
+                    raise WorktreeReleaseError(worktree.run_id, target)
+                self._remove_ownership_marker(worktree.run_id, target, repository_id)
+
+    async def _remove_stale_registration(
+        self,
+        run_id: UUID,
+        target: Path,
+        repository_path: Path,
+        expected_branch: str,
+        *,
+        marker_present: bool,
+    ) -> None:
+        try:
+            registrations = await _list_registered_worktrees(repository_path)
+        except (GitLaunchError, _InvalidLinkedWorktree) as error:
+            raise WorktreeReleaseError(run_id, target) from error
+        matches = [entry for entry in registrations if entry.path == os.fsencode(target)]
+        if not matches and not marker_present:
+            return
+        try:
+            branch_commit = await _resolve_branch_commit(repository_path, expected_branch)
+        except (GitLaunchError, _InvalidLinkedWorktree) as error:
+            raise WorktreeReleaseError(run_id, target) from error
+        if not matches:
+            return
+        if (
+            len(matches) != 1
+            or matches[0].branch_ref != os.fsencode(f"refs/heads/{expected_branch}")
+            or matches[0].commit != branch_commit
+            or not matches[0].prunable
+        ):
+            raise WorktreeReleaseError(run_id, target)
+        try:
+            _, returncode = await run_git(
+                "-C", str(repository_path), "worktree", "remove", str(target)
+            )
+        except GitLaunchError as error:
+            raise WorktreeReleaseError(run_id, target) from error
+        if returncode:
+            raise WorktreeReleaseError(run_id, target, returncode)
+
+    async def _remove_stale_directory(
+        self,
+        run_id: UUID,
+        target: Path,
+        repository_id: UUID,
+        repository_path: Path,
+        expected_branch: str,
+        *,
+        marker_present: bool,
+    ) -> None:
+        registrations = await _list_registered_worktrees(repository_path)
+        if any(entry.path == os.fsencode(target) for entry in registrations):
+            raise WorktreeReleaseError(run_id, target)
+        git_entry = target / ".git"
+        if _path_exists(git_entry):
+            if not _has_stale_git_backpointer(target, repository_path):
+                raise WorktreeReleaseError(run_id, target)
+            if not marker_present:
+                self._create_ownership_marker(run_id, target, repository_id)
+        elif not marker_present:
+            raise WorktreeReleaseError(run_id, target)
+        try:
+            await _resolve_branch_commit(repository_path, expected_branch)
+        except (GitLaunchError, _InvalidLinkedWorktree) as error:
+            raise WorktreeReleaseError(run_id, target) from error
+        if not self._ownership_marker_present(run_id, target, repository_id):
+            raise WorktreeReleaseError(run_id, target)
+
+        await _settle_release_cleanup(
+            self._remove_stale_directory_contents(run_id, target, repository_id)
+        )
+
+    async def _remove_stale_directory_contents(
+        self,
+        run_id: UUID,
+        target: Path,
+        repository_id: UUID,
+    ) -> None:
+        deadline = asyncio.get_running_loop().time() + _CLEANUP_TIMEOUT_SECONDS
+        await remove_owned_tree(target, deadline=deadline)
+        if _path_exists(target):
+            raise WorktreeReleaseError(run_id, target)
+        self._remove_ownership_marker(run_id, target, repository_id)
+
+    def _ownership_marker_present(self, run_id: UUID, target: Path, repository_id: UUID) -> bool:
+        try:
+            return _has_ownership_marker(target, run_id, repository_id)
+        except (OSError, _InvalidOwnershipMarker) as error:
+            raise WorktreeReleaseError(run_id, target) from error
+
+    def _create_ownership_marker(self, run_id: UUID, target: Path, repository_id: UUID) -> None:
+        try:
+            _create_ownership_marker(target, run_id, repository_id)
+        except (OSError, _InvalidOwnershipMarker) as error:
+            raise WorktreeReleaseError(run_id, target) from error
+
+    def _remove_ownership_marker(self, run_id: UUID, target: Path, repository_id: UUID) -> None:
+        try:
+            _remove_ownership_marker(target, run_id, repository_id)
+        except (OSError, _InvalidOwnershipMarker) as error:
+            raise WorktreeReleaseError(run_id, target) from error
 
     def _run_target(self, run_id: UUID) -> Path:
         if not isinstance(run_id, UUID):
@@ -384,6 +557,7 @@ class LocalWorktreeManager:
         self,
         run_id: UUID,
         target: Path,
+        repository_id: UUID,
         repository_path: Path,
         branch: str,
         commit: str,
@@ -423,11 +597,17 @@ class LocalWorktreeManager:
             linked = await _inspect_linked_worktree(target)
             if (
                 linked.repository_path != repository_path
-                or linked.branch_ref != f"refs/heads/{branch}"
+                or linked.branch_ref != os.fsencode(f"refs/heads/{branch}")
                 or linked.commit != commit
                 or not _is_valid_linked_layout(target)
             ):
                 raise WorktreeProvisionError(run_id, target, None)
+            try:
+                _create_ownership_marker(target, run_id, repository_id)
+            except FileExistsError as error:
+                raise _conflict(run_id, target) from error
+            except (OSError, _InvalidOwnershipMarker) as error:
+                raise WorktreeProvisionError(run_id, target, None, filesystem_error=True) from error
             published = True
             return ProvisionedWorktree(
                 run_id=run_id,
@@ -447,6 +627,7 @@ class LocalWorktreeManager:
                     self._cleanup_failed_provision(
                         run_id,
                         target,
+                        repository_id,
                         repository_path,
                         staging,
                         branch,
@@ -471,6 +652,7 @@ class LocalWorktreeManager:
         self,
         run_id: UUID,
         target: Path,
+        repository_id: UUID,
         repository_path: Path,
         staging: Path,
         branch: str,
@@ -481,7 +663,7 @@ class LocalWorktreeManager:
         try:
             if await _is_owned_linked_worktree(target, repository_path, branch):
                 await _remove_failed_worktree(repository_path, target)
-            await _remove_private_staging(repository_path, target, staging)
+            await _remove_private_staging(repository_path, target, staging, branch)
             if branch_may_be_owned:
                 _, returncode = await run_git(
                     "-C",
@@ -497,16 +679,17 @@ class LocalWorktreeManager:
                         target,
                         f"Run {run_id} failed worktree branch rollback failed",
                     )
+            _remove_ownership_marker(target, run_id, repository_id)
         except WorktreeCleanupError:
             raise
-        except (GitLaunchError, OSError, TimeoutError) as error:
+        except (GitLaunchError, OSError, TimeoutError, _InvalidOwnershipMarker) as error:
             raise WorktreeCleanupError(
                 run_id,
                 target,
                 f"Run {run_id} failed worktree cleanup failed at {target}",
             ) from error
 
-    def _lock(self, run_id: UUID, path: Path):  # type: ignore[no-untyped-def]
+    def _lock(self, run_id: UUID, path: Path) -> AbstractAsyncContextManager[None]:
         return repository_lock(
             path,
             timeout_seconds=self._lock_timeout_seconds,
@@ -526,9 +709,234 @@ def _path_exists(path: Path) -> bool:
     return os.path.lexists(path)
 
 
+def _ownership_marker_path(target: Path, run_id: UUID) -> Path:
+    if target.name != str(run_id):
+        raise _InvalidOwnershipMarker
+    return target.with_name(f".{run_id}.owner")
+
+
+def _ownership_marker_prefix(run_id: UUID, repository_id: UUID) -> bytes:
+    return _OWNERSHIP_MARKER_MAGIC + run_id.bytes + repository_id.bytes
+
+
+def _ownership_marker_payload(
+    run_id: UUID,
+    repository_id: UUID,
+    target_identity: tuple[int, int],
+) -> bytes:
+    try:
+        encoded_identity = b"".join(
+            value.to_bytes(16, byteorder="big", signed=False) for value in target_identity
+        )
+    except OverflowError as error:
+        raise _InvalidOwnershipMarker from error
+    return _ownership_marker_prefix(run_id, repository_id) + encoded_identity
+
+
+def _open_worktree_root(target: Path) -> int:
+    flags = os.O_CLOEXEC | os.O_RDONLY | os.O_DIRECTORY
+    flags |= getattr(os, "O_NOFOLLOW", 0)
+    return os.open(target.parent, flags)
+
+
+def _target_identity_at(root_descriptor: int, target_name: str) -> tuple[int, int] | None:
+    flags = os.O_CLOEXEC | os.O_RDONLY | os.O_DIRECTORY
+    flags |= getattr(os, "O_NOFOLLOW", 0)
+    try:
+        descriptor = os.open(target_name, flags, dir_fd=root_descriptor)
+    except FileNotFoundError:
+        return None
+    except OSError as error:
+        raise _InvalidOwnershipMarker from error
+    try:
+        metadata = os.fstat(descriptor)
+        return metadata.st_dev, metadata.st_ino
+    finally:
+        os.close(descriptor)
+
+
+def _read_ownership_marker(
+    root_descriptor: int,
+    marker_name: str,
+    expected_prefix: bytes,
+) -> _OwnershipMarker | None:
+    flags = os.O_CLOEXEC | os.O_RDONLY | os.O_NONBLOCK
+    flags |= getattr(os, "O_NOFOLLOW", 0)
+    try:
+        descriptor = os.open(marker_name, flags, dir_fd=root_descriptor)
+    except FileNotFoundError:
+        return None
+    except OSError as error:
+        raise _InvalidOwnershipMarker from error
+    try:
+        metadata = os.fstat(descriptor)
+        expected_size = len(expected_prefix) + 32
+        if not stat.S_ISREG(metadata.st_mode) or metadata.st_size != expected_size:
+            raise _InvalidOwnershipMarker
+        contents = bytearray()
+        while len(contents) <= expected_size:
+            chunk = os.read(descriptor, expected_size + 1 - len(contents))
+            if not chunk:
+                break
+            contents.extend(chunk)
+        if len(contents) != expected_size or not contents.startswith(expected_prefix):
+            raise _InvalidOwnershipMarker
+        raw_identity = contents[len(expected_prefix) :]
+        target_identity = (
+            int.from_bytes(raw_identity[:16], byteorder="big", signed=False),
+            int.from_bytes(raw_identity[16:], byteorder="big", signed=False),
+        )
+        path_metadata = os.stat(marker_name, dir_fd=root_descriptor, follow_symlinks=False)
+        identity = (metadata.st_dev, metadata.st_ino)
+        if (path_metadata.st_dev, path_metadata.st_ino) != identity:
+            raise _InvalidOwnershipMarker
+        return _OwnershipMarker(
+            marker_identity=identity,
+            target_identity=target_identity,
+        )
+    finally:
+        os.close(descriptor)
+
+
+def _has_ownership_marker(target: Path, run_id: UUID, repository_id: UUID) -> bool:
+    marker = _ownership_marker_path(target, run_id)
+    root_descriptor = _open_worktree_root(target)
+    try:
+        ownership = _read_ownership_marker(
+            root_descriptor,
+            marker.name,
+            _ownership_marker_prefix(run_id, repository_id),
+        )
+        if ownership is None:
+            return False
+        target_identity = _target_identity_at(root_descriptor, target.name)
+    finally:
+        os.close(root_descriptor)
+    if target_identity is not None and target_identity != ownership.target_identity:
+        raise _InvalidOwnershipMarker
+    return True
+
+
+def _create_ownership_marker(target: Path, run_id: UUID, repository_id: UUID) -> None:
+    marker = _ownership_marker_path(target, run_id)
+    root_descriptor = _open_worktree_root(target)
+    descriptor: int | None = None
+    temporary_name = f".{run_id}.owner-{uuid4()}.tmp"
+    try:
+        target_identity = _target_identity_at(root_descriptor, target.name)
+        if target_identity is None:
+            raise _InvalidOwnershipMarker
+        payload = _ownership_marker_payload(run_id, repository_id, target_identity)
+        flags = os.O_CLOEXEC | os.O_CREAT | os.O_EXCL | os.O_WRONLY
+        flags |= getattr(os, "O_NOFOLLOW", 0)
+        descriptor = os.open(temporary_name, flags, 0o600, dir_fd=root_descriptor)
+        offset = 0
+        while offset < len(payload):
+            written = os.write(descriptor, payload[offset:])
+            if written <= 0:
+                raise OSError("ownership marker write made no progress")
+            offset += written
+        os.fsync(descriptor)
+        os.close(descriptor)
+        descriptor = None
+        os.link(
+            temporary_name,
+            marker.name,
+            src_dir_fd=root_descriptor,
+            dst_dir_fd=root_descriptor,
+            follow_symlinks=False,
+        )
+        os.fsync(root_descriptor)
+        os.unlink(temporary_name, dir_fd=root_descriptor)
+        os.fsync(root_descriptor)
+    except BaseException:
+        if descriptor is not None:
+            os.close(descriptor)
+        try:
+            os.unlink(temporary_name, dir_fd=root_descriptor)
+            os.fsync(root_descriptor)
+        except FileNotFoundError:
+            pass
+        raise
+    finally:
+        os.close(root_descriptor)
+
+
+def _remove_ownership_marker(target: Path, run_id: UUID, repository_id: UUID) -> None:
+    marker = _ownership_marker_path(target, run_id)
+    root_descriptor = _open_worktree_root(target)
+    try:
+        if _target_identity_at(root_descriptor, target.name) is not None:
+            raise _InvalidOwnershipMarker
+        ownership = _read_ownership_marker(
+            root_descriptor,
+            marker.name,
+            _ownership_marker_prefix(run_id, repository_id),
+        )
+        if ownership is None:
+            return
+        metadata = os.stat(marker.name, dir_fd=root_descriptor, follow_symlinks=False)
+        if (metadata.st_dev, metadata.st_ino) != ownership.marker_identity:
+            raise _InvalidOwnershipMarker
+        if _target_identity_at(root_descriptor, target.name) is not None:
+            raise _InvalidOwnershipMarker
+        os.fsync(root_descriptor)
+        os.unlink(marker.name, dir_fd=root_descriptor)
+        os.fsync(root_descriptor)
+    finally:
+        os.close(root_descriptor)
+
+
 def _is_valid_linked_layout(path: Path) -> bool:
     git_file = path / ".git"
     return path.is_dir() and git_file.is_file() and not git_file.is_symlink()
+
+
+def _has_stale_git_backpointer(target: Path, repository_path: Path) -> bool:
+    flags = os.O_CLOEXEC | os.O_RDONLY | os.O_DIRECTORY
+    nofollow = getattr(os, "O_NOFOLLOW", 0)
+    try:
+        target_descriptor = os.open(target, flags | nofollow)
+    except OSError:
+        return False
+    try:
+        try:
+            git_descriptor = os.open(
+                ".git",
+                os.O_CLOEXEC | os.O_RDONLY | os.O_NONBLOCK | nofollow,
+                dir_fd=target_descriptor,
+            )
+        except OSError:
+            return False
+        try:
+            metadata = os.fstat(git_descriptor)
+            if not stat.S_ISREG(metadata.st_mode) or metadata.st_size > 4096:
+                return False
+            contents = os.read(git_descriptor, 4097)
+        finally:
+            os.close(git_descriptor)
+    finally:
+        os.close(target_descriptor)
+
+    prefix = b"gitdir: "
+    if not contents.startswith(prefix) or b"\0" in contents:
+        return False
+    raw_path = contents.removeprefix(prefix).removesuffix(b"\n")
+    if not raw_path or b"\n" in raw_path or b"\r" in raw_path:
+        return False
+    git_directory = Path(os.fsdecode(raw_path))
+    administrative_root = repository_path / ".git" / "worktrees"
+    return (
+        git_directory.is_absolute()
+        and administrative_root.is_dir()
+        and not administrative_root.is_symlink()
+        and administrative_root.resolve() == administrative_root
+        and git_directory.parent == administrative_root
+        and git_directory.name not in {"", ".", ".."}
+        and not git_directory.is_symlink()
+        and git_directory.resolve(strict=False) == git_directory
+        and not _path_exists(git_directory)
+    )
 
 
 async def _inspect_linked_worktree(path: Path) -> _LinkedWorktree:
@@ -544,6 +952,7 @@ async def _inspect_linked_worktree(path: Path) -> _LinkedWorktree:
     commit, commit_code = await run_git("-C", str(path), "rev-parse", "--verify", "HEAD^{commit}")
     common_path = Path(os.fsdecode(common.rstrip(b"\r\n")))
     top_path = Path(os.fsdecode(top.rstrip(b"\r\n")))
+    branch_ref = branch.removesuffix(b"\n").removesuffix(b"\r")
     commit_value = commit.strip()
     if (
         common_code
@@ -552,14 +961,87 @@ async def _inspect_linked_worktree(path: Path) -> _LinkedWorktree:
         or commit_code
         or top_path != path
         or common_path.name != ".git"
+        or not branch_ref
         or not _COMMIT_PATTERN.fullmatch(commit_value)
     ):
         raise _InvalidLinkedWorktree
     return _LinkedWorktree(
         repository_path=common_path.parent,
-        branch_ref=branch.decode("utf-8", errors="strict").strip(),
+        branch_ref=branch_ref,
         commit=commit_value.decode("ascii").lower(),
     )
+
+
+async def _worktree_has_preserved_changes(path: Path) -> bool:
+    status, returncode = await run_git(
+        "-C",
+        str(path),
+        "status",
+        "--porcelain=v1",
+        "-z",
+        "--untracked-files=all",
+        "--ignored=matching",
+        "--ignore-submodules=none",
+    )
+    if returncode:
+        raise _InvalidLinkedWorktree
+    return bool(status)
+
+
+async def _list_registered_worktrees(repository_path: Path) -> tuple[_RegisteredWorktree, ...]:
+    output, returncode = await run_git(
+        "-C", str(repository_path), "worktree", "list", "--porcelain", "-z"
+    )
+    if returncode or (output and not output.endswith(b"\0\0")):
+        raise _InvalidLinkedWorktree
+
+    registrations: list[_RegisteredWorktree] = []
+    for record in output.split(b"\0\0"):
+        if not record:
+            continue
+        fields = record.split(b"\0")
+        if not fields or not fields[0].startswith(b"worktree "):
+            raise _InvalidLinkedWorktree
+        path = fields[0].removeprefix(b"worktree ")
+        branch_fields = [
+            field.removeprefix(b"branch ") for field in fields if field.startswith(b"branch ")
+        ]
+        commit_fields = [
+            field.removeprefix(b"HEAD ") for field in fields if field.startswith(b"HEAD ")
+        ]
+        if (
+            not path
+            or len(branch_fields) > 1
+            or len(commit_fields) != 1
+            or not _COMMIT_PATTERN.fullmatch(commit_fields[0])
+        ):
+            raise _InvalidLinkedWorktree
+        registrations.append(
+            _RegisteredWorktree(
+                path=path,
+                branch_ref=branch_fields[0] if branch_fields else None,
+                commit=commit_fields[0].lower(),
+                prunable=any(
+                    field == b"prunable" or field.startswith(b"prunable ") for field in fields
+                ),
+            )
+        )
+    return tuple(registrations)
+
+
+async def _resolve_branch_commit(repository_path: Path, branch: str) -> bytes:
+    commit, returncode = await run_git(
+        "-C",
+        str(repository_path),
+        "show-ref",
+        "--verify",
+        "--hash",
+        f"refs/heads/{branch}",
+    )
+    commit = commit.strip()
+    if returncode or not _COMMIT_PATTERN.fullmatch(commit):
+        raise _InvalidLinkedWorktree
+    return commit.lower()
 
 
 async def _is_owned_linked_worktree(path: Path, repository_path: Path, branch: str) -> bool:
@@ -569,7 +1051,9 @@ async def _is_owned_linked_worktree(path: Path, repository_path: Path, branch: s
         linked = await _inspect_linked_worktree(path)
     except _InvalidLinkedWorktree:
         return False
-    return linked.repository_path == repository_path and linked.branch_ref == f"refs/heads/{branch}"
+    return linked.repository_path == repository_path and linked.branch_ref == os.fsencode(
+        f"refs/heads/{branch}"
+    )
 
 
 async def _remove_failed_worktree(repository_path: Path, path: Path) -> None:
@@ -580,31 +1064,56 @@ async def _remove_failed_worktree(repository_path: Path, path: Path) -> None:
         raise OSError("failed to remove call-owned linked worktree")
 
 
-async def _remove_private_staging(repository_path: Path, target: Path, staging: Path) -> None:
+async def _remove_private_staging(
+    repository_path: Path,
+    target: Path,
+    staging: Path,
+    branch: str,
+) -> None:
     expected_prefix = f".{target.name}.worktree-"
     if staging.parent != target.parent or not staging.name.startswith(expected_prefix):
         raise OSError("invalid worktree staging path")
     if not _path_exists(staging):
+        await _remove_private_registration(repository_path, staging, branch)
         return
 
+    await run_git("-C", str(repository_path), "worktree", "remove", "--force", str(staging))
+    if _path_exists(staging):
+        deadline = asyncio.get_running_loop().time() + _CLEANUP_TIMEOUT_SECONDS
+        await remove_owned_tree(staging, deadline=deadline)
+    if _path_exists(staging):
+        raise OSError("call-owned worktree staging path survived cleanup")
+    await _remove_private_registration(repository_path, staging, branch)
+
+
+async def _remove_private_registration(
+    repository_path: Path,
+    staging: Path,
+    branch: str,
+) -> None:
+    try:
+        registrations = await _list_registered_worktrees(repository_path)
+    except _InvalidLinkedWorktree as error:
+        raise OSError("failed to inspect call-owned worktree metadata") from error
+    matches = [entry for entry in registrations if entry.path == os.fsencode(staging)]
+    if not matches:
+        return
+    if (
+        len(matches) != 1
+        or matches[0].branch_ref != os.fsencode(f"refs/heads/{branch}")
+        or not matches[0].prunable
+    ):
+        raise OSError("refused to remove unverified worktree metadata")
     _, returncode = await run_git(
         "-C", str(repository_path), "worktree", "remove", "--force", str(staging)
     )
-    if not _path_exists(staging):
-        return
     if returncode:
-        deadline = asyncio.get_running_loop().time() + _CLEANUP_TIMEOUT_SECONDS
-        await remove_owned_tree(staging, deadline=deadline)
-        _, prune_returncode = await run_git(
-            "-C", str(repository_path), "worktree", "prune", "--expire", "now"
-        )
-        if prune_returncode:
-            raise OSError("failed to prune call-owned worktree metadata")
-    if _path_exists(staging):
-        raise OSError("call-owned worktree staging path survived cleanup")
+        raise OSError("failed to remove call-owned worktree metadata")
 
 
-async def _complete_cleanup(cleanup_coroutine) -> WorktreeCleanupError | None:  # type: ignore[no-untyped-def]
+async def _complete_cleanup(
+    cleanup_coroutine: Coroutine[Any, Any, None],
+) -> WorktreeCleanupError | None:
     cleanup = asyncio.create_task(cleanup_coroutine)
     while not cleanup.done():
         try:
@@ -618,3 +1127,28 @@ async def _complete_cleanup(cleanup_coroutine) -> WorktreeCleanupError | None:  
     except WorktreeCleanupError as error:
         return error
     return None
+
+
+async def _settle_release_cleanup[CleanupResult](
+    cleanup_coroutine: Coroutine[Any, Any, CleanupResult],
+) -> CleanupResult:
+    cleanup = asyncio.create_task(cleanup_coroutine)
+    cancellation: asyncio.CancelledError | None = None
+    while not cleanup.done():
+        try:
+            await asyncio.shield(cleanup)
+        except asyncio.CancelledError as error:
+            cancellation = cancellation or error
+            continue
+        except BaseException:
+            break
+    try:
+        result = cleanup.result()
+    except BaseException as cleanup_error:
+        if cancellation is not None:
+            cancellation.add_note("release cleanup also failed while settling cancellation")
+            raise cancellation from cleanup_error
+        raise
+    if cancellation is not None:
+        raise cancellation
+    return result

@@ -86,9 +86,13 @@ receive the Repository cache root.
 `circular/run/<Run UUID>`. The requested base ref is resolved to a commit before
 the branch is created; ref text never becomes a path or branch fragment. A
 private same-root staging worktree is published with `git worktree move` and
-only then exposed at the Run path. Provision rollback uses Git-aware removal and
-pruning for only the staging or final paths the call can verify it owns, and
-compare-deletes only its unchanged new branch.
+only then exposed at the Run path. Before returning, provisioning atomically
+installs and fsyncs a sibling ownership receipt that binds the Run UUID,
+Repository UUID, and the target directory's no-follow device/inode identity.
+Provision rollback uses exact-path Git-aware removal and compare-deletes only
+its unchanged new branch; only after that durable rollback completes does it
+remove an installed receipt. It never performs Repository-wide worktree
+pruning.
 
 Repository-cache refresh and worktree metadata changes use the same bounded,
 cross-process Repository lock. A separate Run-path lock prevents two
@@ -96,10 +100,28 @@ Repositories from claiming the same Run target. Platform-owned Git commands
 disable Repository hooks, run with argv, and terminate and await their process
 group on cancellation before either lock is released.
 
-The initial `release` operation is intentionally narrow: it removes a present,
-valid, clean linked worktree and preserves the Run branch for later diff,
-commit, and artifact handling. It is not idempotent and does not prune or repair
-stale metadata. ISQ-167 owns interrupted cleanup recovery and reconciliation.
+`release` is idempotent and preserves the Run branch for later diff, commit, and
+artifact handling. A present registered worktree must be clean; modified or
+untracked files, including ignored outputs, cause a typed failure and remain
+available for explicit recovery. If an interrupted release leaves only Git
+registration metadata, the manager verifies the exact Run path, branch, and
+registered HEAD against the current branch using byte-safe porcelain output
+before removing only that registration. If only the directory remains, its
+receipt must match the directory identity before bounded descriptor-relative
+cleanup. A legacy worktree without a receipt is upgraded only while its regular
+`.git` backpointer still proves ownership beneath the claimed managed
+Repository; loss of both proofs fails closed for operator recovery. After the
+target disappears, the worktree root is fsynced before the receipt is removed
+and fsynced again. Fully absent state is a no-op.
+
+The receipt is safe only because the worktree root's parent directory is a
+worker-owned local trust boundary that is never mounted into agent containers;
+containers receive one Run UUID child. Receipt and target opens are relative to
+no-follow directory descriptors, replacement directories fail the recorded
+device/inode check, and malformed, symlinked, or non-regular receipts fail
+closed. Symlinks inside cleanup targets are unlinked rather than followed. The
+Run-to-Repository lock order remains held until Git subprocess cancellation or
+filesystem cleanup has settled.
 
 ## Worker settings
 
