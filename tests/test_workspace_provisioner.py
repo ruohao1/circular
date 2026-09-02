@@ -9,6 +9,7 @@ import pytest
 from circular.domain import RunStatus, Workspace, WorkspaceStatus
 from circular.git import ProvisionedWorktree
 from circular.runners import (
+    ContainerIdentityPersistenceError,
     ExecutionDirectories,
     FakeWorkloadSpecFactory,
     ProvisionedWorkspace,
@@ -421,6 +422,60 @@ async def test_identity_write_failure_discards_when_failure_state_is_unavailable
     assert exc_info.value is identity_failure
     assert runtime.discarded == [runtime.handle]
     assert getattr(identity_failure, "__notes__", ()) == [
+        "failed to persist provisioning failure (RuntimeError)"
+    ]
+
+
+async def test_self_cancelled_identity_write_records_a_safe_failure(
+    tmp_path: Path,
+) -> None:
+    provisioner, persistence, _cache, _worktrees, runtime, _calls, _directories = _system(tmp_path)
+
+    async def cancelled_record(workspace_id: UUID, resource_id: str) -> Workspace:
+        raise asyncio.CancelledError
+
+    persistence.record_container = cancelled_record  # type: ignore[method-assign]
+
+    with pytest.raises(
+        ContainerIdentityPersistenceError,
+        match="container identity persistence was cancelled",
+    ) as exc_info:
+        await provisioner.provision(RUN_ID)
+
+    assert isinstance(exc_info.value.__cause__, asyncio.CancelledError)
+    assert persistence.run_status is RunStatus.FAILED
+    assert persistence.workspace is not None
+    assert persistence.workspace.status is WorkspaceStatus.FAILED
+    assert persistence.workspace.container_id == "resource-169"
+    assert runtime.discarded == []
+
+
+async def test_self_cancelled_identity_write_discards_when_failure_state_is_unavailable(
+    tmp_path: Path,
+) -> None:
+    provisioner, persistence, _cache, _worktrees, runtime, _calls, _directories = _system(tmp_path)
+    failure_state_error = RuntimeError("failure state unavailable")
+
+    async def cancelled_record(workspace_id: UUID, resource_id: str) -> Workspace:
+        raise asyncio.CancelledError
+
+    async def failing_mark_failed(
+        run_id: UUID,
+        error: Exception,
+        *,
+        container_id: str | None,
+    ) -> None:
+        raise failure_state_error
+
+    persistence.record_container = cancelled_record  # type: ignore[method-assign]
+    persistence.mark_failed = failing_mark_failed  # type: ignore[method-assign]
+
+    with pytest.raises(ContainerIdentityPersistenceError) as exc_info:
+        await provisioner.provision(RUN_ID)
+
+    assert isinstance(exc_info.value.__cause__, asyncio.CancelledError)
+    assert runtime.discarded == [runtime.handle]
+    assert getattr(exc_info.value, "__notes__", ()) == [
         "failed to persist provisioning failure (RuntimeError)"
     ]
 

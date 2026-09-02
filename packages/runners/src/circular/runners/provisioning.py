@@ -30,6 +30,14 @@ class WorkspaceProvisioningCompensationError(RuntimeError):
         self.original_error = original_error
 
 
+class ContainerIdentityPersistenceError(RuntimeError):
+    """The owned durable-identity write ended without a committed result."""
+
+    def __init__(self, cancellation: asyncio.CancelledError) -> None:
+        super().__init__("container identity persistence was cancelled")
+        self.__cause__ = cancellation
+
+
 @dataclass(frozen=True, slots=True)
 class _ContainerRecordOutcome:
     error: Exception | None = None
@@ -275,6 +283,8 @@ class WorkspaceProvisioner:
     ) -> _ContainerRecordOutcome:
         try:
             await self._persistence.record_container(workspace_id, resource_id)
+        except asyncio.CancelledError as cancellation:
+            return _ContainerRecordOutcome(error=ContainerIdentityPersistenceError(cancellation))
         except Exception as error:
             return _ContainerRecordOutcome(error=error)
         return _ContainerRecordOutcome()

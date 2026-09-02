@@ -1,6 +1,7 @@
 from circular.runners.executor import InvalidRunExecutionState, RunExecutor
 from circular.runners.paths import ExecutionDirectories, InvalidExecutionPath, RunPaths
 from circular.runners.provisioning import (
+    ContainerIdentityPersistenceError,
     ContainerSpecFactory,
     FakeWorkloadSpecFactory,
     ProvisionedWorkspace,
@@ -18,6 +19,7 @@ from circular.runners.sql_provisioning import (
 )
 
 __all__ = [
+    "ContainerIdentityPersistenceError",
     "ExecutionDirectories",
     "ContainerSpecFactory",
     "FakeWorkloadSpecFactory",
