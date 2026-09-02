@@ -69,7 +69,10 @@ class IntegrationWorktrees:
 
 class IntegrationRuntime:
     async def start(self, spec: ContainerSpec) -> ContainerHandle:
-        return ContainerHandle("integration-container")
+        return ContainerHandle(
+            id="integration-handle",
+            resource_id="integration-container",
+        )
 
     def output(self, handle: ContainerHandle):
         raise AssertionError("event ingestion is outside this integration slice")
@@ -79,6 +82,9 @@ class IntegrationRuntime:
 
     async def stop(self, handle: ContainerHandle) -> None:
         raise AssertionError("cleanup is outside this integration slice")
+
+    async def discard(self, handle: ContainerHandle) -> None:
+        raise AssertionError("successful provisioning must not discard its container")
 
 
 async def test_claim_provision_execute_and_persist_events_against_postgres(
@@ -163,8 +169,10 @@ async def test_claim_provision_execute_and_persist_events_against_postgres(
                 memory_limit_mb=512,
             ),
         )
-        workspace = await provisioner.provision(run_id)
+        provisioned = await provisioner.provision(run_id)
+        workspace = provisioned.workspace
         assert workspace.status.value == "ready"
+        assert provisioned.handle.resource_id == workspace.container_id
 
         await executor.execute(run_id)
 

@@ -120,7 +120,10 @@ class _FakeRuntime:
 
     async def start(self, spec: ContainerSpec) -> ContainerHandle:
         del spec
-        handle = ContainerHandle(id=f"fake:{self._next_id}")
+        handle = ContainerHandle(
+            id=f"fake:{self._next_id}",
+            resource_id=f"fake-resource:{self._next_id}",
+        )
         self._next_id += 1
         execution = _FakeExecution(plan=self._plan)
         if not self._plan.waits_for_stop:
@@ -150,6 +153,12 @@ class _FakeRuntime:
             return
         execution.result = RuntimeResult.stopped()
         execution.completed.set()
+
+    async def discard(self, handle: ContainerHandle) -> None:
+        if handle.id not in self._executions:
+            return
+        await self.stop(handle)
+        self._executions.pop(handle.id)
 
 
 class TestFakeRuntime(RuntimeContract):

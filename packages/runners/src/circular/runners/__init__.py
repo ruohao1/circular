@@ -3,7 +3,9 @@ from circular.runners.paths import ExecutionDirectories, InvalidExecutionPath, R
 from circular.runners.provisioning import (
     ContainerSpecFactory,
     FakeWorkloadSpecFactory,
+    ProvisionedWorkspace,
     WorkspaceProvisioner,
+    WorkspaceProvisioningCompensationError,
     WorkspaceProvisioningContext,
     WorkspaceProvisioningPersistence,
 )
@@ -23,10 +25,12 @@ __all__ = [
     "InvalidRunProvisioningStatus",
     "InvalidRunExecutionState",
     "MissingRunRepository",
+    "ProvisionedWorkspace",
     "RunExecutor",
     "RunPaths",
     "SqlWorkspaceProvisioningPersistence",
     "WorkspaceProvisioner",
+    "WorkspaceProvisioningCompensationError",
     "WorkspaceProvisioningContext",
     "WorkspaceProvisioningPersistence",
     "WorkspaceProvisioningConflict",

@@ -56,12 +56,14 @@ async def worker_loop(settings: Settings, stop: asyncio.Event | None = None) -> 
                     await asyncio.wait_for(stop.wait(), timeout=settings.poll_interval_seconds)
                 continue
             try:
-                workspace = await provisioner.provision(run_id)
+                provisioned = await provisioner.provision(run_id)
+                workspace = provisioned.workspace
                 logger.debug(
                     "workspace ready",
                     extra={
                         "run_id": str(run_id),
                         "container_id": workspace.container_id,
+                        "runtime_handle_id": provisioned.handle.id,
                     },
                 )
                 # Temporary pre-ISQ-168 compatibility path; container output is not ingested yet.

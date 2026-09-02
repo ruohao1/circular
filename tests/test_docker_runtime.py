@@ -7,6 +7,7 @@ from uuid import UUID
 
 import pytest
 from circular.runtimes import (
+    ContainerDiscardError,
     ContainerHandle,
     ContainerNameConflictError,
     ContainerOutputAlreadyConsumedError,
@@ -433,6 +434,8 @@ async def test_start_streams_ordered_output_and_returns_one_stable_result(
     output = [chunk async for chunk in runtime.output(handle)]
 
     assert repeated_handle == handle
+    assert handle.id == "circular-run-00000000000040008000000000000171"
+    assert handle.resource_id == CONTAINER_ID
     assert output == [
         RuntimeOutput(OutputStream.STDOUT, b"first\n"),
         RuntimeOutput(OutputStream.STDERR, b"warning\n"),
@@ -832,6 +835,68 @@ async def test_stop_is_idempotent_and_returns_a_stable_stopped_result(
     calls = [json.loads(line) for line in (state / "calls.jsonl").read_text().splitlines()]
     assert [call["argv"][0] for call in calls].count("stop") == 1
     assert next(call["argv"] for call in calls if call["argv"][0] == "stop")[-1] == (CONTAINER_ID)
+
+
+async def test_discard_permanently_removes_only_the_immutable_resource(
+    tmp_path: Path,
+) -> None:
+    root, worktree = _worktree(tmp_path)
+    executable, state = _fake_docker(tmp_path, waits_for_stop=True)
+    runtime = DockerRuntime(root, docker_executable=str(executable))
+    handle = await runtime.start(_spec(worktree))
+    await _wait_for_path(state / "start-attached")
+
+    await asyncio.gather(runtime.discard(handle), runtime.discard(handle))
+    await runtime.discard(handle)
+
+    assert not (state / "created").exists()
+    with pytest.raises(UnknownContainerHandleError):
+        await runtime.wait(handle)
+    calls = [json.loads(line) for line in (state / "calls.jsonl").read_text().splitlines()]
+    removals = [call["argv"] for call in calls if call["argv"][0] == "rm"]
+    assert removals == [["rm", "--force", "--volumes", CONTAINER_ID]]
+
+
+async def test_cancelling_discard_finishes_resource_removal_before_propagating(
+    tmp_path: Path,
+) -> None:
+    root, worktree = _worktree(tmp_path)
+    executable, state = _fake_docker(
+        tmp_path,
+        waits_for_stop=True,
+        remove_delay=0.1,
+    )
+    runtime = DockerRuntime(root, docker_executable=str(executable))
+    handle = await runtime.start(_spec(worktree))
+    await _wait_for_path(state / "start-attached")
+    discard = asyncio.create_task(runtime.discard(handle))
+    await _wait_for_path(state / "rm-started")
+
+    discard.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await discard
+
+    assert not (state / "created").exists()
+    calls = [json.loads(line) for line in (state / "calls.jsonl").read_text().splitlines()]
+    removals = [call["argv"] for call in calls if call["argv"][0] == "rm"]
+    assert removals == [["rm", "--force", "--volumes", CONTAINER_ID]]
+
+
+async def test_discard_surfaces_a_typed_removal_failure(tmp_path: Path) -> None:
+    root, worktree = _worktree(tmp_path)
+    executable, state = _fake_docker(
+        tmp_path,
+        waits_for_stop=True,
+        remove_fails=True,
+    )
+    runtime = DockerRuntime(root, docker_executable=str(executable))
+    handle = await runtime.start(_spec(worktree))
+    await _wait_for_path(state / "start-attached")
+
+    with pytest.raises(ContainerDiscardError, match="discard"):
+        await runtime.discard(handle)
+
+    assert (state / "created").exists()
 
 
 async def test_cancelling_start_finishes_create_and_removes_only_its_new_container(
@@ -1256,6 +1321,10 @@ async def test_output_has_one_consumer_and_unknown_handles_are_rejected(
 
     with pytest.raises(ContainerOutputAlreadyConsumedError):
         _ = [chunk async for chunk in runtime.output(handle)]
-    unknown = ContainerHandle(id="circular-run-unowned")
+    unknown = ContainerHandle(id="circular-run-unowned", resource_id="b" * 64)
     with pytest.raises(UnknownContainerHandleError):
         await runtime.wait(unknown)
+
+    forged = ContainerHandle(id=handle.id, resource_id="b" * 64)
+    with pytest.raises(UnknownContainerHandleError):
+        await runtime.wait(forged)

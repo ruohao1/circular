@@ -11,7 +11,28 @@ from uuid import UUID
 from circular.domain import Workspace
 from circular.git import RepositoryCache, WorktreeManager
 from circular.runners.paths import ExecutionDirectories
-from circular.runtimes import ContainerSpec, Runtime
+from circular.runtimes import ContainerHandle, ContainerSpec, Runtime
+
+
+@dataclass(frozen=True, slots=True)
+class ProvisionedWorkspace:
+    """Durable Workspace state paired with its original live runtime handle."""
+
+    workspace: Workspace
+    handle: ContainerHandle
+
+
+class WorkspaceProvisioningCompensationError(RuntimeError):
+    """An uncommitted runtime allocation could not be safely released."""
+
+    def __init__(self, original_error: BaseException) -> None:
+        super().__init__("uncommitted runtime allocation could not be safely discarded")
+        self.original_error = original_error
+
+
+@dataclass(frozen=True, slots=True)
+class _ContainerRecordOutcome:
+    error: Exception | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -141,8 +162,10 @@ class WorkspaceProvisioner:
         self._directories = directories
         self._spec_factory = spec_factory
 
-    async def provision(self, run_id: UUID) -> Workspace:
-        container_id: str | None = None
+    async def provision(self, run_id: UUID) -> ProvisionedWorkspace:
+        handle: ContainerHandle | None = None
+        resource_id: str | None = None
+        identity_recorded = False
         try:
             context = await self._persistence.load_context(run_id)
             if context.run_id != run_id:
@@ -177,40 +200,129 @@ class WorkspaceProvisioner:
                 raise ValueError("worktree manager returned an unexpected Run branch")
 
             spec = self._spec_factory.create(context, paths.docker_host_worktree)
-            handle = await self._runtime.start(spec)
-            if not isinstance(handle.id, str) or not handle.id or len(handle.id) > 200:
+            started = await self._runtime.start(spec)
+            if not isinstance(started, ContainerHandle):
                 raise ValueError("runtime returned an invalid container identity")
-            container_id = handle.id
+            handle = started
+            if (
+                isinstance(handle.resource_id, str)
+                and handle.resource_id
+                and len(handle.resource_id) <= 200
+            ):
+                resource_id = handle.resource_id
+            if (
+                not isinstance(handle.id, str)
+                or not handle.id
+                or len(handle.id) > 200
+                or resource_id is None
+            ):
+                raise ValueError("runtime returned an invalid container identity")
             recording = asyncio.create_task(
-                self._persistence.record_container(context.workspace_id, container_id)
+                self._record_container(context.workspace_id, resource_id)
             )
             try:
-                await asyncio.shield(recording)
+                outcome = await asyncio.shield(recording)
             except asyncio.CancelledError as cancelled:
-                try:
-                    await _await_task_despite_cancellation(recording)
-                except Exception as persistence_error:
+                outcome = await _await_task_despite_cancellation(recording)
+                if outcome.error is not None:
+                    persistence_error = outcome.error
                     cancelled.add_note(
                         "failed to persist started container during cancellation "
                         f"({type(persistence_error).__name__})"
                     )
+                    failure_persisted = await self._try_mark_failed(
+                        run_id,
+                        persistence_error,
+                        resource_id=resource_id,
+                        note_target=cancelled,
+                        note_context="during cancellation",
+                    )
+                    if not failure_persisted:
+                        await self._discard_uncommitted(
+                            handle,
+                            note_target=cancelled,
+                            note_context="during cancellation",
+                        )
                 raise
-            return await self._persistence.mark_ready_and_running(
+            if outcome.error is not None:
+                raise outcome.error
+            identity_recorded = True
+            workspace = await self._persistence.mark_ready_and_running(
                 context.workspace_id,
                 context.backend,
             )
-        except Exception as error:
-            try:
-                await self._persistence.mark_failed(
-                    run_id,
-                    error,
-                    container_id=container_id,
-                )
-            except Exception as persistence_error:
-                error.add_note(
-                    f"failed to persist provisioning failure ({type(persistence_error).__name__})"
-                )
+            return ProvisionedWorkspace(workspace=workspace, handle=handle)
+        except WorkspaceProvisioningCompensationError:
             raise
+        except Exception as error:
+            failure_persisted = await self._try_mark_failed(
+                run_id,
+                error,
+                resource_id=resource_id,
+                note_target=error,
+            )
+            identity_is_durable = identity_recorded or (
+                resource_id is not None and failure_persisted
+            )
+            if handle is not None and not identity_is_durable:
+                await self._discard_uncommitted(handle, note_target=error)
+            raise
+
+    async def _record_container(
+        self,
+        workspace_id: UUID,
+        resource_id: str,
+    ) -> _ContainerRecordOutcome:
+        try:
+            await self._persistence.record_container(workspace_id, resource_id)
+        except Exception as error:
+            return _ContainerRecordOutcome(error=error)
+        return _ContainerRecordOutcome()
+
+    async def _try_mark_failed(
+        self,
+        run_id: UUID,
+        error: Exception,
+        *,
+        resource_id: str | None,
+        note_target: BaseException,
+        note_context: str = "",
+    ) -> bool:
+        persistence = asyncio.create_task(
+            self._persistence.mark_failed(
+                run_id,
+                error,
+                container_id=resource_id,
+            )
+        )
+        try:
+            await _await_task_despite_cancellation(persistence)
+        except (asyncio.CancelledError, Exception) as persistence_error:
+            suffix = f" {note_context}" if note_context else ""
+            note_target.add_note(
+                "failed to persist provisioning failure"
+                f"{suffix} ({type(persistence_error).__name__})"
+            )
+            return False
+        return True
+
+    async def _discard_uncommitted(
+        self,
+        handle: ContainerHandle,
+        *,
+        note_target: BaseException,
+        note_context: str = "",
+    ) -> None:
+        discard = asyncio.create_task(self._runtime.discard(handle))
+        try:
+            await _await_task_despite_cancellation(discard)
+        except (asyncio.CancelledError, Exception) as discard_error:
+            suffix = f" {note_context}" if note_context else ""
+            note_target.add_note(
+                "failed to discard uncommitted runtime allocation"
+                f"{suffix} ({type(discard_error).__name__})"
+            )
+            raise WorkspaceProvisioningCompensationError(note_target) from discard_error
 
 
 async def _await_task_despite_cancellation[T](task: asyncio.Task[T]) -> T:

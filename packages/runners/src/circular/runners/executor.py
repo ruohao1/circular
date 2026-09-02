@@ -27,7 +27,15 @@ class RunExecutor:
         self._backends = backends
 
     async def execute(self, run_id: UUID) -> None:
-        context, backend_name = await self._load_context(run_id)
+        try:
+            context, backend_name = await self._load_context(run_id)
+        except InvalidRunExecutionState:
+            # A rejected caller precondition is not an execution failure and must
+            # not mutate the Run lifecycle.
+            raise
+        except Exception as error:
+            await self._fail_preserving(run_id, error)
+            raise
         try:
             backend = self._backends[backend_name]
             backend_session = await backend.start(context)
@@ -48,8 +56,16 @@ class RunExecutor:
                     ),
                 )
         except Exception as error:
-            await self._fail(run_id, error)
+            await self._fail_preserving(run_id, error)
             raise
+
+    async def _fail_preserving(self, run_id: UUID, error: Exception) -> None:
+        try:
+            await self._fail(run_id, error)
+        except Exception as persistence_error:
+            error.add_note(
+                f"failed to persist Run execution failure ({type(persistence_error).__name__})"
+            )
 
     async def _load_context(self, run_id: UUID) -> tuple[BackendContext, str]:
         async with self._sessions() as session:

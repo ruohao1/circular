@@ -80,6 +80,10 @@ class ContainerStopError(DockerRuntimeError):
     """Docker could not stop an owned Run container."""
 
 
+class ContainerDiscardError(DockerRuntimeError):
+    """Docker could not permanently release an uncommitted Run container."""
+
+
 class UnknownContainerHandleError(DockerRuntimeError, LookupError):
     """A handle was not issued by this Docker runtime adapter instance."""
 
@@ -157,6 +161,8 @@ class _Execution:
     stop_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
     stop_decision: asyncio.Future[bool] | None = None
     stop_task: asyncio.Task[None] | None = None
+    discard_task: asyncio.Task[None] | None = None
+    discard_failure: DockerRuntimeError | None = None
     terminal_observed: bool = False
 
 
@@ -196,6 +202,7 @@ class DockerRuntime:
         self._operation_timeout_seconds = operation_timeout
         self._start_locks: dict[str, asyncio.Lock] = {}
         self._executions: dict[str, _Execution] = {}
+        self._discarded_handles: set[ContainerHandle] = set()
         self._unresolved_creates: dict[str, _UnresolvedCreate] = {}
 
     def resolve(self, spec: ContainerSpec) -> DockerContainerPlan:
@@ -213,7 +220,12 @@ class DockerRuntime:
         )
         async with start_lock:
             existing = self._executions.get(launch.plan.container_name)
+            if existing is not None and existing.discard_task is not None:
+                await asyncio.shield(existing.discard_task)
+                existing = self._executions.get(launch.plan.container_name)
             if existing is not None:
+                if existing.discard_failure is not None:
+                    raise existing.discard_failure
                 if existing.launch != launch:
                     raise ContainerNameConflictError(
                         "Run was already started with a different container specification"
@@ -261,7 +273,10 @@ class DockerRuntime:
                 )
                 loop = asyncio.get_running_loop()
                 execution = _Execution(
-                    handle=ContainerHandle(id=launch.plan.container_name),
+                    handle=ContainerHandle(
+                        id=launch.plan.container_name,
+                        resource_id=created_container_id,
+                    ),
                     container_id=created_container_id,
                     launch=launch,
                     attach_process=attach_process,
@@ -369,6 +384,53 @@ class DockerRuntime:
                 await _await_task_despite_cancellation(task)
             finally:
                 raise cancelled
+
+    async def discard(self, handle: ContainerHandle) -> None:
+        """Permanently release an allocation that was not durably handed off."""
+
+        if not isinstance(handle, ContainerHandle):
+            raise UnknownContainerHandleError("container handle is invalid")
+        if handle in self._discarded_handles:
+            return
+        execution = self._execution(handle)
+        task = execution.discard_task
+        if task is None:
+            task = asyncio.create_task(self._discard_execution(execution))
+            execution.discard_task = task
+        try:
+            await asyncio.shield(task)
+        except asyncio.CancelledError as cancelled:
+            try:
+                await _await_task_despite_cancellation(task)
+            except DockerRuntimeError as error:
+                raise error from cancelled
+            raise
+
+    async def _discard_execution(self, execution: _Execution) -> None:
+        stop_failure: DockerRuntimeError | None = None
+        try:
+            try:
+                await self.stop(execution.handle)
+            except DockerRuntimeError as error:
+                # Forced removal is the final containment operation and may still
+                # succeed when graceful observation or termination did not.
+                stop_failure = error
+            result, _ = await self._run_cli(("rm", "--force", "--volumes", execution.container_id))
+            if result != 0:
+                raise ContainerDiscardError(
+                    "Docker could not discard the uncommitted Run container"
+                ) from stop_failure
+        except DockerRuntimeError as error:
+            execution.discard_failure = error
+            execution.discard_task = None
+            raise
+        except BaseException:
+            execution.discard_task = None
+            raise
+        current = self._executions.get(execution.handle.id)
+        if current is execution:
+            self._executions.pop(execution.handle.id)
+        self._discarded_handles.add(execution.handle)
 
     async def _stop_execution(self, execution: _Execution) -> None:
         async with execution.stop_lock:
@@ -953,11 +1015,16 @@ class DockerRuntime:
         if not isinstance(handle, ContainerHandle):
             raise UnknownContainerHandleError("container handle is invalid")
         try:
-            return self._executions[handle.id]
+            execution = self._executions[handle.id]
         except KeyError as error:
             raise UnknownContainerHandleError(
                 "container handle is not owned by this adapter instance"
             ) from error
+        if execution.handle != handle:
+            raise UnknownContainerHandleError(
+                "container handle resource identity does not match this execution"
+            )
+        return execution
 
 
 def _validated_root(root: Path) -> Path:

@@ -76,6 +76,13 @@ handle until inspection proves the immutable container is running or already exi
 the attached client finishes, inspection of that same immutable identity supplies the
 authoritative exit status; a Docker `wait` process is not involved.
 
+The returned `ContainerHandle` deliberately has two identities. Its adapter-local `id`
+routes live `output`, `wait`, and `stop` calls, while `resource_id` is the verified,
+immutable full Docker ID that workspace provisioning persists for later ownership checks
+and cleanup. Live consumers retain the original complete handle; they do not reconstruct
+one from the persisted resource ID. Every live operation compares both fields, so a
+same-name replacement or a forged resource identity is rejected.
+
 Chunk boundaries are transport details and may not align with backend event records. Output
 is a one-consumer stream; it remains available after fast completion, and `wait()` never
 depends on the caller consuming it. The MVP queue is intentionally unbounded in memory so
@@ -99,12 +106,21 @@ failure retains the original failure as its cause. Rejection cleanup also remove
 volumes created from image declarations. Every post-create policy inspect, start, stop, kill,
 and cleanup operation targets the immutable ID.
 
+`discard()` is a narrower operation than general Workspace cleanup. It exists only to
+compensate a container that was created but could not be durably handed off: it finishes
+termination and permanently removes that exact immutable resource, including anonymous
+volumes. The operation is cancellation-safe and shared by concurrent callers. After it
+succeeds, live operations reject the released handle, repeated discard is a tombstoned
+no-op, and a later `start()` may create a fresh allocation rather than reuse the removed
+execution. Failure is typed and prominent because the caller then has neither a durable
+identity nor proof of release.
+
 Calling `start()` repeatedly with the exact same resolved launch is idempotent only within
 one adapter instance. A changed stdin or environment value is an in-process conflict even
 though those confidential values are excluded from labels. Any deterministic name already
 present in Docker is a typed conflict and is never adopted, stopped, or removed. Crash
-recovery, reconciliation, and cleanup of retained containers belong to the later workspace
-cleanup slice.
+recovery, reconciliation, and cleanup of durably recorded containers belong to the later
+workspace cleanup slice; `discard()` does not implement that lifecycle.
 
 Startup reservations are per deterministic Run name. Concurrent calls for one Run remain
 serialized for idempotence, while unrelated Runs can create and verify containers in

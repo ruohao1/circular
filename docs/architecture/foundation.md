@@ -40,7 +40,12 @@ directory, Repository cache, Artifact root, or control-plane credentials. A clai
 now creates a pending Workspace, refreshes its Repository cache, provisions its linked
 worktree, and starts its container before one transaction makes the Workspace `ready`
 and the Run `running`. Each durable resource identity is recorded before the next
-lifecycle transition so later cleanup can reconcile partial allocations.
+lifecycle transition so later cleanup can reconcile partial allocations. A runtime handle
+keeps its adapter-local live identity separate from its immutable persisted resource ID;
+the provisioner returns both the ready Workspace and the original live handle. If the
+post-start identity write fails, provisioning either records that immutable ID in the
+failed Workspace transaction or permanently discards the just-created allocation through
+the runtime compensation boundary.
 
 Container output ingestion remains the next integration slice. Until that is composed,
 the worker retains the in-process fake backend after provisioning as a temporary
@@ -61,4 +66,8 @@ contracts, billing, and distributed runners are not implemented. The fake worklo
 now exercises provisioning, but its output is not yet connected to the execution event
 flow. These have explicit seams or storage fields where needed, but no speculative framework.
 Cross-process container recovery and retained-container cleanup also remain worker
-lifecycle work.
+lifecycle work. Active-cancellation coordination, including the executor preflight
+read-then-act race, remains in ISQ-175. Compose Docker CLI/socket access, runner-image
+composition, and writable worktree ownership for the container UID remain in ISQ-176.
+The fake-workload spec factory stays injected behind the generic spec-factory port; a
+separate production factory can replace it when real backend execution is introduced.

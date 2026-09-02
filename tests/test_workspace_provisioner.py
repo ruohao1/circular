@@ -11,7 +11,9 @@ from circular.git import ProvisionedWorktree
 from circular.runners import (
     ExecutionDirectories,
     FakeWorkloadSpecFactory,
+    ProvisionedWorkspace,
     WorkspaceProvisioner,
+    WorkspaceProvisioningCompensationError,
     WorkspaceProvisioningContext,
 )
 from circular.runtimes import ContainerHandle, ContainerSpec
@@ -138,8 +140,13 @@ class RecordingRuntime:
     def __init__(self, calls: list[tuple[Any, ...]]) -> None:
         self.calls = calls
         self.spec: ContainerSpec | None = None
-        self.handle = ContainerHandle("container-169")
+        self.handle = ContainerHandle(
+            id="live-handle-169",
+            resource_id="resource-169",
+        )
         self.failure: Exception | None = None
+        self.discarded: list[ContainerHandle] = []
+        self.discard_failure: Exception | None = None
 
     async def start(self, spec: ContainerSpec) -> ContainerHandle:
         self.calls.append(("runtime.start", spec))
@@ -156,6 +163,11 @@ class RecordingRuntime:
 
     async def stop(self, handle: ContainerHandle) -> None:
         raise AssertionError("provisioning failures do not implement cleanup")
+
+    async def discard(self, handle: ContainerHandle) -> None:
+        self.discarded.append(handle)
+        if self.discard_failure is not None:
+            raise self.discard_failure
 
 
 def _system(tmp_path: Path):
@@ -202,16 +214,19 @@ async def test_claimed_run_is_running_only_after_its_workspace_is_ready(
         directories,
     ) = _system(tmp_path)
 
-    workspace = await provisioner.provision(RUN_ID)
+    provisioned = await provisioner.provision(RUN_ID)
+    assert isinstance(provisioned, ProvisionedWorkspace)
+    workspace = provisioned.workspace
 
     worker_worktree = directories.run_paths(RUN_ID).worktree
     assert workspace == Workspace(
         id=WORKSPACE_ID,
         run_id=RUN_ID,
         worktree_path=str(worker_worktree),
-        container_id="container-169",
+        container_id="resource-169",
         status=WorkspaceStatus.READY,
     )
+    assert provisioned.handle is runtime.handle
     assert persistence.run_status is RunStatus.RUNNING
     assert [call[0] for call in persistence.calls] == [
         "load_context",
@@ -304,8 +319,8 @@ async def test_container_identity_survives_a_persistence_failure_after_start(
     assert exc_info.value is failure
     assert persistence.workspace is not None
     assert persistence.workspace.status is WorkspaceStatus.FAILED
-    assert persistence.workspace.container_id == "container-169"
-    assert persistence.calls[-1] == ("mark_failed", RUN_ID, failure, "container-169")
+    assert persistence.workspace.container_id == "resource-169"
+    assert persistence.calls[-1] == ("mark_failed", RUN_ID, failure, "resource-169")
 
 
 async def test_workspace_creation_failure_fails_run_before_external_resources(
@@ -351,7 +366,7 @@ async def test_final_state_or_event_failure_retains_container_and_fails_both_lif
     assert persistence.run_status is RunStatus.FAILED
     assert persistence.workspace is not None
     assert persistence.workspace.status is WorkspaceStatus.FAILED
-    assert persistence.workspace.container_id == "container-169"
+    assert persistence.workspace.container_id == "resource-169"
 
 
 async def test_failure_state_error_does_not_mask_the_provisioning_error(tmp_path: Path) -> None:
@@ -375,6 +390,37 @@ async def test_failure_state_error_does_not_mask_the_provisioning_error(tmp_path
 
     assert exc_info.value is primary
     assert getattr(primary, "__notes__", ()) == [
+        "failed to persist provisioning failure (RuntimeError)"
+    ]
+
+
+async def test_identity_write_failure_discards_when_failure_state_is_unavailable(
+    tmp_path: Path,
+) -> None:
+    provisioner, persistence, _cache, _worktrees, runtime, _calls, _directories = _system(tmp_path)
+    identity_failure = RuntimeError("identity write failed")
+    failure_state_error = RuntimeError("failure state unavailable")
+
+    async def failing_record(workspace_id: UUID, resource_id: str) -> Workspace:
+        raise identity_failure
+
+    async def failing_mark_failed(
+        run_id: UUID,
+        error: Exception,
+        *,
+        container_id: str | None,
+    ) -> None:
+        raise failure_state_error
+
+    persistence.record_container = failing_record  # type: ignore[method-assign]
+    persistence.mark_failed = failing_mark_failed  # type: ignore[method-assign]
+
+    with pytest.raises(RuntimeError, match="identity write failed") as exc_info:
+        await provisioner.provision(RUN_ID)
+
+    assert exc_info.value is identity_failure
+    assert runtime.discarded == [runtime.handle]
+    assert getattr(identity_failure, "__notes__", ()) == [
         "failed to persist provisioning failure (RuntimeError)"
     ]
 
@@ -417,8 +463,136 @@ async def test_cancellation_after_container_start_finishes_identity_persistence(
     assert persistence.run_status is RunStatus.PROVISIONING
     assert persistence.workspace is not None
     assert persistence.workspace.status is WorkspaceStatus.PENDING
-    assert persistence.workspace.container_id == "container-169"
+    assert persistence.workspace.container_id == "resource-169"
     assert all(call[0] != "mark_failed" for call in persistence.calls)
+
+
+async def test_cancellation_during_failed_identity_write_records_failure_state(
+    tmp_path: Path,
+) -> None:
+    provisioner, persistence, _cache, _worktrees, runtime, _calls, _directories = _system(tmp_path)
+    record_started = asyncio.Event()
+    allow_record = asyncio.Event()
+    identity_failure = RuntimeError("identity write failed")
+
+    async def failing_record(workspace_id: UUID, resource_id: str) -> Workspace:
+        record_started.set()
+        await allow_record.wait()
+        raise identity_failure
+
+    persistence.record_container = failing_record  # type: ignore[method-assign]
+    provisioning = asyncio.create_task(provisioner.provision(RUN_ID))
+    await record_started.wait()
+
+    provisioning.cancel()
+    allow_record.set()
+    with pytest.raises(asyncio.CancelledError):
+        await provisioning
+
+    assert persistence.run_status is RunStatus.FAILED
+    assert persistence.workspace is not None
+    assert persistence.workspace.status is WorkspaceStatus.FAILED
+    assert persistence.workspace.container_id == "resource-169"
+    assert persistence.calls[-1] == (
+        "mark_failed",
+        RUN_ID,
+        identity_failure,
+        "resource-169",
+    )
+    assert runtime.discarded == []
+
+
+async def test_cancellation_discards_allocation_when_identity_cannot_be_recorded(
+    tmp_path: Path,
+) -> None:
+    provisioner, persistence, _cache, _worktrees, runtime, _calls, _directories = _system(tmp_path)
+    record_started = asyncio.Event()
+    allow_record = asyncio.Event()
+    identity_failure = RuntimeError("identity write failed")
+    failure_state_error = RuntimeError("failure state unavailable")
+    failure_attempts: list[tuple[UUID, Exception, str | None]] = []
+
+    async def failing_record(workspace_id: UUID, resource_id: str) -> Workspace:
+        record_started.set()
+        await allow_record.wait()
+        raise identity_failure
+
+    async def failing_mark_failed(
+        run_id: UUID,
+        error: Exception,
+        *,
+        container_id: str | None,
+    ) -> None:
+        failure_attempts.append((run_id, error, container_id))
+        raise failure_state_error
+
+    persistence.record_container = failing_record  # type: ignore[method-assign]
+    persistence.mark_failed = failing_mark_failed  # type: ignore[method-assign]
+    provisioning = asyncio.create_task(provisioner.provision(RUN_ID))
+    await record_started.wait()
+
+    provisioning.cancel()
+    allow_record.set()
+    with pytest.raises(asyncio.CancelledError) as exc_info:
+        await provisioning
+
+    assert failure_attempts == [(RUN_ID, identity_failure, "resource-169")]
+    assert runtime.discarded == [runtime.handle]
+    assert persistence.run_status is RunStatus.PROVISIONING
+    assert persistence.workspace is not None
+    assert persistence.workspace.status is WorkspaceStatus.PENDING
+    assert persistence.workspace.container_id is None
+    assert getattr(exc_info.value, "__notes__", ()) == [
+        "failed to persist started container during cancellation (RuntimeError)",
+        "failed to persist provisioning failure during cancellation (RuntimeError)",
+    ]
+
+
+async def test_failed_cancellation_compensation_surfaces_the_safety_failure(
+    tmp_path: Path,
+) -> None:
+    provisioner, persistence, _cache, _worktrees, runtime, _calls, _directories = _system(tmp_path)
+    record_started = asyncio.Event()
+    allow_record = asyncio.Event()
+    identity_failure = RuntimeError("identity write failed")
+    failure_state_error = RuntimeError("failure state unavailable")
+    discard_error = RuntimeError("allocation could not be discarded")
+
+    async def failing_record(workspace_id: UUID, resource_id: str) -> Workspace:
+        record_started.set()
+        await allow_record.wait()
+        raise identity_failure
+
+    async def failing_mark_failed(
+        run_id: UUID,
+        error: Exception,
+        *,
+        container_id: str | None,
+    ) -> None:
+        raise failure_state_error
+
+    persistence.record_container = failing_record  # type: ignore[method-assign]
+    persistence.mark_failed = failing_mark_failed  # type: ignore[method-assign]
+    runtime.discard_failure = discard_error
+    provisioning = asyncio.create_task(provisioner.provision(RUN_ID))
+    await record_started.wait()
+
+    provisioning.cancel()
+    allow_record.set()
+    with pytest.raises(
+        WorkspaceProvisioningCompensationError,
+        match="could not be safely discarded",
+    ) as exc_info:
+        await provisioning
+
+    assert exc_info.value.__cause__ is discard_error
+    assert isinstance(exc_info.value.original_error, asyncio.CancelledError)
+    assert getattr(exc_info.value.original_error, "__notes__", ()) == [
+        "failed to persist started container during cancellation (RuntimeError)",
+        "failed to persist provisioning failure during cancellation (RuntimeError)",
+        "failed to discard uncommitted runtime allocation during cancellation (RuntimeError)",
+    ]
+    assert runtime.discarded == [runtime.handle]
 
 
 @pytest.mark.parametrize(
@@ -430,7 +604,8 @@ async def test_cancellation_after_container_start_finishes_identity_persistence(
         ("worktree_repository", "worktree references a different Repository checkout"),
         ("worktree_path", "worktree manager returned a path not owned by the Run"),
         ("worktree_branch", "worktree manager returned an unexpected Run branch"),
-        ("container", "runtime returned an invalid container identity"),
+        ("container_live", "runtime returned an invalid container identity"),
+        ("container_resource", "runtime returned an invalid container identity"),
     ],
 )
 async def test_untrusted_port_results_fail_closed_before_the_next_handoff(
@@ -456,8 +631,10 @@ async def test_untrusted_port_results_fail_closed_before_the_next_handoff(
         worktrees.worktree = replace(worktrees.worktree, path=tmp_path / "other-worktree")
     elif boundary == "worktree_branch":
         worktrees.worktree = replace(worktrees.worktree, branch="unexpected/branch")
-    elif boundary == "container":
-        runtime.handle = ContainerHandle("")
+    elif boundary == "container_live":
+        runtime.handle = ContainerHandle(id="", resource_id="resource-169")
+    elif boundary == "container_resource":
+        runtime.handle = ContainerHandle(id="live-handle-169", resource_id="")
 
     with pytest.raises(ValueError, match=message):
         await provisioner.provision(RUN_ID)
@@ -477,3 +654,5 @@ async def test_untrusted_port_results_fail_closed_before_the_next_handoff(
             "runtime.start",
         ]
     assert all(call[0] != "record_container" for call in persistence.calls)
+    if boundary == "container_resource":
+        assert runtime.discarded == [runtime.handle]

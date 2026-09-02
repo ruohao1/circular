@@ -1,4 +1,5 @@
 from circular.runtimes.docker import (
+    ContainerDiscardError,
     ContainerNameConflictError,
     ContainerOutputAlreadyConsumedError,
     ContainerStartError,
@@ -25,6 +26,7 @@ __all__ = [
     "CompletionReason",
     "ContainerHandle",
     "ContainerSpec",
+    "ContainerDiscardError",
     "ContainerNameConflictError",
     "ContainerOutputAlreadyConsumedError",
     "ContainerStartError",

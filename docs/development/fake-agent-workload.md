@@ -62,8 +62,8 @@ identify field names but never echo field values. An injected failure writes one
 `injected_failure` record to standard error and exits `20`; its record includes the Run ID.
 Success leaves standard error empty and exits `0`.
 
-The later container adapter will translate these records into `EventEnvelope` values and
-preserve the raw lines. That integration is intentionally deferred.
+The event-ingestion slice will translate these records into `EventEnvelope` values and
+preserve the raw lines. That integration is intentionally separate from provisioning.
 
 ## Build and run
 

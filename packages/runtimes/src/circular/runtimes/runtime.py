@@ -27,9 +27,16 @@ class ContainerSpec:
 
 @dataclass(frozen=True, slots=True)
 class ContainerHandle:
-    """Opaque reference to an execution owned by a runtime adapter."""
+    """Adapter-issued reference to one live execution allocation.
+
+    ``id`` is the adapter-local routing identity used for live operations.
+    ``resource_id`` is the immutable backend identity safe to persist for later
+    ownership checks and cleanup. Callers must retain the complete handle for
+    live operations rather than reconstructing one from durable state.
+    """
 
     id: str
+    resource_id: str
 
 
 class OutputStream(StrEnum):
@@ -82,7 +89,10 @@ class Runtime(Protocol):
     adapters may attempt a bounded graceful stop before forcing termination. Once
     it returns, ``output`` reaches EOF and ``wait`` returns a stable result. It is
     safe to call repeatedly or after natural completion, whose result wins a race
-    with cancellation.
+    with cancellation. ``discard`` is the narrow compensation boundary for an
+    allocation that could not be durably handed off: it permanently releases that
+    exact resource before returning and is safe to call repeatedly. General
+    Workspace cleanup remains a separate responsibility.
     """
 
     async def start(self, spec: ContainerSpec) -> ContainerHandle: ...
@@ -92,3 +102,5 @@ class Runtime(Protocol):
     async def wait(self, handle: ContainerHandle) -> RuntimeResult: ...
 
     async def stop(self, handle: ContainerHandle) -> None: ...
+
+    async def discard(self, handle: ContainerHandle) -> None: ...
