@@ -3,12 +3,27 @@ from uuid import UUID
 from circular.agents import AgentBackend, BackendContext
 from circular.domain import RunStatus, WorkspaceStatus
 from circular.events import EventEnvelope, EventType
-from circular.runners.event_ingestion import BackendReportedError, RuntimeEventIngestor
+from circular.runners.event_ingestion import (
+    BackendProtocolError,
+    BackendReportedError,
+    RuntimeEventIngestor,
+)
 from circular.runtimes import ContainerHandle, Runtime
 from circular.storage.models import AgentRecord, RunRecord, TaskRecord, WorkspaceRecord
 from circular.storage.repositories import RunStore
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+
+_MAX_PERSISTED_ERROR_LENGTH = 4000
+
+
+def _safe_error_projection(error: Exception) -> str:
+    try:
+        message = str(error)
+    except Exception:
+        message = type(error).__name__
+    message = message.replace("\x00", "\N{REPLACEMENT CHARACTER}")
+    return message.encode("utf-8", errors="replace").decode("utf-8")[:_MAX_PERSISTED_ERROR_LENGTH]
 
 
 class InvalidRunExecutionState(ValueError):
@@ -107,9 +122,13 @@ class RunExecutor:
         try:
             await self._fail(run_id, error)
         except Exception as persistence_error:
-            error.add_note(
-                f"failed to persist Run execution failure ({type(persistence_error).__name__})"
-            )
+            try:
+                error.add_note(
+                    f"failed to persist Run execution failure "
+                    f"({type(persistence_error).__name__})"
+                )
+            except Exception:
+                return
 
     async def _load_context(self, run_id: UUID) -> tuple[BackendContext, str]:
         async with self._sessions() as session:
@@ -154,14 +173,24 @@ class RunExecutor:
                 RunStatus.CANCELLED,
             }:
                 return
-            await self._store.transition(session, run_id, RunStatus.FAILED, error=str(error)[:4000])
+            error_projection = _safe_error_projection(error)
+            await self._store.transition(
+                session,
+                run_id,
+                RunStatus.FAILED,
+                error=error_projection,
+            )
             await self._store.append_event(
                 session,
                 EventEnvelope(
                     run_id=run_id,
                     type=EventType.RUN_FAILED,
                     source="worker",
-                    data={"error": str(error)},
-                    raw=error.raw if isinstance(error, BackendReportedError) else None,
+                    data={"error": error_projection},
+                    raw=(
+                        error.raw
+                        if isinstance(error, (BackendProtocolError, BackendReportedError))
+                        else None
+                    ),
                 ),
             )

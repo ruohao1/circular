@@ -1,5 +1,6 @@
 import json
 from collections.abc import AsyncIterator, Iterator
+from math import isfinite
 from typing import Any
 from uuid import UUID
 
@@ -26,10 +27,12 @@ class BackendProtocolError(EventIngestionError):
         *,
         stream: OutputStream | None = None,
         line_number: int | None = None,
+        raw: dict[str, Any] | None = None,
     ) -> None:
         self.reason = reason
         self.stream = stream
         self.line_number = line_number
+        self.raw = raw
         super().__init__(self._message())
 
     def locate(self, stream: OutputStream, line_number: int) -> None:
@@ -37,6 +40,10 @@ class BackendProtocolError(EventIngestionError):
             self.stream = stream
             self.line_number = line_number
             self.args = (self._message(),)
+
+    def attach_raw(self, raw: dict[str, Any]) -> None:
+        if self.raw is None:
+            self.raw = raw
 
     def _message(self) -> str:
         if self.stream is None:
@@ -119,6 +126,13 @@ def _reject_nonstandard_constant(value: str) -> None:
     raise _NonstandardJsonConstant
 
 
+def _parse_finite_json_float(value: str) -> float:
+    number = float(value)
+    if not isfinite(number):
+        raise _NonstandardJsonConstant
+    return number
+
+
 def _require_valid_unicode(value: Any) -> None:
     if isinstance(value, str):
         value.encode("utf-8")
@@ -155,23 +169,36 @@ class FakeBackendEventStream:
         decoder = _EventDecoder(self._run_id, self._max_line_bytes)
         failure: EventIngestionError | None = None
         output_failure: Exception | None = None
-        output = self._runtime.output(self._handle)
+        output: AsyncIterator[RuntimeOutput] | None = None
+        output_acquired = False
+        output_exhausted = False
         try:
-            async for chunk in output:
-                if failure is not None:
-                    continue
-                try:
-                    for event in decoder.feed(chunk):
-                        yield event
-                except EventIngestionError as error:
-                    failure = error
+            output = self._runtime.output(self._handle)
+            output_acquired = True
         except Exception as error:
             output_failure = error
-        finally:
-            close = getattr(output, "aclose", None)
-            if close is not None:
-                await close()
-        if failure is None and output_failure is None:
+        if output_acquired:
+            try:
+                async for chunk in output:
+                    if failure is not None:
+                        continue
+                    try:
+                        for event in decoder.feed(chunk):
+                            yield event
+                    except EventIngestionError as error:
+                        failure = error
+                output_exhausted = True
+            except Exception as error:
+                output_failure = error
+            finally:
+                try:
+                    close = getattr(output, "aclose", None)
+                    if close is not None:
+                        await close()
+                except Exception as close_error:
+                    if output_failure is None:
+                        output_failure = close_error
+        if failure is None and output_exhausted:
             try:
                 decoder.finish()
             except EventIngestionError as error:
@@ -281,31 +308,37 @@ class _EventDecoder:
 
     def _decode_event(self, line: bytes) -> EventEnvelope:
         document = self._decode_object(line, "event")
-        expected_fields = {"protocol_version", "run_id", "source", "type", "data"}
-        if set(document) != expected_fields:
-            raise BackendProtocolError("fake backend event fields do not match protocol version 1")
-        self._validate_version(document)
-        self._validate_run_id(document)
-        if document["source"] != _SOURCE:
-            raise BackendProtocolError("fake backend event has an unsupported source")
         try:
-            event_type = EventType(document["type"])
-        except (TypeError, ValueError):
-            raise BackendProtocolError("fake backend event has an unsupported type") from None
-        if event_type not in {
-            EventType.AGENT_MESSAGE_DELTA,
-            EventType.AGENT_MESSAGE_COMPLETED,
-            EventType.USAGE_UPDATED,
-        }:
-            raise BackendProtocolError("fake backend event has an unsupported type")
-        normalized = self._normalized_data(event_type, document["data"])
-        return EventEnvelope(
-            run_id=self._run_id,
-            type=event_type,
-            source=_SOURCE,
-            data=normalized,
-            raw=document,
-        )
+            expected_fields = {"protocol_version", "run_id", "source", "type", "data"}
+            if set(document) != expected_fields:
+                raise BackendProtocolError(
+                    "fake backend event fields do not match protocol version 1"
+                )
+            self._validate_version(document)
+            self._validate_run_id(document)
+            if document["source"] != _SOURCE:
+                raise BackendProtocolError("fake backend event has an unsupported source")
+            try:
+                event_type = EventType(document["type"])
+            except (TypeError, ValueError):
+                raise BackendProtocolError("fake backend event has an unsupported type") from None
+            if event_type not in {
+                EventType.AGENT_MESSAGE_DELTA,
+                EventType.AGENT_MESSAGE_COMPLETED,
+                EventType.USAGE_UPDATED,
+            }:
+                raise BackendProtocolError("fake backend event has an unsupported type")
+            normalized = self._normalized_data(event_type, document["data"])
+            return EventEnvelope(
+                run_id=self._run_id,
+                type=event_type,
+                source=_SOURCE,
+                data=normalized,
+                raw=document,
+            )
+        except BackendProtocolError as error:
+            error.attach_raw(document)
+            raise
 
     @staticmethod
     def _decode_object(line: bytes, record_name: str) -> dict[str, Any]:
@@ -314,6 +347,7 @@ class _EventDecoder:
                 line.decode("utf-8"),
                 object_pairs_hook=_object_without_duplicates,
                 parse_constant=_reject_nonstandard_constant,
+                parse_float=_parse_finite_json_float,
             )
         except _DuplicateField:
             raise BackendProtocolError(
@@ -347,36 +381,42 @@ class _EventDecoder:
 
     def _raise_error(self, line: bytes) -> None:
         document = self._decode_object(line, "error")
-        if set(document) not in (
-            {"protocol_version", "error"},
-            {"protocol_version", "run_id", "error"},
-        ):
-            raise BackendProtocolError("fake backend error fields do not match protocol version 1")
-        self._validate_version(document)
-        error = document["error"]
-        if not isinstance(error, dict) or set(error) != {"code", "message"}:
-            raise BackendProtocolError("fake backend error has invalid data")
-        if not isinstance(error["message"], str):
-            raise BackendProtocolError("fake backend error has unsupported data")
-        if error["code"] == "invalid_input":
-            if set(document) != {"protocol_version", "error"}:
+        try:
+            if set(document) not in (
+                {"protocol_version", "error"},
+                {"protocol_version", "run_id", "error"},
+            ):
                 raise BackendProtocolError(
-                    "fake backend invalid-input error fields do not match protocol version 1"
+                    "fake backend error fields do not match protocol version 1"
                 )
-        elif error["code"] == "injected_failure":
-            if set(document) != {"protocol_version", "run_id", "error"}:
-                raise BackendProtocolError(
-                    "fake backend injected-failure fields do not match protocol version 1"
-                )
-            self._validate_run_id(document)
-        else:
-            raise BackendProtocolError("fake backend error has unsupported data")
-        raise BackendReportedError(
-            run_id=self._run_id,
-            code=error["code"],
-            message=error["message"],
-            raw=document,
-        )
+            self._validate_version(document)
+            error = document["error"]
+            if not isinstance(error, dict) or set(error) != {"code", "message"}:
+                raise BackendProtocolError("fake backend error has invalid data")
+            if not isinstance(error["message"], str):
+                raise BackendProtocolError("fake backend error has unsupported data")
+            if error["code"] == "invalid_input":
+                if set(document) != {"protocol_version", "error"}:
+                    raise BackendProtocolError(
+                        "fake backend invalid-input error fields do not match protocol version 1"
+                    )
+            elif error["code"] == "injected_failure":
+                if set(document) != {"protocol_version", "run_id", "error"}:
+                    raise BackendProtocolError(
+                        "fake backend injected-failure fields do not match protocol version 1"
+                    )
+                self._validate_run_id(document)
+            else:
+                raise BackendProtocolError("fake backend error has unsupported data")
+            raise BackendReportedError(
+                run_id=self._run_id,
+                code=error["code"],
+                message=error["message"],
+                raw=document,
+            )
+        except BackendProtocolError as error:
+            error.attach_raw(document)
+            raise
 
     @staticmethod
     def _normalized_data(event_type: EventType, data: Any) -> dict[str, Any]:

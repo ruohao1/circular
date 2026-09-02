@@ -92,6 +92,116 @@ class FailingOutputRuntime(StubRuntime):
         return await super().wait(handle)
 
 
+class SynchronousOutputFailureRuntime(StubRuntime):
+    def __init__(self) -> None:
+        super().__init__(())
+        self.wait_calls = 0
+
+    def output(self, handle: ContainerHandle) -> AsyncIterator[RuntimeOutput]:
+        assert handle == HANDLE
+        raise OSError("output acquisition failed")
+
+    async def wait(self, handle: ContainerHandle) -> RuntimeResult:
+        self.wait_calls += 1
+        return await super().wait(handle)
+
+
+class MissingOutputIteratorRuntime(StubRuntime):
+    def __init__(self) -> None:
+        super().__init__(())
+        self.wait_calls = 0
+
+    def output(self, handle: ContainerHandle) -> Any:
+        assert handle == HANDLE
+        return None
+
+    async def wait(self, handle: ContainerHandle) -> RuntimeResult:
+        self.wait_calls += 1
+        return await super().wait(handle)
+
+
+class CloseFailingOutput:
+    def __init__(
+        self,
+        chunks: tuple[RuntimeOutput, ...],
+        *,
+        iteration_error: Exception | None = None,
+    ) -> None:
+        self._chunks = iter(chunks)
+        self._iteration_error = iteration_error
+        self.close_calls = 0
+
+    def __aiter__(self) -> "CloseFailingOutput":
+        return self
+
+    async def __anext__(self) -> RuntimeOutput:
+        try:
+            return next(self._chunks)
+        except StopIteration:
+            if self._iteration_error is not None:
+                raise self._iteration_error from None
+            raise StopAsyncIteration from None
+
+    async def aclose(self) -> None:
+        self.close_calls += 1
+        raise OSError("output close failed")
+
+
+class CloseFailingRuntime(StubRuntime):
+    def __init__(
+        self,
+        chunks: tuple[RuntimeOutput, ...],
+        *,
+        iteration_error: Exception | None = None,
+    ) -> None:
+        super().__init__(chunks)
+        self.iterator = CloseFailingOutput(chunks, iteration_error=iteration_error)
+        self.wait_calls = 0
+
+    def output(self, handle: ContainerHandle) -> AsyncIterator[RuntimeOutput]:
+        assert handle == HANDLE
+        return self.iterator
+
+    async def wait(self, handle: ContainerHandle) -> RuntimeResult:
+        self.wait_calls += 1
+        return await super().wait(handle)
+
+
+class CancellableOutputRuntime(StubRuntime):
+    def __init__(self) -> None:
+        super().__init__(())
+        self.output_started = asyncio.Event()
+        self.output_closed = asyncio.Event()
+        self.release = asyncio.Event()
+        self.wait_calls = 0
+
+    async def output(self, handle: ContainerHandle) -> AsyncIterator[RuntimeOutput]:
+        assert handle == HANDLE
+        self.output_started.set()
+        try:
+            await self.release.wait()
+            yield RuntimeOutput(OutputStream.STDOUT, b"")
+        finally:
+            self.output_closed.set()
+
+    async def wait(self, handle: ContainerHandle) -> RuntimeResult:
+        self.wait_calls += 1
+        return await super().wait(handle)
+
+
+class CancellableWaitRuntime(StubRuntime):
+    def __init__(self) -> None:
+        super().__init__(())
+        self.wait_started = asyncio.Event()
+        self.release = asyncio.Event()
+
+    async def wait(self, handle: ContainerHandle) -> RuntimeResult:
+        assert handle == HANDLE
+        self.wait_started.set()
+        await self.release.wait()
+        return self.result
+
+
 class FailingWaitRuntime(StubRuntime):
     async def wait(self, handle: ContainerHandle) -> RuntimeResult:
         assert handle == HANDLE
@@ -185,6 +295,47 @@ class FailureRecordingStore(LifecycleStore):
     ) -> None:
         del session, run_id, target, error
         raise OSError("do-not-print")
+
+
+class CompletionFailingStore(LifecycleStore):
+    def __init__(self, failure: Exception) -> None:
+        self._failure = failure
+        self._failed = False
+
+    async def transition(
+        self,
+        session: RecordingTransaction,
+        run_id: UUID,
+        target: RunStatus,
+        *,
+        error: str | None = None,
+    ) -> None:
+        if target is RunStatus.FINALIZING and not self._failed:
+            self._failed = True
+            raise self._failure
+        await super().transition(session, run_id, target, error=error)
+
+
+class UnprintableError(OSError):
+    def __str__(self) -> str:
+        raise ValueError("cannot render error")
+
+
+class MalformedNotesFailureStore(LifecycleStore):
+    async def transition(
+        self,
+        session: RecordingTransaction,
+        run_id: UUID,
+        target: RunStatus,
+        *,
+        error: str | None = None,
+    ) -> None:
+        del session, run_id, error
+        if target is RunStatus.FINALIZING:
+            execution_error = OSError("original execution failure")
+            execution_error.__notes__ = "malformed"  # type: ignore[assignment]
+            raise execution_error
+        raise RuntimeError("secondary failure recording failure")
 
 
 def _event_line(event_type: str, data: object) -> bytes:
@@ -300,6 +451,7 @@ async def test_event_stream_rejects_duplicate_json_fields_without_echoing_values
 
     assert "duplicate" in str(exc_info.value)
     assert "do-not-print" not in str(exc_info.value)
+    assert exc_info.value.raw is None
 
 
 async def test_event_stream_yields_prior_events_then_raises_a_typed_backend_error() -> None:
@@ -425,6 +577,115 @@ async def test_event_stream_waits_for_completion_after_output_iteration_fails() 
     assert runtime.wait_calls == 1
 
 
+async def test_event_stream_waits_after_synchronous_output_acquisition_fails() -> None:
+    runtime = SynchronousOutputFailureRuntime()
+
+    with pytest.raises(RuntimeOutputError) as exc_info:
+        _ = [event async for event in FakeBackendEventStream(RUN_ID, runtime, HANDLE).events()]
+
+    assert isinstance(exc_info.value.__cause__, OSError)
+    assert runtime.wait_calls == 1
+
+
+async def test_event_stream_types_a_missing_output_iterator_and_waits() -> None:
+    runtime = MissingOutputIteratorRuntime()
+
+    with pytest.raises(RuntimeOutputError) as exc_info:
+        _ = [event async for event in FakeBackendEventStream(RUN_ID, runtime, HANDLE).events()]
+
+    assert isinstance(exc_info.value.__cause__, TypeError)
+    assert runtime.wait_calls == 1
+
+
+async def test_event_stream_types_an_output_iterator_close_failure_and_waits() -> None:
+    runtime = CloseFailingRuntime(())
+
+    with pytest.raises(RuntimeOutputError) as exc_info:
+        _ = [event async for event in FakeBackendEventStream(RUN_ID, runtime, HANDLE).events()]
+
+    assert isinstance(exc_info.value.__cause__, OSError)
+    assert str(exc_info.value.__cause__) == "output close failed"
+    assert runtime.iterator.close_calls == 1
+    assert runtime.wait_calls == 1
+
+
+async def test_iterator_close_failure_does_not_mask_an_incomplete_protocol_record() -> None:
+    runtime = CloseFailingRuntime(
+        (
+            RuntimeOutput(
+                OutputStream.STDOUT,
+                _event_line("agent.message.delta", {"delta": "unterminated"}).rstrip(b"\n"),
+            ),
+        )
+    )
+
+    with pytest.raises(BackendProtocolError) as exc_info:
+        _ = [event async for event in FakeBackendEventStream(RUN_ID, runtime, HANDLE).events()]
+
+    assert "incomplete JSON line" in str(exc_info.value)
+    assert isinstance(exc_info.value.__cause__, OSError)
+    assert str(exc_info.value.__cause__) == "output close failed"
+    assert runtime.wait_calls == 1
+
+
+async def test_iterator_close_failure_does_not_mask_an_output_iteration_failure() -> None:
+    runtime = CloseFailingRuntime((), iteration_error=OSError("output pump failed first"))
+
+    with pytest.raises(RuntimeOutputError) as exc_info:
+        _ = [event async for event in FakeBackendEventStream(RUN_ID, runtime, HANDLE).events()]
+
+    assert isinstance(exc_info.value.__cause__, OSError)
+    assert str(exc_info.value.__cause__) == "output pump failed first"
+    assert runtime.iterator.close_calls == 1
+    assert runtime.wait_calls == 1
+
+
+async def test_iterator_close_failure_does_not_mask_an_event_persistence_failure() -> None:
+    runtime = CloseFailingRuntime(
+        (
+            RuntimeOutput(
+                OutputStream.STDOUT,
+                _event_line("agent.message.delta", {"delta": "cannot commit"}),
+            ),
+        )
+    )
+    ingestor = RuntimeEventIngestor(RecordingSessions(), FailingStore(fail_on_call=1))
+
+    with pytest.raises(EventPersistenceError) as exc_info:
+        await ingestor.ingest(RUN_ID, runtime, HANDLE)
+
+    assert isinstance(exc_info.value.__cause__, OSError)
+    assert str(exc_info.value.__cause__) == "database unavailable"
+    assert runtime.iterator.close_calls == 1
+    assert runtime.wait_calls == 0
+
+
+async def test_cancellation_during_output_propagates_without_waiting() -> None:
+    runtime = CancellableOutputRuntime()
+    events = FakeBackendEventStream(RUN_ID, runtime, HANDLE).events()
+    next_event = asyncio.create_task(anext(events))
+    await asyncio.wait_for(runtime.output_started.wait(), timeout=1)
+
+    next_event.cancel()
+
+    with pytest.raises(asyncio.CancelledError):
+        await next_event
+    assert runtime.output_closed.is_set()
+    assert runtime.wait_calls == 0
+
+
+async def test_cancellation_during_runtime_wait_propagates() -> None:
+    runtime = CancellableWaitRuntime()
+    events = FakeBackendEventStream(RUN_ID, runtime, HANDLE).events()
+    next_event = asyncio.create_task(anext(events))
+    await asyncio.wait_for(runtime.wait_started.wait(), timeout=1)
+
+    next_event.cancel()
+
+    with pytest.raises(asyncio.CancelledError):
+        await next_event
+
+
 async def test_event_stream_types_a_runtime_completion_failure() -> None:
     runtime = FailingWaitRuntime(())
 
@@ -457,6 +718,26 @@ async def test_event_stream_rejects_nonstandard_json_and_lone_surrogates(
         _ = [event async for event in FakeBackendEventStream(RUN_ID, runtime, HANDLE).events()]
 
     assert expected_message in str(exc_info.value)
+    assert exc_info.value.raw is None
+
+
+async def test_runtime_executor_rejects_numeric_overflow_without_unsafe_raw() -> None:
+    overflowing_number = (
+        b'{"protocol_version":1,"run_id":"'
+        + str(RUN_ID).encode()
+        + b'","source":"fake-container-workload","type":"agent.message.delta",'
+        b'"data":{"delta":1e400}}\n'
+    )
+    runtime = StubRuntime((RuntimeOutput(OutputStream.STDOUT, overflowing_number),))
+    sessions = RecordingSessions()
+    executor = RunExecutor(sessions, LifecycleStore(), {})
+
+    with pytest.raises(BackendProtocolError) as exc_info:
+        await executor.execute_runtime(RUN_ID, runtime, HANDLE)
+
+    assert exc_info.value.raw is None
+    assert sessions.committed[1].type is EventType.RUN_FAILED
+    assert sessions.committed[1].raw is None
 
 
 async def test_event_stream_bounds_partial_lines_independently_of_chunk_boundaries() -> None:
@@ -501,6 +782,25 @@ async def test_event_stream_accepts_the_versioned_invalid_input_error_shape() ->
         _ = [event async for event in FakeBackendEventStream(RUN_ID, runtime, HANDLE).events()]
 
     assert exc_info.value.code == "invalid_input"
+    assert exc_info.value.raw == raw_error
+
+
+async def test_event_stream_retains_valid_rejected_stderr_raw() -> None:
+    raw_error = {
+        "protocol_version": 2,
+        "error": {
+            "code": "invalid_input",
+            "message": "unsupported input",
+        },
+    }
+    runtime = StubRuntime(
+        (RuntimeOutput(OutputStream.STDERR, _raw_line(raw_error)),),
+        result=RuntimeResult.exited(2),
+    )
+
+    with pytest.raises(BackendProtocolError) as exc_info:
+        _ = [event async for event in FakeBackendEventStream(RUN_ID, runtime, HANDLE).events()]
+
     assert exc_info.value.raw == raw_error
 
 
@@ -560,6 +860,20 @@ async def test_runtime_executor_persists_backend_error_raw_on_run_failure() -> N
     assert sessions.committed[1].raw == raw_error
 
 
+async def test_runtime_executor_persists_rejected_protocol_event_raw_on_run_failure() -> None:
+    raw_event = {**_valid_event_document(), "source": "unexpected-backend"}
+    runtime = StubRuntime((RuntimeOutput(OutputStream.STDOUT, _raw_line(raw_event)),))
+    sessions = RecordingSessions()
+    executor = RunExecutor(sessions, LifecycleStore(), {})
+
+    with pytest.raises(BackendProtocolError):
+        await executor.execute_runtime(RUN_ID, runtime, HANDLE)
+
+    assert sessions.committed[0][2] is RunStatus.FAILED
+    assert sessions.committed[1].type is EventType.RUN_FAILED
+    assert sessions.committed[1].raw == raw_event
+
+
 async def test_runtime_executor_preserves_original_error_when_failure_recording_fails() -> None:
     runtime = StubRuntime((), result=RuntimeResult.exited(23))
     executor = RunExecutor(RecordingSessions(), FailureRecordingStore(), {})
@@ -570,6 +884,45 @@ async def test_runtime_executor_preserves_original_error_when_failure_recording_
     assert exc_info.value.exit_code == 23
     assert exc_info.value.__notes__ == ["failed to persist Run execution failure (OSError)"]
     assert "do-not-print" not in str(exc_info.value)
+
+
+async def test_failure_note_error_does_not_mask_the_original_execution_error() -> None:
+    executor = RunExecutor(RecordingSessions(), MalformedNotesFailureStore(), {})
+
+    with pytest.raises(OSError, match="original execution failure") as exc_info:
+        await executor.execute_runtime(RUN_ID, StubRuntime(()), HANDLE)
+
+    assert exc_info.value.__notes__ == "malformed"
+
+
+async def test_runtime_executor_caps_one_error_projection_for_failure_state_and_event() -> None:
+    long_message = "\x00\ud800" + "x" * 5001
+    sessions = RecordingSessions()
+    executor = RunExecutor(sessions, CompletionFailingStore(OSError(long_message)), {})
+
+    with pytest.raises(OSError):
+        await executor.execute_runtime(RUN_ID, StubRuntime(()), HANDLE)
+
+    expected = "\N{REPLACEMENT CHARACTER}?" + "x" * 3998
+    assert sessions.committed[0] == (
+        "transition",
+        RUN_ID,
+        RunStatus.FAILED,
+        expected,
+    )
+    assert sessions.committed[1].type is EventType.RUN_FAILED
+    assert sessions.committed[1].data == {"error": expected}
+
+
+async def test_runtime_executor_safely_projects_an_unprintable_error() -> None:
+    sessions = RecordingSessions()
+    executor = RunExecutor(sessions, CompletionFailingStore(UnprintableError()), {})
+
+    with pytest.raises(UnprintableError):
+        await executor.execute_runtime(RUN_ID, StubRuntime(()), HANDLE)
+
+    assert sessions.committed[0][3] == "UnprintableError"
+    assert sessions.committed[1].data == {"error": "UnprintableError"}
 
 
 async def test_runtime_executor_rejects_a_non_running_run_before_consuming_output() -> None:
@@ -657,6 +1010,7 @@ async def test_event_stream_rejects_noncanonical_or_unsupported_event_shapes(
         _ = [event async for event in FakeBackendEventStream(RUN_ID, runtime, HANDLE).events()]
 
     assert "do-not-print" not in str(exc_info.value)
+    assert exc_info.value.raw == document
 
 
 async def test_event_stream_rejects_an_unterminated_final_record() -> None:

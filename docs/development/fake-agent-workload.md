@@ -77,16 +77,20 @@ without limit.
 Version 1 stdout events use exact field sets and the canonical Run ID and source. The adapter
 normalizes `agent.message.delta`, `agent.message.completed`, and `usage.updated`; unknown event
 types are execution failures rather than silently dropped facts. It rejects malformed UTF-8,
-duplicate JSON fields, non-standard constants such as `NaN`, lone Unicode surrogates, unknown
-versions, and invalid type-specific data. The normalized `data` and the complete decoded wire
-object remain separately available on the envelope.
+duplicate JSON fields, non-standard constants such as `NaN`, numeric values that decode as
+non-finite, lone Unicode surrogates, unknown versions, and invalid type-specific data. The
+normalized `data` and the complete decoded wire object remain separately available on the
+envelope.
 
 Version 1 stderr records are errors, not normalized events. The two workload-defined shapes are
 supported: `invalid_input` without a Run ID and `injected_failure` with the matching canonical
 Run ID. A valid record raises `BackendReportedError` carrying its decoded raw object. Malformed
 stderr, an unexplained nonzero exit, a stopped execution, output observation failure, and result
-observation failure have distinct typed errors. A protocol or backend-reported failure observed
-before process completion takes precedence over the exit status.
+observation failure have distinct typed errors. Synchronous output-iterator acquisition and
+iterator cleanup failures are output observation failures too; ordinary output failures still
+wait for the terminal process result, while cancellation propagates unchanged. A protocol or
+backend-reported failure observed before process completion takes precedence over output cleanup
+and the exit status.
 
 `RuntimeEventIngestor` commits every normalized event in its own transaction. PostgreSQL's
 per-Run lock remains the sequence allocator, so concurrent writers retain one contiguous event
@@ -97,10 +101,13 @@ later protocol, process, or persistence failure does not roll back prior event c
 `RunExecutor.execute_runtime()` is the post-provisioning coordinator for an already-running Run.
 It verifies the Run state before consuming output, invokes the ingestor, and then performs the
 existing `running` to `finalizing` to `succeeded` transitions. Failures use the existing terminal
-path; a backend error's raw object is attached to `run.failed`. If recording that failure also
-fails, the original execution error remains primary and receives only the secondary exception
-type as a sanitized note. Workspace provisioning, container start, cancellation, and release
-remain separate lifecycle concerns.
+path. A backend-reported error, or a valid decoded event rejected by version, identity, source,
+type, or data schema, attaches its raw object to `run.failed`; malformed bytes and ambiguous
+duplicate-key documents do not. Run state and `run.failed` use the same database-safe error
+projection, capped at 4,000 characters. If recording that failure also fails, the original
+execution error remains primary and, when possible, receives only the secondary exception type
+as a sanitized note. Workspace provisioning, container start, cancellation, and release remain
+separate lifecycle concerns.
 
 ## Build and run
 
