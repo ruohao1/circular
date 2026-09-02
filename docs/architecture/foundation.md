@@ -47,9 +47,9 @@ post-start identity write fails, provisioning either records that immutable ID i
 failed Workspace transaction or permanently discards the just-created allocation through
 the runtime compensation boundary.
 
-Container output ingestion remains the next integration slice. Until that is composed,
-the worker retains the in-process fake backend after provisioning as a temporary
-compatibility execution path; this is not the final isolated execution chain.
+Runner-side event ingestion can consume and persist fake-workload output, but the worker
+still retains the in-process fake backend after provisioning as a temporary compatibility
+path. Composing those two completed boundaries is the next integration step.
 
 Repository caches, worktrees, and artifacts are derived from internal UUIDs beneath
 worker-owned roots. The `runners` path module validates containment and translates a
@@ -60,14 +60,16 @@ local and Compose mappings.
 
 ## Deliberately deferred
 
-Real agent backends, container event ingestion, authentication and RBAC, approval UI,
+Real agent backends, container-event worker composition, authentication and RBAC, approval UI,
 recursive delegation, Linear/GitHub adapters, LISTEN/NOTIFY wakeups, generated frontend
 contracts, billing, and distributed runners are not implemented. The fake workload image
-now exercises provisioning, but its output is not yet connected to the execution event
-flow. These have explicit seams or storage fields where needed, but no speculative framework.
+now exercises provisioning, and its output adapter is implemented, but the two are not yet
+connected in worker composition. These have explicit seams or storage fields where needed,
+but no speculative framework.
 Cross-process container recovery and retained-container cleanup also remain worker
 lifecycle work. Active-cancellation coordination, including the executor preflight
 read-then-act race, remains in ISQ-175. Compose Docker CLI/socket access, runner-image
 composition, and writable worktree ownership for the container UID remain in ISQ-176.
 The fake-workload spec factory stays injected behind the generic spec-factory port; a
 separate production factory can replace it when real backend execution is introduced.
+Production output backpressure or durable spooling also remains worker lifecycle work.

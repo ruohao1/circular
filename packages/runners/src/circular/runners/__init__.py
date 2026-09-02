@@ -1,4 +1,20 @@
-from circular.runners.executor import InvalidRunExecutionState, RunExecutor
+from circular.runners.event_ingestion import (
+    BackendProcessError,
+    BackendProtocolError,
+    BackendReportedError,
+    BackendStoppedError,
+    EventIngestionError,
+    EventPersistenceError,
+    FakeBackendEventStream,
+    RuntimeCompletionError,
+    RuntimeEventIngestor,
+    RuntimeOutputError,
+)
+from circular.runners.executor import (
+    InvalidRunExecutionState,
+    RunExecutor,
+    RunNotReadyForRuntimeError,
+)
 from circular.runners.paths import ExecutionDirectories, InvalidExecutionPath, RunPaths
 from circular.runners.provisioning import (
     ContainerIdentityPersistenceError,
@@ -19,9 +35,16 @@ from circular.runners.sql_provisioning import (
 )
 
 __all__ = [
+    "BackendProcessError",
+    "BackendProtocolError",
+    "BackendReportedError",
+    "BackendStoppedError",
     "ContainerIdentityPersistenceError",
-    "ExecutionDirectories",
     "ContainerSpecFactory",
+    "ExecutionDirectories",
+    "EventIngestionError",
+    "EventPersistenceError",
+    "FakeBackendEventStream",
     "FakeWorkloadSpecFactory",
     "InvalidExecutionPath",
     "InvalidRunProvisioningStatus",
@@ -29,7 +52,11 @@ __all__ = [
     "MissingRunRepository",
     "ProvisionedWorkspace",
     "RunExecutor",
+    "RunNotReadyForRuntimeError",
     "RunPaths",
+    "RuntimeCompletionError",
+    "RuntimeEventIngestor",
+    "RuntimeOutputError",
     "SqlWorkspaceProvisioningPersistence",
     "WorkspaceProvisioner",
     "WorkspaceProvisioningCompensationError",

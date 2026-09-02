@@ -3,6 +3,8 @@ from uuid import UUID
 from circular.agents import AgentBackend, BackendContext
 from circular.domain import RunStatus, WorkspaceStatus
 from circular.events import EventEnvelope, EventType
+from circular.runners.event_ingestion import BackendReportedError, RuntimeEventIngestor
+from circular.runtimes import ContainerHandle, Runtime
 from circular.storage.models import AgentRecord, RunRecord, TaskRecord, WorkspaceRecord
 from circular.storage.repositories import RunStore
 from sqlalchemy import select
@@ -11,6 +13,13 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 class InvalidRunExecutionState(ValueError):
     """A caller attempted execution without a ready, provisioned Workspace."""
+
+
+class RunNotReadyForRuntimeError(InvalidRunExecutionState):
+    def __init__(self, run_id: UUID, status: RunStatus) -> None:
+        super().__init__(f"run {run_id} must be running before runtime output is consumed")
+        self.run_id = run_id
+        self.status = status
 
 
 class RunExecutor:
@@ -30,11 +39,9 @@ class RunExecutor:
         try:
             context, backend_name = await self._load_context(run_id)
         except InvalidRunExecutionState:
-            # A rejected caller precondition is not an execution failure and must
-            # not mutate the Run lifecycle.
             raise
         except Exception as error:
-            await self._fail_preserving(run_id, error)
+            await self._record_failure(run_id, error)
             raise
         try:
             backend = self._backends[backend_name]
@@ -43,23 +50,60 @@ class RunExecutor:
                 async with self._sessions.begin() as session:
                     await self._store.append_event(session, event)
 
-            async with self._sessions.begin() as session:
-                await self._store.transition(session, run_id, RunStatus.FINALIZING)
-                await self._store.transition(session, run_id, RunStatus.SUCCEEDED)
-                await self._store.append_event(
-                    session,
-                    EventEnvelope(
-                        run_id=run_id,
-                        type=EventType.RUN_COMPLETED,
-                        source="worker",
-                        data={},
-                    ),
-                )
+            await self._complete(run_id)
         except Exception as error:
-            await self._fail_preserving(run_id, error)
+            await self._record_failure(run_id, error)
             raise
 
-    async def _fail_preserving(self, run_id: UUID, error: Exception) -> None:
+    async def execute_runtime(
+        self,
+        run_id: UUID,
+        runtime: Runtime,
+        handle: ContainerHandle,
+    ) -> None:
+        """Finish an already-running Run from its started container output."""
+        try:
+            await self._require_running(run_id)
+        except InvalidRunExecutionState:
+            raise
+        except Exception as error:
+            await self._record_failure(run_id, error)
+            raise
+        try:
+            await RuntimeEventIngestor(self._sessions, self._store).ingest(
+                run_id,
+                runtime,
+                handle,
+            )
+            await self._complete(run_id)
+        except Exception as error:
+            await self._record_failure(run_id, error)
+            raise
+
+    async def _require_running(self, run_id: UUID) -> None:
+        async with self._sessions.begin() as session:
+            run = await session.get(RunRecord, run_id)
+            if run is None:
+                raise InvalidRunExecutionState(f"run {run_id} is not available for execution")
+            status = RunStatus(run.status)
+            if status is not RunStatus.RUNNING:
+                raise RunNotReadyForRuntimeError(run_id, status)
+
+    async def _complete(self, run_id: UUID) -> None:
+        async with self._sessions.begin() as session:
+            await self._store.transition(session, run_id, RunStatus.FINALIZING)
+            await self._store.transition(session, run_id, RunStatus.SUCCEEDED)
+            await self._store.append_event(
+                session,
+                EventEnvelope(
+                    run_id=run_id,
+                    type=EventType.RUN_COMPLETED,
+                    source="worker",
+                    data={},
+                ),
+            )
+
+    async def _record_failure(self, run_id: UUID, error: Exception) -> None:
         try:
             await self._fail(run_id, error)
         except Exception as persistence_error:
@@ -118,5 +162,6 @@ class RunExecutor:
                     type=EventType.RUN_FAILED,
                     source="worker",
                     data={"error": str(error)},
+                    raw=error.raw if isinstance(error, BackendReportedError) else None,
                 ),
             )

@@ -62,8 +62,45 @@ identify field names but never echo field values. An injected failure writes one
 `injected_failure` record to standard error and exits `20`; its record includes the Run ID.
 Success leaves standard error empty and exits `0`.
 
-The event-ingestion slice will translate these records into `EventEnvelope` values and
-preserve the raw lines. That integration is intentionally separate from provisioning.
+The runner-side ingestion adapter translates these records into backend-neutral
+`EventEnvelope` values and preserves each complete decoded wire object in `raw`.
+
+## Worker event ingestion
+
+`FakeBackendEventStream` consumes the backend-neutral `Runtime.output()` iterator. Runtime
+chunks are transport details: one record may span chunks (including inside a multibyte UTF-8
+character), one chunk may contain several records, and stdout and stderr keep independent
+partial-line buffers. A record is accepted only after its terminating newline. Each line is
+bounded to 1 MiB before decoding so an unterminated or oversized record cannot grow a buffer
+without limit.
+
+Version 1 stdout events use exact field sets and the canonical Run ID and source. The adapter
+normalizes `agent.message.delta`, `agent.message.completed`, and `usage.updated`; unknown event
+types are execution failures rather than silently dropped facts. It rejects malformed UTF-8,
+duplicate JSON fields, non-standard constants such as `NaN`, lone Unicode surrogates, unknown
+versions, and invalid type-specific data. The normalized `data` and the complete decoded wire
+object remain separately available on the envelope.
+
+Version 1 stderr records are errors, not normalized events. The two workload-defined shapes are
+supported: `invalid_input` without a Run ID and `injected_failure` with the matching canonical
+Run ID. A valid record raises `BackendReportedError` carrying its decoded raw object. Malformed
+stderr, an unexplained nonzero exit, a stopped execution, output observation failure, and result
+observation failure have distinct typed errors. A protocol or backend-reported failure observed
+before process completion takes precedence over the exit status.
+
+`RuntimeEventIngestor` commits every normalized event in its own transaction. PostgreSQL's
+per-Run lock remains the sequence allocator, so concurrent writers retain one contiguous event
+sequence. Because each record commits before the next output chunk is requested, the existing
+polling event reader and SSE endpoint can expose deltas while the backend is still running. A
+later protocol, process, or persistence failure does not roll back prior event commits.
+
+`RunExecutor.execute_runtime()` is the post-provisioning coordinator for an already-running Run.
+It verifies the Run state before consuming output, invokes the ingestor, and then performs the
+existing `running` to `finalizing` to `succeeded` transitions. Failures use the existing terminal
+path; a backend error's raw object is attached to `run.failed`. If recording that failure also
+fails, the original execution error remains primary and receives only the secondary exception
+type as a sanitized note. Workspace provisioning, container start, cancellation, and release
+remain separate lifecycle concerns.
 
 ## Build and run
 

@@ -85,10 +85,10 @@ same-name replacement or a forged resource identity is rejected.
 
 Chunk boundaries are transport details and may not align with backend event records. Output
 is a one-consumer stream; it remains available after fast completion, and `wait()` never
-depends on the caller consuming it. The MVP queue is intentionally unbounded in memory so
-the adapter can always drain child pipes even when no caller consumes output. The immediate
-event-ingestion and budget slice must consume it while a Run is active and define bounded
-backpressure or durable spooling before production-scale output is accepted.
+depends on the caller consuming it. `RuntimeEventIngestor` consumes this stream while a Run is
+active and bounds each backend JSON Line to 1 MiB, but the runtime's MVP queue remains
+intentionally unbounded so the adapter can always drain child pipes. Production-scale output
+still requires bounded backpressure or durable spooling between the pipe pump and consumer.
 
 `wait()` is cancellation-shielded and returns one stable result. `stop()` is bounded,
 idempotent, shared by concurrent callers, and completes the owned stop operation before
