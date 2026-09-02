@@ -225,6 +225,91 @@ async def test_ready_transition_records_container_id_and_release_retains_it(
     ]
 
 
+async def test_pending_workspace_records_container_id_idempotently(
+    store_fixture: StoreFixture,
+) -> None:
+    store = WorkspaceStore()
+    workspace = Workspace(
+        id=uuid4(),
+        run_id=store_fixture.run_id,
+        worktree_path="/worktrees/pending-container",
+    )
+    async with store_fixture.sessions.begin() as session:
+        await store.create(session, workspace, source="test-worker")
+        first = await store.record_container(
+            session,
+            workspace.id,
+            "container-pending-123",
+            source="test-worker",
+        )
+        repeated = await store.record_container(
+            session,
+            workspace.id,
+            "container-pending-123",
+            source="test-worker",
+        )
+
+    async with store_fixture.sessions() as session:
+        loaded = await store.load(session, workspace.id)
+    events = await RunEventReader(store_fixture.sessions).read_after(store_fixture.run_id, 0)
+
+    assert first == repeated == loaded
+    assert loaded.status is WorkspaceStatus.PENDING
+    assert loaded.container_id == "container-pending-123"
+    assert [(event.type, event.data) for event in events] == [
+        (
+            "workspace.provisioning",
+            {"status": "pending", "workspace_id": str(workspace.id)},
+        ),
+        (
+            "workspace.provisioning",
+            {
+                "status": "pending",
+                "stage": "container_started",
+                "workspace_id": str(workspace.id),
+                "container_id": "container-pending-123",
+            },
+        ),
+    ]
+
+
+async def test_pending_workspace_rejects_replacing_recorded_container(
+    store_fixture: StoreFixture,
+) -> None:
+    store = WorkspaceStore()
+    workspace = Workspace(
+        id=uuid4(),
+        run_id=store_fixture.run_id,
+        worktree_path="/worktrees/pending-container-conflict",
+    )
+    async with store_fixture.sessions.begin() as session:
+        await store.create(session, workspace, source="test-worker")
+        await store.record_container(
+            session,
+            workspace.id,
+            "container-original",
+            source="test-worker",
+        )
+
+    async with store_fixture.sessions.begin() as session:
+        with pytest.raises(WorkspaceContainerIdConflictError):
+            await store.record_container(
+                session,
+                workspace.id,
+                "container-replacement",
+                source="test-worker",
+            )
+
+    async with store_fixture.sessions() as session:
+        loaded = await store.load(session, workspace.id)
+    events = await RunEventReader(store_fixture.sessions).read_after(store_fixture.run_id, 0)
+    assert loaded.container_id == "container-original"
+    assert [event.type for event in events] == [
+        "workspace.provisioning",
+        "workspace.provisioning",
+    ]
+
+
 async def test_create_rejects_a_workspace_that_bypasses_the_initial_state(
     store_fixture: StoreFixture,
 ) -> None:

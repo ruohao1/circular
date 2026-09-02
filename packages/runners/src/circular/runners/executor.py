@@ -1,16 +1,20 @@
 from uuid import UUID
 
 from circular.agents import AgentBackend, BackendContext
-from circular.domain import RunStatus
+from circular.domain import RunStatus, WorkspaceStatus
 from circular.events import EventEnvelope, EventType
-from circular.storage.models import AgentRecord, RunRecord, TaskRecord
+from circular.storage.models import AgentRecord, RunRecord, TaskRecord, WorkspaceRecord
 from circular.storage.repositories import RunStore
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 
+class InvalidRunExecutionState(ValueError):
+    """A caller attempted execution without a ready, provisioned Workspace."""
+
+
 class RunExecutor:
-    """Coordinates one claimed Run; backend reasoning remains behind AgentBackend."""
+    """Execute an already-running Run whose Workspace is durably ready."""
 
     def __init__(
         self,
@@ -23,21 +27,9 @@ class RunExecutor:
         self._backends = backends
 
     async def execute(self, run_id: UUID) -> None:
+        context, backend_name = await self._load_context(run_id)
         try:
-            context, backend_name = await self._load_context(run_id)
             backend = self._backends[backend_name]
-            async with self._sessions.begin() as session:
-                await self._store.transition(session, run_id, RunStatus.RUNNING)
-                await self._store.append_event(
-                    session,
-                    EventEnvelope(
-                        run_id=run_id,
-                        type=EventType.RUN_STARTED,
-                        source="worker",
-                        data={"backend": backend_name},
-                    ),
-                )
-
             backend_session = await backend.start(context)
             async for event in backend.events(backend_session):
                 async with self._sessions.begin() as session:
@@ -63,19 +55,31 @@ class RunExecutor:
         async with self._sessions() as session:
             row = (
                 await session.execute(
-                    select(RunRecord, TaskRecord, AgentRecord)
+                    select(RunRecord, TaskRecord, AgentRecord, WorkspaceRecord)
                     .join(TaskRecord, TaskRecord.id == RunRecord.task_id)
                     .join(AgentRecord, AgentRecord.id == RunRecord.agent_id)
+                    .outerjoin(WorkspaceRecord, WorkspaceRecord.run_id == RunRecord.id)
                     .where(RunRecord.id == run_id)
                 )
-            ).one()
-            run, task, agent = row
+            ).one_or_none()
+            if row is None:
+                raise InvalidRunExecutionState(f"run {run_id} is not available for execution")
+            run, task, agent, workspace = row
+            if RunStatus(run.status) is not RunStatus.RUNNING:
+                raise InvalidRunExecutionState(
+                    f"run {run_id} must be running before execution, not {run.status}"
+                )
+            if workspace is None or WorkspaceStatus(workspace.status) is not WorkspaceStatus.READY:
+                raise InvalidRunExecutionState(
+                    f"run {run_id} requires a ready Workspace before execution"
+                )
             return (
                 BackendContext(
                     run_id=run.id,
                     task_title=task.title,
                     task_description=task.description,
                     instructions=agent.instructions,
+                    workspace_path=workspace.worktree_path,
                     config=agent.backend_config,
                 ),
                 run.backend,

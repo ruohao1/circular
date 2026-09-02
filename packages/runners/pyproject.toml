@@ -6,6 +6,8 @@ dependencies = [
   "circular-agents",
   "circular-domain",
   "circular-events",
+  "circular-git",
+  "circular-runtimes",
   "circular-storage",
 ]
 
@@ -13,6 +15,8 @@ dependencies = [
 circular-agents = { workspace = true }
 circular-domain = { workspace = true }
 circular-events = { workspace = true }
+circular-git = { workspace = true }
+circular-runtimes = { workspace = true }
 circular-storage = { workspace = true }
 
 [build-system]

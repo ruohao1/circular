@@ -2,8 +2,8 @@
 
 `DockerRuntime` is the execution-isolation adapter behind the shared `Runtime` interface.
 It controls Docker; it does not implement an agent reasoning loop, normalize backend
-events, provision Git worktrees, or decide Run lifecycle transitions. Worker composition
-and Docker socket installation are deliberately deferred.
+events, provision Git worktrees, or decide Run lifecycle transitions. The worker composes
+it behind workspace provisioning; container event ingestion remains a separate boundary.
 
 ## Resolved policy
 

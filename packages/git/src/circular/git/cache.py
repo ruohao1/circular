@@ -5,7 +5,7 @@ import math
 import os
 import tempfile
 from pathlib import Path
-from typing import Protocol
+from typing import Protocol, runtime_checkable
 from uuid import UUID
 
 from circular.git._local import (
@@ -23,6 +23,13 @@ class _RepositoryPathPolicy(Protocol):
     repository_cache_root: Path
 
     def repository_cache_path(self, repository_id: UUID) -> Path: ...
+
+
+@runtime_checkable
+class RepositoryCache(Protocol):
+    """Checkout seam consumed by Run workspace orchestration."""
+
+    async def checkout(self, repository_id: UUID, clone_url: str) -> Path: ...
 
 
 class RepositoryCacheError(RuntimeError):

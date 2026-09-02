@@ -2,8 +2,9 @@
 
 The fake agent workload is a deterministic process and container image for exercising the
 future Run → container → worktree → backend execution path. It is not a control-plane
-process, a fourth Compose service, or the in-worker `FakeAgentBackend`. The worker does not
-launch it yet.
+process, a fourth Compose service, or the in-worker `FakeAgentBackend`. Workspace
+provisioning now starts the configured runner image with this version-1 request; output
+ingestion and replacement of the temporary in-worker fake execution path remain separate.
 
 Its only interface is one UTF-8 encoded JSON object on standard input, UTF-8 JSON Lines on
 standard output and standard error, and the process exit code. The byte encoding is explicit

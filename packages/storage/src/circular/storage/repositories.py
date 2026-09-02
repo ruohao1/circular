@@ -14,6 +14,14 @@ class RunNotFoundError(LookupError):
     pass
 
 
+class RunStatusMismatchError(ValueError):
+    def __init__(self, run_id: UUID, expected: RunStatus, actual: RunStatus) -> None:
+        super().__init__(f"run {run_id} must be {expected.value}, not {actual.value}")
+        self.run_id = run_id
+        self.expected = expected
+        self.actual = actual
+
+
 class WorkspaceNotFoundError(LookupError):
     pass
 
@@ -33,6 +41,15 @@ class WorkspaceContainerIdConflictError(ValueError):
         self.workspace_id = workspace_id
         self.existing = existing
         self.requested = requested
+
+
+class WorkspaceContainerStatusError(ValueError):
+    def __init__(self, workspace_id: UUID, status: WorkspaceStatus) -> None:
+        super().__init__(
+            f"workspace {workspace_id} cannot first record a container while {status.value}"
+        )
+        self.workspace_id = workspace_id
+        self.status = status
 
 
 async def _lock_run(session: AsyncSession, run_id: UUID) -> RunRecord:
@@ -146,6 +163,19 @@ class RunStore:
         await session.flush()
         return run
 
+    async def require_status(
+        self,
+        session: AsyncSession,
+        run_id: UUID,
+        expected: RunStatus,
+    ) -> RunRecord:
+        """Lock a Run and fail closed unless it is in the caller's expected state."""
+        run = await _lock_run(session, run_id)
+        actual = RunStatus(run.status)
+        if actual is not expected:
+            raise RunStatusMismatchError(run_id, expected, actual)
+        return run
+
     async def append_event(self, session: AsyncSession, envelope: EventEnvelope) -> EventRecord:
         # Locking the owning Run serializes sequence allocation without a second queue system.
         run = await _lock_run(session, envelope.run_id)
@@ -232,6 +262,65 @@ class WorkspaceStore:
             statement.order_by(WorkspaceRecord.created_at, WorkspaceRecord.id)
         )
         return tuple(self._to_domain(record) for record in records)
+
+    async def record_container(
+        self,
+        session: AsyncSession,
+        workspace_id: UUID,
+        container_id: str,
+        *,
+        source: str,
+    ) -> Workspace:
+        """Durably attach a started container while provisioning remains pending.
+
+        Repeating the same immutable identity is a no-op and does not duplicate its
+        provisioning event. Replacing an identity always fails closed.
+        """
+        if not isinstance(container_id, str) or not container_id or len(container_id) > 200:
+            raise ValueError("container_id must be a non-empty string of at most 200 characters")
+
+        run_id = await session.scalar(
+            select(WorkspaceRecord.run_id).where(WorkspaceRecord.id == workspace_id)
+        )
+        if run_id is None:
+            raise WorkspaceNotFoundError(str(workspace_id))
+        run = await _lock_run(session, run_id)
+        record = await session.scalar(
+            select(WorkspaceRecord).where(WorkspaceRecord.id == workspace_id).with_for_update()
+        )
+        if record is None:
+            raise WorkspaceNotFoundError(str(workspace_id))
+
+        if record.container_id is not None:
+            if record.container_id != container_id:
+                raise WorkspaceContainerIdConflictError(
+                    record.id,
+                    record.container_id,
+                    container_id,
+                )
+            return self._to_domain(record)
+
+        status = WorkspaceStatus(record.status)
+        if status is not WorkspaceStatus.PENDING:
+            raise WorkspaceContainerStatusError(record.id, status)
+
+        record.container_id = container_id
+        await _append_event_for_locked_run(
+            session,
+            run,
+            EventEnvelope(
+                run_id=record.run_id,
+                type=EventType.WORKSPACE_PROVISIONING,
+                source=source,
+                data={
+                    "status": WorkspaceStatus.PENDING.value,
+                    "stage": "container_started",
+                    "workspace_id": str(record.id),
+                    "container_id": container_id,
+                },
+            ),
+        )
+        return self._to_domain(record)
 
     async def transition(
         self,

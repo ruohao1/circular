@@ -20,7 +20,7 @@ class InvalidWorkspaceInitialContainer(ValueError):
     def __init__(self, container_id: str) -> None:
         super().__init__(
             f"workspace cannot start with container {container_id}; "
-            "record it when the workspace becomes ready or failed"
+            "record it only after the pending workspace is durable"
         )
         self.container_id = container_id
 

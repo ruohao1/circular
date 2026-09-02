@@ -4,7 +4,9 @@ version = "0.1.0"
 requires-python = ">=3.12"
 dependencies = [
   "circular-agents",
+  "circular-git",
   "circular-runners",
+  "circular-runtimes",
   "circular-storage",
   "pydantic-settings>=2.8,<3",
 ]
@@ -14,7 +16,9 @@ circular-worker = "circular.worker.main:run"
 
 [tool.uv.sources]
 circular-agents = { workspace = true }
+circular-git = { workspace = true }
 circular-runners = { workspace = true }
+circular-runtimes = { workspace = true }
 circular-storage = { workspace = true }
 
 [build-system]

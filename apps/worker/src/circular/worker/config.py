@@ -25,6 +25,7 @@ class Settings(BaseSettings):
     fake_delay_seconds: float = Field(
         default=0.05,
         ge=0,
+        le=10,
         validation_alias="CIRCULAR_FAKE_DELAY_SECONDS",
     )
     worker_id: str = Field(

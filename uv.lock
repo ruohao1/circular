@@ -174,6 +174,8 @@ dependencies = [
     { name = "circular-agents" },
     { name = "circular-domain" },
     { name = "circular-events" },
+    { name = "circular-git" },
+    { name = "circular-runtimes" },
     { name = "circular-storage" },
 ]
 
@@ -182,6 +184,8 @@ requires-dist = [
     { name = "circular-agents", editable = "packages/agents" },
     { name = "circular-domain", editable = "packages/domain" },
     { name = "circular-events", editable = "packages/events" },
+    { name = "circular-git", editable = "packages/git" },
+    { name = "circular-runtimes", editable = "packages/runtimes" },
     { name = "circular-storage", editable = "packages/storage" },
 ]
 
@@ -217,7 +221,9 @@ version = "0.1.0"
 source = { editable = "apps/worker" }
 dependencies = [
     { name = "circular-agents" },
+    { name = "circular-git" },
     { name = "circular-runners" },
+    { name = "circular-runtimes" },
     { name = "circular-storage" },
     { name = "pydantic-settings" },
 ]
@@ -225,7 +231,9 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "circular-agents", editable = "packages/agents" },
+    { name = "circular-git", editable = "packages/git" },
     { name = "circular-runners", editable = "packages/runners" },
+    { name = "circular-runtimes", editable = "packages/runtimes" },
     { name = "circular-storage", editable = "packages/storage" },
     { name = "pydantic-settings", specifier = ">=2.8,<3" },
 ]

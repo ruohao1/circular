@@ -1,6 +1,7 @@
 from circular.git.cache import (
     InvalidRepositoryCache,
     LocalRepositoryCache,
+    RepositoryCache,
     RepositoryCacheError,
     RepositoryCloneCleanupError,
     RepositoryCloneError,
@@ -29,6 +30,7 @@ __all__ = [
     "LocalRepositoryCache",
     "LocalWorktreeManager",
     "ProvisionedWorktree",
+    "RepositoryCache",
     "RepositoryCacheError",
     "RepositoryCloneError",
     "RepositoryCloneCleanupError",

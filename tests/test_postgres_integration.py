@@ -1,17 +1,30 @@
 import os
 from datetime import UTC, datetime
+from pathlib import Path
+from uuid import UUID
 
 import pytest
 from circular.agents import FakeAgentBackend
 from circular.domain import RunStatus
-from circular.runners import RunExecutor
+from circular.git import ProvisionedWorktree
+from circular.runners import (
+    ExecutionDirectories,
+    FakeWorkloadSpecFactory,
+    InvalidRunExecutionState,
+    RunExecutor,
+    SqlWorkspaceProvisioningPersistence,
+    WorkspaceProvisioner,
+)
+from circular.runtimes import ContainerHandle, ContainerSpec
 from circular.storage import (
     AgentRecord,
     EventRecord,
     ProjectRecord,
+    RepositoryRecord,
     RunRecord,
     RunStore,
     TaskRecord,
+    WorkspaceStore,
     create_engine,
     create_session_factory,
 )
@@ -30,7 +43,47 @@ async def remove_test_fixture(session: AsyncSession) -> None:
     await session.execute(delete(ProjectRecord).where(ProjectRecord.id.in_(project_ids)))
 
 
-async def test_claim_execute_and_persist_events_against_postgres() -> None:
+class IntegrationCache:
+    def __init__(self, path: Path) -> None:
+        self.path = path
+
+    async def checkout(self, repository_id: UUID, clone_url: str) -> Path:
+        return self.path
+
+
+class IntegrationWorktrees:
+    def __init__(self, worktree: ProvisionedWorktree) -> None:
+        self.worktree = worktree
+
+    async def provision(
+        self,
+        run_id: UUID,
+        repository_path: Path,
+        base_ref: str,
+    ) -> ProvisionedWorktree:
+        return self.worktree
+
+    async def release(self, worktree: ProvisionedWorktree) -> None:
+        raise AssertionError("cleanup is outside this integration slice")
+
+
+class IntegrationRuntime:
+    async def start(self, spec: ContainerSpec) -> ContainerHandle:
+        return ContainerHandle("integration-container")
+
+    def output(self, handle: ContainerHandle):
+        raise AssertionError("event ingestion is outside this integration slice")
+
+    async def wait(self, handle: ContainerHandle):
+        raise AssertionError("runtime completion is outside this integration slice")
+
+    async def stop(self, handle: ContainerHandle) -> None:
+        raise AssertionError("cleanup is outside this integration slice")
+
+
+async def test_claim_provision_execute_and_persist_events_against_postgres(
+    tmp_path: Path,
+) -> None:
     assert database_url is not None
     engine = create_engine(database_url)
     sessions = create_session_factory(engine)
@@ -42,8 +95,20 @@ async def test_claim_execute_and_persist_events_against_postgres() -> None:
             session.add(project)
             await session.flush()
             agent = AgentRecord(project_id=project.id, name="Test engineer", backend="fake")
-            task = TaskRecord(project_id=project.id, title="Exercise the worker")
-            session.add_all([agent, task])
+            repository = RepositoryRecord(
+                project_id=project.id,
+                name="circular",
+                clone_url="https://example.test/circular.git",
+                default_branch="main",
+            )
+            session.add_all([agent, repository])
+            await session.flush()
+            task = TaskRecord(
+                project_id=project.id,
+                repository_id=repository.id,
+                title="Exercise the worker",
+            )
+            session.add(task)
             await session.flush()
             run = RunRecord(
                 task_id=task.id,
@@ -63,6 +128,44 @@ async def test_claim_execute_and_persist_events_against_postgres() -> None:
             assert claimed.status == RunStatus.PROVISIONING.value
 
         executor = RunExecutor(sessions, store, {"fake": FakeAgentBackend()})
+        with pytest.raises(InvalidRunExecutionState, match="must be running"):
+            await executor.execute(run_id)
+
+        directories = ExecutionDirectories(
+            repository_cache_root=tmp_path / "repositories",
+            worktree_root=tmp_path / "worktrees",
+            artifact_root=tmp_path / "artifacts",
+            docker_worktree_root=tmp_path / "docker-worktrees",
+        )
+        repository_path = directories.repository_cache_path(repository.id)
+        worktree_path = directories.run_paths(run_id).worktree
+        provisioner = WorkspaceProvisioner(
+            persistence=SqlWorkspaceProvisioningPersistence(
+                sessions,
+                store,
+                WorkspaceStore(),
+                source="integration-worker",
+            ),
+            repository_cache=IntegrationCache(repository_path),
+            worktrees=IntegrationWorktrees(
+                ProvisionedWorktree(
+                    run_id=run_id,
+                    repository_path=repository_path,
+                    path=worktree_path,
+                    branch=f"circular/run/{run_id}",
+                )
+            ),
+            runtime=IntegrationRuntime(),
+            directories=directories,
+            spec_factory=FakeWorkloadSpecFactory(
+                image="circular-runner:test",
+                cpu_limit=1,
+                memory_limit_mb=512,
+            ),
+        )
+        workspace = await provisioner.provision(run_id)
+        assert workspace.status.value == "ready"
+
         await executor.execute(run_id)
 
         async with sessions() as session:
@@ -77,7 +180,12 @@ async def test_claim_execute_and_persist_events_against_postgres() -> None:
         assert persisted is not None
         assert persisted.status == RunStatus.SUCCEEDED.value
         assert [event.sequence for event in events] == list(range(1, len(events) + 1))
-        assert events[0].type == "run.started"
+        assert [event.type for event in events[:4]] == [
+            "workspace.provisioning",
+            "workspace.provisioning",
+            "workspace.ready",
+            "run.started",
+        ]
         assert events[-1].type == "run.completed"
     finally:
         try:

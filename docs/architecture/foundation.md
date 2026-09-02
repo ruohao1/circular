@@ -36,8 +36,15 @@ The intended execution chain is Run → container → Git worktree → backend. 
 argv-only Docker CLI operations: one Run worktree is mounted read-write at `/workspace`,
 the container root is read-only, and network, capabilities, resource limits, user, and
 environment policy are explicit. The adapter never mounts the Docker socket, host SSH
-directory, Repository cache, Artifact root, or control-plane credentials. It is not yet
-wired into the worker; the in-process fake backend remains the development default.
+directory, Repository cache, Artifact root, or control-plane credentials. A claimed Run
+now creates a pending Workspace, refreshes its Repository cache, provisions its linked
+worktree, and starts its container before one transaction makes the Workspace `ready`
+and the Run `running`. Each durable resource identity is recorded before the next
+lifecycle transition so later cleanup can reconcile partial allocations.
+
+Container output ingestion remains the next integration slice. Until that is composed,
+the worker retains the in-process fake backend after provisioning as a temporary
+compatibility execution path; this is not the final isolated execution chain.
 
 Repository caches, worktrees, and artifacts are derived from internal UUIDs beneath
 worker-owned roots. The `runners` path module validates containment and translates a
@@ -48,10 +55,10 @@ local and Compose mappings.
 
 ## Deliberately deferred
 
-Real agent backends, worker-to-Docker composition, authentication and RBAC, approval UI,
+Real agent backends, container event ingestion, authentication and RBAC, approval UI,
 recursive delegation, Linear/GitHub adapters, LISTEN/NOTIFY wakeups, generated frontend
 contracts, billing, and distributed runners are not implemented. The fake workload image
-proves the process and Docker runtime contracts but is not wired into the worker. These
-have explicit seams or storage fields where needed, but no speculative framework.
+now exercises provisioning, but its output is not yet connected to the execution event
+flow. These have explicit seams or storage fields where needed, but no speculative framework.
 Cross-process container recovery and retained-container cleanup also remain worker
 lifecycle work.

@@ -68,3 +68,11 @@ def test_worker_settings_reject_non_positive_resource_limits(
 
     with pytest.raises(ValidationError):
         Settings(_env_file=None)
+
+
+def test_worker_settings_reject_fake_workload_delay_above_protocol_limit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("CIRCULAR_FAKE_DELAY_SECONDS", "10.001")
+    with pytest.raises(ValidationError, match="less than or equal to 10"):
+        Settings(_env_file=None)
