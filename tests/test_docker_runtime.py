@@ -58,6 +58,17 @@ def _fake_docker(
     attachment_fails: bool = False,
     inspect_fails_after_ready: bool = False,
     replace_name_on_create: bool = False,
+    unexpected_mount: bool = False,
+    invalid_create_id: bool = False,
+    create_hangs_after_creation: bool = False,
+    remove_fails: bool = False,
+    policy_mismatch: str | None = None,
+    create_returns_failure: bool = False,
+    reconciliation_unavailable: bool = False,
+    create_late_commit_delay: float = 0,
+    remove_delay: float = 0,
+    create_hangs_without_commit_once: bool = False,
+    owned_nonce_with_foreign_name: bool = False,
 ) -> tuple[Path, Path]:
     state = tmp_path / "fake-docker-state"
     state.mkdir()
@@ -68,6 +79,7 @@ def _fake_docker(
             #!{os.sys.executable}
             import json
             import os
+            import subprocess
             import sys
             import time
             from pathlib import Path
@@ -80,6 +92,17 @@ def _fake_docker(
             attachment_fails = {attachment_fails!r}
             inspect_fails_after_ready = {inspect_fails_after_ready!r}
             replace_name_on_create = {replace_name_on_create!r}
+            unexpected_mount = {unexpected_mount!r}
+            invalid_create_id = {invalid_create_id!r}
+            create_hangs_after_creation = {create_hangs_after_creation!r}
+            remove_fails = {remove_fails!r}
+            policy_mismatch = {policy_mismatch!r}
+            create_returns_failure = {create_returns_failure!r}
+            reconciliation_unavailable = {reconciliation_unavailable!r}
+            create_late_commit_delay = {create_late_commit_delay!r}
+            remove_delay = {remove_delay!r}
+            create_hangs_without_commit_once = {create_hangs_without_commit_once!r}
+            owned_nonce_with_foreign_name = {owned_nonce_with_foreign_name!r}
             container_id = {CONTAINER_ID!r}
             operation = sys.argv[1]
             with (state / "calls.jsonl").open("a") as calls:
@@ -89,12 +112,48 @@ def _fake_docker(
                 if (state / "created").exists():
                     raise SystemExit(17)
                 (state / "create-started").touch()
-                time.sleep(create_delay)
+                if (
+                    create_hangs_without_commit_once
+                    and not (state / "create-hung-once").exists()
+                ):
+                    (state / "create-hung-once").touch()
+                    time.sleep(create_delay)
+                    raise SystemExit(19)
+                if create_late_commit_delay:
+                    payload = json.dumps({{
+                        "argv": sys.argv[1:],
+                        "delay": create_late_commit_delay,
+                        "state": str(state),
+                    }})
+                    code = (
+                        "import json,sys,time; from pathlib import Path; "
+                        "p=json.loads(sys.argv[1]); time.sleep(p['delay']); "
+                        "s=Path(p['state']); (s/'created').touch(); "
+                        "(s/'create-argv.json').write_text(json.dumps(p['argv']))"
+                    )
+                    subprocess.Popen(
+                        [sys.executable, "-c", code, payload],
+                        stdin=subprocess.DEVNULL,
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL,
+                        start_new_session=True,
+                    )
+                    time.sleep(create_delay)
+                    raise SystemExit(19)
+                if not create_hangs_after_creation and not create_hangs_without_commit_once:
+                    time.sleep(create_delay)
                 (state / "created").touch()
                 if replace_name_on_create:
                     (state / "replacement").touch()
+                if owned_nonce_with_foreign_name:
+                    (state / "owned-with-foreign-name").touch()
                 (state / "create-environment.json").write_text(json.dumps(dict(os.environ)))
-                print(container_id)
+                (state / "create-argv.json").write_text(json.dumps(sys.argv[1:]))
+                if create_hangs_after_creation:
+                    time.sleep(create_delay)
+                if create_returns_failure:
+                    raise SystemExit(17)
+                print("not-a-container-id" if invalid_create_id else container_id)
             elif operation in {{"inspect", "container"}}:
                 if "{{{{.State.Status}}}} {{{{.State.ExitCode}}}}" in sys.argv:
                     inspect_count_path = state / "inspect-count"
@@ -114,6 +173,147 @@ def _fake_docker(
                             (state / "ready-inspected").touch()
                     else:
                         print("created 0")
+                elif len(sys.argv) > 3 and sys.argv[1:3] == ["container", "ls"]:
+                    if (
+                        reconciliation_unavailable
+                        and not (state / "reconciliation-available").exists()
+                    ):
+                        raise SystemExit(1)
+                    if (state / "created").exists():
+                        filter_value = sys.argv[sys.argv.index("--filter") + 1]
+                        has_foreign_name = (
+                            (state / "replacement").exists()
+                            or (state / "owned-with-foreign-name").exists()
+                        )
+                        if filter_value.startswith("label="):
+                            if not (state / "replacement").exists():
+                                print(container_id)
+                        else:
+                            print("b" * 64 if has_foreign_name else container_id)
+                    raise SystemExit(0)
+                elif len(sys.argv) == 4 and sys.argv[1:3] == ["container", "inspect"]:
+                    if (
+                        reconciliation_unavailable
+                        and sys.argv[-1].startswith("circular-run-")
+                        and not (state / "reconciliation-available").exists()
+                    ):
+                        raise SystemExit(1)
+                    create_argv_path = state / "create-argv.json"
+                    create_argv = (
+                        json.loads(create_argv_path.read_text())
+                        if create_argv_path.exists()
+                        else []
+                    )
+                    labels = {{}}
+                    for index, argument in enumerate(create_argv):
+                        if argument == "--label":
+                            name, _, value = create_argv[index + 1].partition("=")
+                            labels[name] = value
+                    reported_id = container_id
+                    if (
+                        (
+                            (state / "replacement").exists()
+                            or (state / "owned-with-foreign-name").exists()
+                        )
+                        and sys.argv[-1].startswith("circular-run-")
+                    ):
+                        reported_id = "b" * 64
+                        labels = {{}}
+                    mount = next(
+                        (
+                            create_argv[index + 1]
+                            for index, argument in enumerate(create_argv)
+                            if argument == "--mount"
+                        ),
+                        "type=bind,src=/missing,dst=/workspace",
+                    )
+                    mount_parts = dict(
+                        part.split("=", 1) for part in mount.split(",") if "=" in part
+                    )
+                    mounts = [
+                        {{
+                            "Type": mount_parts["type"],
+                            "Source": mount_parts["src"],
+                            "Destination": mount_parts["dst"],
+                            "RW": True,
+                        }}
+                    ]
+                    if unexpected_mount:
+                        mounts.append(
+                            {{
+                                "Type": "volume",
+                                "Source": "unexpected",
+                                "Destination": "/image-volume",
+                                "RW": True,
+                            }}
+                        )
+                    def option(name, default):
+                        try:
+                            return create_argv[create_argv.index(name) + 1]
+                        except ValueError:
+                            return default
+                    document = {{
+                        "Id": reported_id,
+                        "Name": "/" + next(
+                            (
+                                create_argv[index + 1]
+                                for index, argument in enumerate(create_argv)
+                                if argument == "--name"
+                            ),
+                            "missing",
+                        ),
+                        "Mounts": mounts,
+                        "Config": {{
+                            "Labels": labels,
+                            "User": option("--user", ""),
+                            "WorkingDir": option("--workdir", ""),
+                        }},
+                        "HostConfig": {{
+                            "NetworkMode": option("--network", "default"),
+                            "ReadonlyRootfs": "--read-only" in create_argv,
+                            "CapDrop": [option("--cap-drop", "")],
+                            "SecurityOpt": [option("--security-opt", "")],
+                            "NanoCpus": int(float(option("--cpus", "0")) * 1_000_000_000),
+                            "Memory": int(option("--memory", "0m")[:-1]) * 1024 * 1024,
+                            "RestartPolicy": {{
+                                "Name": option("--restart", ""),
+                                "MaximumRetryCount": 0,
+                            }},
+                        }},
+                    }}
+                    if policy_mismatch == "mount_type":
+                        document["Mounts"][0]["Type"] = "volume"
+                    elif policy_mismatch == "mount_source":
+                        document["Mounts"][0]["Source"] = "/different"
+                    elif policy_mismatch == "mount_destination":
+                        document["Mounts"][0]["Destination"] = "/different"
+                    elif policy_mismatch == "mount_rw":
+                        document["Mounts"][0]["RW"] = False
+                    elif policy_mismatch == "network":
+                        document["HostConfig"]["NetworkMode"] = "bridge"
+                    elif policy_mismatch == "read_only":
+                        document["HostConfig"]["ReadonlyRootfs"] = False
+                    elif policy_mismatch == "cap_drop":
+                        document["HostConfig"]["CapDrop"] = []
+                    elif policy_mismatch == "security":
+                        document["HostConfig"]["SecurityOpt"] = []
+                    elif policy_mismatch == "cpu":
+                        document["HostConfig"]["NanoCpus"] += 1
+                    elif policy_mismatch == "memory":
+                        document["HostConfig"]["Memory"] += 1
+                    elif policy_mismatch == "user":
+                        document["Config"]["User"] = "0:0"
+                    elif policy_mismatch == "workdir":
+                        document["Config"]["WorkingDir"] = "/"
+                    elif policy_mismatch == "restart":
+                        document["HostConfig"]["RestartPolicy"]["Name"] = "always"
+                    elif policy_mismatch == "managed_label":
+                        document["Config"]["Labels"]["io.circular.managed"] = "false"
+                    elif policy_mismatch == "extra_label":
+                        document["Config"]["Labels"]["org.opencontainers.image.source"] = "image"
+                    elif policy_mismatch == "extra_circular_label":
+                        document["Config"]["Labels"]["io.circular.unexpected"] = "unsafe"
+                    print(json.dumps([document], ensure_ascii=False))
                 raise SystemExit(0 if (state / "created").exists() else 1)
             elif operation == "start":
                 (state / "start-invoked").touch()
@@ -153,7 +353,14 @@ def _fake_docker(
                 time.sleep(stop_delay)
                 (state / "exit-code").write_text("137")
             elif operation == "rm":
+                (state / "rm-started").touch()
+                time.sleep(remove_delay)
+                if remove_fails:
+                    raise SystemExit(1)
                 target = sys.argv[-1]
+                if target == container_id and (state / "owned-with-foreign-name").exists():
+                    (state / "owned-removed").touch()
+                    raise SystemExit(0)
                 if target == container_id and (state / "replacement").exists():
                     raise SystemExit(1)
                 (state / "created").unlink(missing_ok=True)
@@ -288,6 +495,323 @@ async def test_start_streams_ordered_output_and_returns_one_stable_result(
     assert "CIRCULAR_PLATFORM_TOKEN" not in create_environment
 
 
+async def test_start_rejects_and_removes_a_container_with_an_unexpected_mount(
+    tmp_path: Path,
+) -> None:
+    root, worktree = _worktree(tmp_path)
+    executable, state = _fake_docker(tmp_path, unexpected_mount=True)
+    runtime = DockerRuntime(root, docker_executable=str(executable))
+
+    with pytest.raises(ContainerStartError, match="policy"):
+        await runtime.start(_spec(worktree))
+
+    assert not (state / "start-invoked").exists()
+    assert not (state / "created").exists()
+    calls = [json.loads(line) for line in (state / "calls.jsonl").read_text().splitlines()]
+    assert [call["argv"][0] for call in calls] == ["create", "container", "rm"]
+    assert calls[-1]["argv"] == ["rm", "--force", "--volumes", CONTAINER_ID]
+
+
+@pytest.mark.parametrize(
+    "policy_mismatch",
+    [
+        "mount_type",
+        "mount_source",
+        "mount_destination",
+        "mount_rw",
+        "network",
+        "read_only",
+        "cap_drop",
+        "security",
+        "cpu",
+        "memory",
+        "user",
+        "workdir",
+        "restart",
+        "managed_label",
+        "extra_circular_label",
+    ],
+)
+async def test_start_rejects_every_effective_policy_mismatch_before_start(
+    tmp_path: Path,
+    policy_mismatch: str,
+) -> None:
+    root, worktree = _worktree(tmp_path)
+    executable, state = _fake_docker(tmp_path, policy_mismatch=policy_mismatch)
+    runtime = DockerRuntime(root, docker_executable=str(executable))
+
+    with pytest.raises(ContainerStartError, match="policy"):
+        await runtime.start(_spec(worktree))
+
+    assert not (state / "start-invoked").exists()
+    assert not (state / "created").exists()
+
+
+async def test_start_allows_benign_image_labels_outside_the_reserved_namespace(
+    tmp_path: Path,
+) -> None:
+    root, worktree = _worktree(tmp_path)
+    executable, _ = _fake_docker(tmp_path, policy_mismatch="extra_label")
+    runtime = DockerRuntime(root, docker_executable=str(executable))
+
+    handle = await runtime.start(_spec(worktree))
+
+    assert await runtime.wait(handle) == RuntimeResult.exited(23)
+
+
+async def test_invalid_create_identity_is_reconciled_by_nonce_and_removed(
+    tmp_path: Path,
+) -> None:
+    root, worktree = _worktree(tmp_path)
+    executable, state = _fake_docker(tmp_path, invalid_create_id=True)
+    runtime = DockerRuntime(root, docker_executable=str(executable))
+
+    with pytest.raises(ContainerStartError, match="invalid container identity"):
+        await runtime.start(_spec(worktree))
+
+    assert not (state / "start-invoked").exists()
+    assert not (state / "created").exists()
+    calls = [json.loads(line) for line in (state / "calls.jsonl").read_text().splitlines()]
+    assert [call["argv"][0] for call in calls] == [
+        "create",
+        "container",
+        "container",
+        "rm",
+    ]
+    assert calls[1]["argv"][-1].startswith("label=io.circular.create_nonce=")
+    assert calls[2]["argv"][-1] == CONTAINER_ID
+    assert calls[-1]["argv"][-1] == CONTAINER_ID
+
+
+async def test_nonzero_create_with_a_matching_nonce_is_removed_by_immutable_id(
+    tmp_path: Path,
+) -> None:
+    root, worktree = _worktree(tmp_path)
+    executable, state = _fake_docker(tmp_path, create_returns_failure=True)
+    runtime = DockerRuntime(root, docker_executable=str(executable))
+
+    with pytest.raises(ContainerStartError, match="create"):
+        await runtime.start(_spec(worktree))
+
+    assert not (state / "start-invoked").exists()
+    assert not (state / "created").exists()
+    calls = [json.loads(line) for line in (state / "calls.jsonl").read_text().splitlines()]
+    assert [call["argv"][0] for call in calls] == ["create", "container", "rm"]
+    assert calls[-1]["argv"][-1] == CONTAINER_ID
+
+
+async def test_timed_out_create_is_reconciled_by_nonce_and_removed(
+    tmp_path: Path,
+) -> None:
+    root, worktree = _worktree(tmp_path)
+    executable, state = _fake_docker(
+        tmp_path,
+        create_delay=0.2,
+        create_hangs_after_creation=True,
+    )
+    runtime = DockerRuntime(
+        root,
+        docker_executable=str(executable),
+        operation_timeout_seconds=0.05,
+    )
+
+    with pytest.raises(DockerOperationError, match="deadline"):
+        await runtime.start(_spec(worktree))
+
+    assert not (state / "start-invoked").exists()
+    assert not (state / "created").exists()
+    calls = [json.loads(line) for line in (state / "calls.jsonl").read_text().splitlines()]
+    assert [call["argv"][0] for call in calls] == [
+        "create",
+        "container",
+        "container",
+        "rm",
+    ]
+    assert calls[-1]["argv"][-1] == CONTAINER_ID
+
+
+async def test_timed_out_create_finds_and_removes_a_late_daemon_commit(
+    tmp_path: Path,
+) -> None:
+    root, worktree = _worktree(tmp_path)
+    executable, state = _fake_docker(
+        tmp_path,
+        create_delay=0.2,
+        create_late_commit_delay=0.08,
+    )
+    runtime = DockerRuntime(
+        root,
+        docker_executable=str(executable),
+        operation_timeout_seconds=0.05,
+    )
+
+    with pytest.raises(DockerOperationError, match="deadline"):
+        await runtime.start(_spec(worktree))
+    await asyncio.sleep(0.12)
+
+    assert not (state / "created").exists()
+    assert not (state / "start-invoked").exists()
+    calls = [json.loads(line) for line in (state / "calls.jsonl").read_text().splitlines()]
+    assert [call["argv"][0] for call in calls].count("create") == 1
+    assert [call["argv"][0] for call in calls].count("rm") == 1
+    assert calls[-1]["argv"] == ["rm", "--force", "--volumes", CONTAINER_ID]
+
+
+async def test_ambiguous_create_removes_nonce_owned_id_before_foreign_name_check(
+    tmp_path: Path,
+) -> None:
+    root, worktree = _worktree(tmp_path)
+    executable, state = _fake_docker(
+        tmp_path,
+        create_delay=0.2,
+        create_hangs_after_creation=True,
+        owned_nonce_with_foreign_name=True,
+    )
+    runtime = DockerRuntime(
+        root,
+        docker_executable=str(executable),
+        operation_timeout_seconds=0.05,
+    )
+
+    with pytest.raises(DockerOperationError, match="deadline"):
+        await runtime.start(_spec(worktree))
+
+    assert (state / "owned-removed").exists()
+    assert (state / "created").exists()
+    assert not (state / "start-invoked").exists()
+    calls = [json.loads(line) for line in (state / "calls.jsonl").read_text().splitlines()]
+    assert calls[1]["argv"][0:2] == ["container", "ls"]
+    assert calls[1]["argv"][-1].startswith("label=io.circular.create_nonce=")
+    assert calls[2]["argv"] == ["container", "inspect", CONTAINER_ID]
+    assert calls[3]["argv"] == ["rm", "--force", "--volumes", CONTAINER_ID]
+
+
+async def test_timed_out_create_without_a_commit_clears_after_settle_for_retry(
+    tmp_path: Path,
+) -> None:
+    root, worktree = _worktree(tmp_path)
+    executable, state = _fake_docker(
+        tmp_path,
+        create_delay=0.3,
+        create_hangs_without_commit_once=True,
+    )
+    runtime = DockerRuntime(
+        root,
+        docker_executable=str(executable),
+        operation_timeout_seconds=0.1,
+    )
+
+    with pytest.raises(DockerOperationError, match="deadline"):
+        await runtime.start(_spec(worktree))
+    handle = await runtime.start(_spec(worktree))
+
+    assert await runtime.wait(handle) == RuntimeResult.exited(23)
+    calls = [json.loads(line) for line in (state / "calls.jsonl").read_text().splitlines()]
+    assert [call["argv"][0] for call in calls].count("create") == 2
+    assert [call["argv"][0] for call in calls].count("start") == 1
+
+
+async def test_unavailable_reconciliation_is_surfaced_and_retried_before_create(
+    tmp_path: Path,
+) -> None:
+    root, worktree = _worktree(tmp_path)
+    executable, state = _fake_docker(
+        tmp_path,
+        create_delay=0.2,
+        create_hangs_after_creation=True,
+        reconciliation_unavailable=True,
+    )
+    runtime = DockerRuntime(
+        root,
+        docker_executable=str(executable),
+        operation_timeout_seconds=0.05,
+    )
+
+    with pytest.raises(DockerOperationError, match="reconcile") as raised:
+        await runtime.start(_spec(worktree))
+    assert isinstance(raised.value.__cause__, DockerOperationError)
+    assert "deadline" in str(raised.value.__cause__)
+    assert (state / "created").exists()
+
+    (state / "reconciliation-available").touch()
+    with pytest.raises(DockerOperationError, match="deadline"):
+        await runtime.start(_spec(worktree))
+
+    calls = [json.loads(line) for line in (state / "calls.jsonl").read_text().splitlines()]
+    operations = [call["argv"][0] for call in calls]
+    assert operations.count("create") == 2
+    assert operations.count("rm") == 2
+    first_rm = operations.index("rm")
+    assert operations.index("create", 1) > first_rm
+    assert not (state / "created").exists()
+
+
+async def test_cancelling_retained_create_cleanup_never_starts_a_second_create(
+    tmp_path: Path,
+) -> None:
+    root, worktree = _worktree(tmp_path)
+    executable, state = _fake_docker(
+        tmp_path,
+        create_delay=0.2,
+        create_hangs_after_creation=True,
+        reconciliation_unavailable=True,
+        remove_delay=0.05,
+    )
+    runtime = DockerRuntime(
+        root,
+        docker_executable=str(executable),
+        operation_timeout_seconds=0.1,
+    )
+    with pytest.raises(DockerOperationError, match="reconcile"):
+        await runtime.start(_spec(worktree))
+    (state / "reconciliation-available").touch()
+
+    retry = asyncio.create_task(runtime.start(_spec(worktree)))
+    await _wait_for_path(state / "rm-started")
+    retry.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await retry
+
+    assert not (state / "created").exists()
+    assert not (state / "start-invoked").exists()
+    calls = [json.loads(line) for line in (state / "calls.jsonl").read_text().splitlines()]
+    assert [call["argv"][0] for call in calls].count("create") == 1
+    assert [call["argv"][0] for call in calls].count("rm") == 1
+
+
+async def test_policy_inspection_accepts_a_utf8_worktree_path(tmp_path: Path) -> None:
+    root = tmp_path / "wörktrees"
+    worktree = root / str(RUN_ID)
+    worktree.mkdir(parents=True)
+    executable, state = _fake_docker(tmp_path)
+    runtime = DockerRuntime(root, docker_executable=str(executable))
+
+    handle = await runtime.start(_spec(worktree))
+
+    assert await runtime.wait(handle) == RuntimeResult.exited(23)
+    assert (state / "start-invoked").exists()
+
+
+async def test_failed_rejection_cleanup_is_surfaced_with_the_policy_failure_retained(
+    tmp_path: Path,
+) -> None:
+    root, worktree = _worktree(tmp_path)
+    executable, state = _fake_docker(
+        tmp_path,
+        unexpected_mount=True,
+        remove_fails=True,
+    )
+    runtime = DockerRuntime(root, docker_executable=str(executable))
+
+    with pytest.raises(ContainerStartError, match="remove") as raised:
+        await runtime.start(_spec(worktree))
+
+    assert isinstance(raised.value.__cause__, ContainerStartError)
+    assert "policy" in str(raised.value.__cause__)
+    assert (state / "created").exists()
+    assert not (state / "start-invoked").exists()
+
+
 async def test_stop_is_idempotent_and_returns_a_stable_stopped_result(
     tmp_path: Path,
 ) -> None:
@@ -325,8 +849,13 @@ async def test_cancelling_start_finishes_create_and_removes_only_its_new_contain
 
     assert not (state / "created").exists()
     calls = [json.loads(line) for line in (state / "calls.jsonl").read_text().splitlines()]
-    assert [call["argv"][0] for call in calls] == ["create", "rm"]
-    assert calls[-1]["argv"] == ["rm", "--force", CONTAINER_ID]
+    assert [call["argv"][0] for call in calls] == [
+        "create",
+        "container",
+        "container",
+        "rm",
+    ]
+    assert calls[-1]["argv"] == ["rm", "--force", "--volumes", CONTAINER_ID]
 
 
 async def test_cancelling_stop_finishes_termination_before_propagating(
@@ -362,12 +891,37 @@ async def test_cancelled_create_cleanup_cannot_remove_a_same_name_replacement(
     await _wait_for_path(state / "create-started")
 
     start_task.cancel()
-    with pytest.raises(asyncio.CancelledError):
+    with pytest.raises(ContainerNameConflictError, match="already occupied") as raised:
         await start_task
 
+    assert isinstance(raised.value.__cause__, asyncio.CancelledError)
     assert (state / "created").exists()
     calls = [json.loads(line) for line in (state / "calls.jsonl").read_text().splitlines()]
-    assert calls[-1]["argv"] == ["rm", "--force", CONTAINER_ID]
+    assert [call["argv"][0] for call in calls] == ["create", "container", "container"]
+    assert calls[1]["argv"][1] == "ls"
+    assert calls[-1]["argv"][-1] == "circular-run-00000000000040008000000000000171"
+
+
+async def test_cancelled_create_surfaces_cleanup_failure_and_retains_cancellation(
+    tmp_path: Path,
+) -> None:
+    root, worktree = _worktree(tmp_path)
+    executable, state = _fake_docker(
+        tmp_path,
+        create_delay=0.1,
+        remove_fails=True,
+    )
+    runtime = DockerRuntime(root, docker_executable=str(executable))
+    start_task = asyncio.create_task(runtime.start(_spec(worktree)))
+    await _wait_for_path(state / "create-started")
+
+    start_task.cancel()
+    with pytest.raises(ContainerStartError, match="remove") as raised:
+        await start_task
+
+    assert isinstance(raised.value.__cause__, asyncio.CancelledError)
+    assert (state / "created").exists()
+    assert not (state / "start-invoked").exists()
 
 
 async def test_start_waits_until_the_container_is_no_longer_only_created(
@@ -390,6 +944,32 @@ async def test_start_waits_until_the_container_is_no_longer_only_created(
     assert await runtime.wait(handle) == RuntimeResult.stopped()
 
 
+async def test_unrelated_runs_do_not_wait_for_each_others_create_attempt(
+    tmp_path: Path,
+) -> None:
+    root, first_worktree = _worktree(tmp_path)
+    second_run_id = UUID("00000000-0000-4000-8000-000000000172")
+    second_worktree = root / str(second_run_id)
+    second_worktree.mkdir()
+    executable, state = _fake_docker(tmp_path, create_delay=0.2)
+    runtime = DockerRuntime(root, docker_executable=str(executable))
+    first = asyncio.create_task(runtime.start(_spec(first_worktree)))
+    second = asyncio.create_task(runtime.start(_spec(second_worktree, run_id=second_run_id)))
+
+    try:
+        async with asyncio.timeout(0.15):
+            while True:  # noqa: ASYNC110 -- polling an external process log
+                calls_path = state / "calls.jsonl"
+                calls = calls_path.read_text().splitlines() if calls_path.exists() else []
+                if sum(json.loads(line)["argv"][0] == "create" for line in calls) == 2:
+                    break
+                await asyncio.sleep(0.005)
+    finally:
+        first.cancel()
+        second.cancel()
+        await asyncio.gather(first, second, return_exceptions=True)
+
+
 async def test_start_bounds_stdin_delivery_and_removes_the_owned_container(
     tmp_path: Path,
 ) -> None:
@@ -407,7 +987,7 @@ async def test_start_bounds_stdin_delivery_and_removes_the_owned_container(
 
     assert not (state / "created").exists()
     calls = [json.loads(line) for line in (state / "calls.jsonl").read_text().splitlines()]
-    assert calls[-1]["argv"] == ["rm", "--force", CONTAINER_ID]
+    assert calls[-1]["argv"] == ["rm", "--force", "--volumes", CONTAINER_ID]
 
 
 async def test_lost_attachment_is_an_error_and_stop_still_terminates_the_container(

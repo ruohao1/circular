@@ -6,7 +6,13 @@ from pathlib import Path
 from uuid import UUID, uuid4
 
 import pytest
-from circular.runtimes import ContainerSpec, DockerRuntime, OutputStream, RuntimeResult
+from circular.runtimes import (
+    ContainerSpec,
+    ContainerStartError,
+    DockerRuntime,
+    OutputStream,
+    RuntimeResult,
+)
 
 pytestmark = pytest.mark.skipif(
     os.getenv("CIRCULAR_RUN_DOCKER_TESTS") != "1",
@@ -15,6 +21,7 @@ pytestmark = pytest.mark.skipif(
 
 ROOT = Path(__file__).resolve().parents[1]
 IMAGE = "circular-fake-agent-workload:runtime-test"
+VOLUME_IMAGE = "circular-fake-agent-workload:runtime-volume-test"
 
 
 def _docker(*arguments: str) -> subprocess.CompletedProcess[str]:
@@ -39,6 +46,15 @@ def _build_fake_workload_image() -> None:
         ".",
     )
     assert build.returncode == 0, "fake workload image build failed"
+    volume_build = _docker(
+        "build",
+        "--file",
+        "infra/fake-agent-workload-volume.Dockerfile",
+        "--tag",
+        VOLUME_IMAGE,
+        ".",
+    )
+    assert volume_build.returncode == 0, "volume workload image build failed"
 
 
 def _workload_document(run_id: UUID, *, delay_ms: int) -> dict[str, object]:
@@ -63,7 +79,13 @@ def _remove_owned_container(container_name: str, run_id: UUID) -> None:
     if labels.get("io.circular.managed") == "true" and labels.get("io.circular.run_id") == str(
         run_id
     ):
-        _docker("rm", "--force", container["Id"])
+        _docker("rm", "--force", "--volumes", container["Id"])
+
+
+def _docker_volume_names() -> frozenset[str]:
+    volumes = _docker("volume", "ls", "--quiet")
+    assert volumes.returncode == 0, "Docker volume listing failed"
+    return frozenset(volumes.stdout.splitlines())
 
 
 async def test_real_docker_runtime_runs_workload_and_enforces_inspected_policy(
@@ -152,7 +174,9 @@ async def test_real_docker_runtime_runs_workload_and_enforces_inspected_policy(
         assert host_config["Memory"] == 256 * 1024 * 1024
         assert container["Config"]["User"] == "65532:65532"
         assert container["Config"]["WorkingDir"] == "/workspace"
-        assert container["Config"]["Labels"] == dict(plan.labels)
+        labels = container["Config"]["Labels"]
+        assert labels.pop("io.circular.create_nonce")
+        assert labels == dict(plan.labels)
 
         environment_names = {entry.partition("=")[0] for entry in container["Config"]["Env"]}
         assert "DATABASE_URL" not in environment_names
@@ -160,6 +184,38 @@ async def test_real_docker_runtime_runs_workload_and_enforces_inspected_policy(
         assert not any(name.startswith("CIRCULAR_PLATFORM_") for name in environment_names)
     finally:
         _remove_owned_container(plan.container_name, run_id)
+
+
+async def test_real_docker_runtime_rejects_an_image_volume_before_start(
+    tmp_path: Path,
+) -> None:
+    volumes_before = _docker_volume_names()
+    run_id = uuid4()
+    worktree_root = tmp_path / "volume-worktrees"
+    worktree = worktree_root / str(run_id)
+    worktree.mkdir(parents=True)
+    worktree.chmod(0o777)
+    runtime = DockerRuntime(worktree_root)
+    spec = ContainerSpec(
+        run_id=run_id,
+        image=VOLUME_IMAGE,
+        worktree=worktree,
+        command=(),
+        stdin=json.dumps(_workload_document(run_id, delay_ms=0)).encode("utf-8"),
+        cpu_limit=1.0,
+        memory_limit_mb=256,
+    )
+    plan = runtime.resolve(spec)
+
+    try:
+        with pytest.raises(ContainerStartError, match="policy"):
+            await runtime.start(spec)
+
+        assert not (worktree / "container-started").exists()
+        assert _docker("inspect", plan.container_name).returncode != 0
+    finally:
+        _remove_owned_container(plan.container_name, run_id)
+    assert _docker_volume_names() == volumes_before
 
 
 async def test_real_docker_runtime_preserves_a_fast_nonzero_exit_code(

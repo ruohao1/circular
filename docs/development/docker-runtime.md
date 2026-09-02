@@ -25,6 +25,16 @@ The adapter enforces:
 - network mode `none` by default, or explicit `bridge` only when the caller enables it;
 - argv-only process creation without a shell.
 
+Immediately after `docker create` returns, the adapter inspects the immutable full
+container ID before invoking `docker start`. The effective configuration must match the
+resolved plan exactly: one read-write bind at `/workspace`, the network and root-filesystem
+settings, capability and security options, CPU and memory limits, user, working directory,
+restart policy, and the complete reserved `io.circular.*` label set. Missing, changed, or
+additional Circular labels fail closed; benign image metadata outside that namespace,
+including OCI labels, is portable and allowed. Images remain trusted runtime inputs whose
+`VOLUME` declarations must not expand the resolved mount policy; an image-declared volume
+makes creation fail closed before its entrypoint can run.
+
 The spec cannot add mounts, change the container user or working directory, or inject
 Docker CLI flags through its image, command, path, or environment fields. A Docker-host
 path is accepted only when it is the direct canonical UUID child matching the Run. The
@@ -75,12 +85,19 @@ backpressure or durable spooling before production-scale output is accepted.
 
 `wait()` is cancellation-shielded and returns one stable result. `stop()` is bounded,
 idempotent, shared by concurrent callers, and completes the owned stop operation before
-propagating caller cancellation. Cancellation during `create` waits for an unambiguous
-result and removes only a container that invocation created. Docker `create` output is
-strictly validated as a full immutable container ID; every post-create inspect, start, stop,
-kill, and cleanup operation targets that ID. The deterministic name is retained only for
-creation, pre-create conflict detection, and public correlation, so later name reuse cannot
-redirect an owned operation to a foreign container.
+propagating caller cancellation. Every create attempt adds a cryptographically random,
+ephemeral nonce label that is not part of the stable resolved plan. If create times out, is
+cancelled, or returns an invalid identity, the adapter first scans all containers for that
+exact nonce, then validates the immutable full ID, nonce, and deterministic name. Ambiguous
+outcomes are rechecked through a bounded settle window so a daemon commit arriving after the
+client was killed is still found and removed. The attempt is cleared as absent only after a
+final empty nonce scan and exact-name listing; an unavailable or inconsistent check retains
+the attempt for the next same-instance reconciliation. A foreign or same-name replacement
+is never started, stopped, or removed. Cleanup is cancellation-safe; cancellation during
+retained-attempt removal completes and records cleanup before being re-raised, and a cleanup
+failure retains the original failure as its cause. Rejection cleanup also removes anonymous
+volumes created from image declarations. Every post-create policy inspect, start, stop, kill,
+and cleanup operation targets the immutable ID.
 
 Calling `start()` repeatedly with the exact same resolved launch is idempotent only within
 one adapter instance. A changed stdin or environment value is an in-process conflict even
@@ -89,6 +106,10 @@ present in Docker is a typed conflict and is never adopted, stopped, or removed.
 recovery, reconciliation, and cleanup of retained containers belong to the later workspace
 cleanup slice.
 
+Startup reservations are per deterministic Run name. Concurrent calls for one Run remain
+serialized for idempotence, while unrelated Runs can create and verify containers in
+parallel.
+
 Docker daemon and CLI details are removed from raised errors; raw stderr, argv, stdin, and
 environment values are never included.
 
@@ -96,7 +117,9 @@ environment values are never included.
 
 Pure policy and CLI-boundary tests run in the normal suite. The real Docker security smoke
 builds the isolated fake workload image, launches it through `DockerRuntime`, inspects the
-resulting container policy, and removes only the uniquely labeled test container:
+resulting container policy, and removes only the uniquely labeled test container. It also
+builds a hostile fixture image with an extra `VOLUME` and a host-visible entrypoint marker,
+proving the policy gate removes the created container without ever starting it:
 
 ```bash
 CIRCULAR_RUN_DOCKER_TESTS=1 uv run pytest -q tests/test_docker_runtime_image.py

@@ -4,6 +4,7 @@ import json
 import math
 import os
 import re
+import secrets
 import shutil
 import signal
 from collections.abc import AsyncIterator
@@ -29,6 +30,9 @@ _IMAGE_REFERENCE = re.compile(
 )
 _CONTAINER_USER = re.compile(r"[1-9][0-9]*:[1-9][0-9]*\Z")
 _CONTAINER_ID = re.compile(r"[0-9a-f]{64}\Z")
+_CREATE_NONCE_LABEL: Final = "io.circular.create_nonce"
+_MIN_CREATE_SETTLE_SECONDS: Final = 0.25
+_MAX_CREATE_SETTLE_SECONDS: Final = 1.0
 _SENSITIVE_ENVIRONMENT_NAMES = frozenset(
     {
         "DATABASE_URL",
@@ -129,6 +133,12 @@ class _ContainerState:
     exit_code: int
 
 
+@dataclass(frozen=True, slots=True)
+class _UnresolvedCreate:
+    nonce: str
+    ambiguous: bool
+
+
 _OUTPUT_EOF: Final = object()
 _DEFAULT_DEADLINE: Final = object()
 
@@ -184,8 +194,9 @@ class DockerRuntime:
         self._container_user = container_user
         self._stop_timeout_seconds = stop_timeout
         self._operation_timeout_seconds = operation_timeout
-        self._start_lock = asyncio.Lock()
+        self._start_locks: dict[str, asyncio.Lock] = {}
         self._executions: dict[str, _Execution] = {}
+        self._unresolved_creates: dict[str, _UnresolvedCreate] = {}
 
     def resolve(self, spec: ContainerSpec) -> DockerContainerPlan:
         """Validate a request and return the exact policy resolved for launch."""
@@ -196,7 +207,11 @@ class DockerRuntime:
         """Create and attach one container, idempotently within this adapter instance."""
 
         launch = self._resolve_launch(spec)
-        async with self._start_lock:
+        start_lock = self._start_locks.setdefault(
+            launch.plan.container_name,
+            asyncio.Lock(),
+        )
+        async with start_lock:
             existing = self._executions.get(launch.plan.container_name)
             if existing is not None:
                 if existing.launch != launch:
@@ -205,21 +220,34 @@ class DockerRuntime:
                     )
                 return existing.handle
 
+            await self._cleanup_unresolved_create(launch.plan.container_name)
+
             created_container_id: str | None = None
             attach_process: asyncio.subprocess.Process | None = None
             execution: _Execution | None = None
+            create_nonce = secrets.token_hex(16)
+            self._unresolved_creates[launch.plan.container_name] = _UnresolvedCreate(
+                nonce=create_nonce,
+                ambiguous=True,
+            )
             try:
-                create_result, create_stdout = await self._create_container(launch)
+                create_result, create_stdout = await self._create_container(launch, create_nonce)
                 if create_result != 0:
-                    inspect_result, _ = await self._run_cli(
-                        ("container", "inspect", launch.plan.container_name)
+                    self._unresolved_creates[launch.plan.container_name] = _UnresolvedCreate(
+                        nonce=create_nonce,
+                        ambiguous=False,
                     )
-                    if inspect_result == 0:
-                        raise ContainerNameConflictError(
-                            "the deterministic Run container name is already occupied"
-                        )
                     raise ContainerStartError("Docker could not create the Run container")
                 created_container_id = _validated_container_id(create_stdout)
+                self._unresolved_creates[launch.plan.container_name] = _UnresolvedCreate(
+                    nonce=create_nonce,
+                    ambiguous=False,
+                )
+                await self._verify_container_policy(
+                    created_container_id,
+                    launch.plan,
+                    create_nonce,
+                )
                 attach_process = await self._spawn_cli(
                     (
                         "start",
@@ -247,8 +275,9 @@ class DockerRuntime:
                     name=f"docker-runtime:{launch.plan.run_id}",
                 )
                 await asyncio.shield(execution.ready)
+                self._unresolved_creates.pop(launch.plan.container_name, None)
                 return execution.handle
-            except BaseException:
+            except BaseException as failure:
                 if execution is not None and execution.monitor_task is not None:
                     execution.monitor_task.cancel()
                     try:
@@ -261,9 +290,48 @@ class DockerRuntime:
                 elif attach_process is not None:
                     task = asyncio.create_task(_terminate_process(attach_process))
                     await _await_task_despite_cancellation(task)
+                if created_container_id is None:
+                    try:
+                        unresolved = self._unresolved_creates[launch.plan.container_name]
+                        reconciliation = asyncio.create_task(
+                            self._reconcile_created_container(
+                                launch.plan.container_name,
+                                unresolved,
+                            )
+                        )
+                        created_container_id = await _await_task_despite_cancellation(
+                            reconciliation
+                        )
+                    except DockerRuntimeError as reconciliation_error:
+                        raise reconciliation_error from failure
                 if created_container_id is not None:
-                    await self._remove_new_container_safely(created_container_id)
+                    try:
+                        await self._remove_new_container_safely(created_container_id)
+                    except DockerRuntimeError as cleanup_error:
+                        raise cleanup_error from failure
+                self._unresolved_creates.pop(launch.plan.container_name, None)
                 raise
+
+    async def _cleanup_unresolved_create(self, container_name: str) -> None:
+        unresolved = self._unresolved_creates.get(container_name)
+        if unresolved is None:
+            return
+        container_id = await self._reconcile_created_container(
+            container_name,
+            unresolved,
+        )
+        if container_id is not None:
+            cleanup = asyncio.create_task(self._remove_new_container(container_id))
+            try:
+                await asyncio.shield(cleanup)
+            except asyncio.CancelledError as cancelled:
+                try:
+                    await _await_task_despite_cancellation(cleanup)
+                except DockerRuntimeError as cleanup_error:
+                    raise cleanup_error from cancelled
+                self._unresolved_creates.pop(container_name, None)
+                raise
+        self._unresolved_creates.pop(container_name, None)
 
     async def output(self, handle: ContainerHandle) -> AsyncIterator[RuntimeOutput]:
         """Yield the one-shot merged stdout/stderr stream in observation order."""
@@ -391,10 +459,12 @@ class DockerRuntime:
                 with suppress(asyncio.CancelledError):
                     await execution.monitor_task
 
-    async def _create_container(self, launch: _ResolvedLaunch) -> tuple[int, str]:
+    async def _create_container(
+        self, launch: _ResolvedLaunch, create_nonce: str
+    ) -> tuple[int, str]:
         task = asyncio.create_task(
             self._run_cli(
-                self._create_arguments(launch.plan),
+                self._create_arguments(launch.plan, create_nonce),
                 environment=self._minimal_cli_environment(launch.environment),
                 capture_stdout=True,
             )
@@ -403,12 +473,13 @@ class DockerRuntime:
             return await asyncio.shield(task)
         except asyncio.CancelledError as cancelled:
             try:
-                result = await _await_task_despite_cancellation(task)
-                if result[0] == 0:
-                    container_id = _validated_container_id(result[1])
-                    await self._remove_new_container_safely(container_id)
+                await _await_task_despite_cancellation(task)
+            except DockerRuntimeError as error:
+                raise cancelled from error
             finally:
-                raise cancelled
+                if task.cancelled():
+                    raise cancelled
+            raise cancelled
 
     def _resolve_launch(self, spec: ContainerSpec) -> _ResolvedLaunch:
         run_id = _validate_run_id(spec.run_id)
@@ -460,10 +531,11 @@ class DockerRuntime:
         )
         return _ResolvedLaunch(plan=plan, environment=environment)
 
-    def _create_arguments(self, plan: DockerContainerPlan) -> tuple[str, ...]:
+    def _create_arguments(self, plan: DockerContainerPlan, create_nonce: str) -> tuple[str, ...]:
         arguments: list[str] = ["create", "--name", plan.container_name]
         for name, value in plan.labels:
             arguments.extend(("--label", f"{name}={value}"))
+        arguments.extend(("--label", f"{_CREATE_NONCE_LABEL}={create_nonce}"))
         arguments.extend(
             (
                 "--network",
@@ -493,6 +565,185 @@ class DockerRuntime:
         arguments.append(plan.image)
         arguments.extend(plan.command)
         return tuple(arguments)
+
+    async def _verify_container_policy(
+        self,
+        container_id: str,
+        plan: DockerContainerPlan,
+        create_nonce: str,
+    ) -> None:
+        container = await self._inspect_container(container_id)
+        if container.get("Id") != container_id:
+            raise DockerOperationError("Docker returned an invalid container inspection")
+
+        mounts = container.get("Mounts")
+        config = container.get("Config")
+        host_config = container.get("HostConfig")
+        expected_labels = {
+            **dict(plan.labels),
+            _CREATE_NONCE_LABEL: create_nonce,
+        }
+        labels = config.get("Labels") if isinstance(config, dict) else None
+        reserved_labels = (
+            {
+                name: value
+                for name, value in labels.items()
+                if isinstance(name, str) and name.startswith("io.circular.")
+            }
+            if isinstance(labels, dict)
+            else None
+        )
+        expected_nano_cpus = int(float(format(plan.cpu_limit, ".15g")) * 1_000_000_000)
+        policy_matches = (
+            isinstance(mounts, list)
+            and len(mounts) == 1
+            and isinstance(mounts[0], dict)
+            and mounts[0].get("Type") == "bind"
+            and mounts[0].get("Source") == str(plan.worktree_source)
+            and mounts[0].get("Destination") == plan.worktree_destination
+            and mounts[0].get("RW") is (not plan.worktree_read_only)
+            and isinstance(config, dict)
+            and reserved_labels == expected_labels
+            and config.get("User") == plan.container_user
+            and config.get("WorkingDir") == plan.working_directory
+            and isinstance(host_config, dict)
+            and host_config.get("NetworkMode") == plan.network_mode
+            and host_config.get("ReadonlyRootfs") is plan.root_read_only
+            and host_config.get("CapDrop") == list(plan.cap_drop)
+            and host_config.get("SecurityOpt") == list(plan.security_options)
+            and host_config.get("NanoCpus") == expected_nano_cpus
+            and host_config.get("Memory") == plan.memory_limit_mb * 1024 * 1024
+            and host_config.get("RestartPolicy") == {"Name": "no", "MaximumRetryCount": 0}
+        )
+        if not policy_matches:
+            raise ContainerStartError(
+                "Docker container policy does not match the resolved Run plan"
+            )
+
+    async def _reconcile_created_container(
+        self,
+        container_name: str,
+        unresolved: _UnresolvedCreate,
+    ) -> str | None:
+        if not unresolved.ambiguous:
+            result, stdout = await self._run_cli(
+                ("container", "inspect", container_name),
+                capture_stdout=True,
+            )
+            if result == 0:
+                return _validated_reconciled_container(
+                    _decoded_container_inspection(stdout),
+                    container_name,
+                    unresolved.nonce,
+                    nonce_mismatch_is_conflict=True,
+                )
+            container_id = await self._find_container_by_create_nonce(
+                container_name,
+                unresolved.nonce,
+            )
+            if container_id is not None:
+                return container_id
+            if await self._container_name_is_absent(container_name):
+                return None
+            raise DockerOperationError("Docker could not reconcile the new Run container")
+
+        loop = asyncio.get_running_loop()
+        settle_seconds = min(
+            max(self._operation_timeout_seconds, _MIN_CREATE_SETTLE_SECONDS),
+            _MAX_CREATE_SETTLE_SECONDS,
+        )
+        deadline = loop.time() + settle_seconds
+        while True:
+            container_id = await self._find_container_by_create_nonce(
+                container_name,
+                unresolved.nonce,
+            )
+            if container_id is not None:
+                return container_id
+
+            result, stdout = await self._run_cli(
+                ("container", "inspect", container_name),
+                capture_stdout=True,
+            )
+            if result == 0:
+                return _validated_reconciled_container(
+                    _decoded_container_inspection(stdout),
+                    container_name,
+                    unresolved.nonce,
+                    nonce_mismatch_is_conflict=True,
+                )
+            if loop.time() >= deadline:
+                if await self._container_name_is_absent(container_name):
+                    return None
+                raise DockerOperationError(
+                    "Docker could not settle the ambiguous Run container creation"
+                )
+            await asyncio.sleep(0.01)  # noqa: ASYNC110 -- bounded daemon reconciliation
+
+    async def _find_container_by_create_nonce(
+        self,
+        container_name: str,
+        create_nonce: str,
+    ) -> str | None:
+        result, stdout = await self._run_cli(
+            (
+                "container",
+                "ls",
+                "--all",
+                "--quiet",
+                "--no-trunc",
+                "--filter",
+                f"label={_CREATE_NONCE_LABEL}={create_nonce}",
+            ),
+            capture_stdout=True,
+        )
+        if result != 0:
+            raise DockerOperationError("Docker could not reconcile the new Run container")
+        identities = stdout.splitlines()
+        if len(identities) > 1:
+            raise DockerOperationError("Docker returned an invalid reconciliation response")
+        if not identities:
+            return None
+        container_id = _validated_container_id(identities[0])
+        container = await self._inspect_container(container_id)
+        return _validated_reconciled_container(
+            container,
+            container_name,
+            create_nonce,
+            nonce_mismatch_is_conflict=False,
+        )
+
+    async def _container_name_is_absent(self, container_name: str) -> bool:
+        result, stdout = await self._run_cli(
+            (
+                "container",
+                "ls",
+                "--all",
+                "--quiet",
+                "--no-trunc",
+                "--filter",
+                f"name=^/{container_name}$",
+            ),
+            capture_stdout=True,
+        )
+        if result != 0:
+            raise DockerOperationError("Docker could not reconcile the new Run container")
+        identities = stdout.splitlines()
+        if any(_CONTAINER_ID.fullmatch(identity) is None for identity in identities):
+            raise DockerOperationError("Docker returned an invalid reconciliation response")
+        return not identities
+
+    async def _inspect_container(
+        self,
+        reference: str,
+    ) -> dict[str, object]:
+        result, stdout = await self._run_cli(
+            ("container", "inspect", reference),
+            capture_stdout=True,
+        )
+        if result != 0:
+            raise DockerOperationError("Docker could not inspect the new Run container")
+        return _decoded_container_inspection(stdout)
 
     async def _monitor(self, execution: _Execution) -> None:
         process = execution.attach_process
@@ -614,8 +865,9 @@ class DockerRuntime:
             execution.terminal_observed = True
 
     async def _remove_new_container(self, container_id: str) -> None:
-        with suppress(DockerRuntimeError):
-            await self._run_cli(("rm", "--force", container_id))
+        result, _ = await self._run_cli(("rm", "--force", "--volumes", container_id))
+        if result != 0:
+            raise ContainerStartError("Docker could not remove the new Run container")
 
     async def _remove_new_container_safely(self, container_id: str) -> None:
         task = asyncio.create_task(self._remove_new_container(container_id))
@@ -656,7 +908,7 @@ class DockerRuntime:
         decoded = ""
         if stdout is not None:
             try:
-                decoded = stdout.decode("ascii")
+                decoded = stdout.decode("utf-8")
             except UnicodeDecodeError as error:
                 raise DockerOperationError("Docker returned an invalid response") from error
         return process.returncode or 0, decoded
@@ -728,6 +980,42 @@ def _validated_container_id(stdout: str) -> str:
     if _CONTAINER_ID.fullmatch(container_id) is None:
         raise ContainerStartError("Docker returned an invalid container identity")
     return container_id
+
+
+def _decoded_container_inspection(stdout: str) -> dict[str, object]:
+    try:
+        response = json.loads(stdout)
+    except json.JSONDecodeError as error:
+        raise DockerOperationError("Docker returned an invalid container inspection") from error
+    if not isinstance(response, list) or len(response) != 1 or not isinstance(response[0], dict):
+        raise DockerOperationError("Docker returned an invalid container inspection")
+    return response[0]
+
+
+def _validated_reconciled_container(
+    container: dict[str, object],
+    container_name: str,
+    create_nonce: str,
+    *,
+    nonce_mismatch_is_conflict: bool,
+) -> str:
+    container_id = container.get("Id")
+    if not isinstance(container_id, str):
+        raise DockerOperationError("Docker returned an invalid container inspection")
+    immutable_id = _validated_container_id(container_id)
+    config = container.get("Config")
+    if not isinstance(config, dict):
+        raise DockerOperationError("Docker returned an invalid container inspection")
+    labels = config.get("Labels")
+    if not isinstance(labels, dict) or labels.get(_CREATE_NONCE_LABEL) != create_nonce:
+        if nonce_mismatch_is_conflict:
+            raise ContainerNameConflictError(
+                "the deterministic Run container name is already occupied"
+            )
+        raise DockerOperationError("Docker returned an invalid container inspection")
+    if container.get("Name") != f"/{container_name}":
+        raise DockerOperationError("Docker returned an invalid container inspection")
+    return immutable_id
 
 
 def _validated_allowlist(names: frozenset[str]) -> frozenset[str]:
