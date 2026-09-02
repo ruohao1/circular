@@ -1,10 +1,11 @@
+import json
 import os
+from collections.abc import AsyncIterator
 from datetime import UTC, datetime
 from pathlib import Path
 from uuid import UUID
 
 import pytest
-from circular.agents import FakeAgentBackend
 from circular.domain import RunStatus
 from circular.git import ProvisionedWorktree
 from circular.runners import (
@@ -15,7 +16,13 @@ from circular.runners import (
     SqlWorkspaceProvisioningPersistence,
     WorkspaceProvisioner,
 )
-from circular.runtimes import ContainerHandle, ContainerSpec
+from circular.runtimes import (
+    ContainerHandle,
+    ContainerSpec,
+    OutputStream,
+    RuntimeOutput,
+    RuntimeResult,
+)
 from circular.storage import (
     AgentRecord,
     EventRecord,
@@ -68,17 +75,35 @@ class IntegrationWorktrees:
 
 
 class IntegrationRuntime:
-    async def start(self, spec: ContainerSpec) -> ContainerHandle:
-        return ContainerHandle(
+    def __init__(self) -> None:
+        self.handle = ContainerHandle(
             id="integration-handle",
             resource_id="integration-container",
         )
+        self.run_id: UUID | None = None
 
-    def output(self, handle: ContainerHandle):
-        raise AssertionError("event ingestion is outside this integration slice")
+    async def start(self, spec: ContainerSpec) -> ContainerHandle:
+        self.run_id = spec.run_id
+        return self.handle
 
-    async def wait(self, handle: ContainerHandle):
-        raise AssertionError("runtime completion is outside this integration slice")
+    async def output(self, handle: ContainerHandle) -> AsyncIterator[RuntimeOutput]:
+        assert handle is self.handle
+        assert self.run_id is not None
+        document = {
+            "protocol_version": 1,
+            "run_id": str(self.run_id),
+            "source": "fake-container-workload",
+            "type": "agent.message.completed",
+            "data": {"content": "isolated execution completed"},
+        }
+        yield RuntimeOutput(
+            OutputStream.STDOUT,
+            (json.dumps(document, separators=(",", ":")) + "\n").encode(),
+        )
+
+    async def wait(self, handle: ContainerHandle) -> RuntimeResult:
+        assert handle is self.handle
+        return RuntimeResult.exited(0)
 
     async def stop(self, handle: ContainerHandle) -> None:
         raise AssertionError("cleanup is outside this integration slice")
@@ -133,7 +158,7 @@ async def test_claim_provision_execute_and_persist_events_against_postgres(
             assert claimed.id == run_id
             assert claimed.status == RunStatus.PROVISIONING.value
 
-        executor = RunExecutor(sessions, store, {"fake": FakeAgentBackend()})
+        executor = RunExecutor(sessions, store, {})
         with pytest.raises(InvalidRunExecutionState, match="must be running"):
             await executor.execute(run_id)
 
@@ -145,6 +170,7 @@ async def test_claim_provision_execute_and_persist_events_against_postgres(
         )
         repository_path = directories.repository_cache_path(repository.id)
         worktree_path = directories.run_paths(run_id).worktree
+        runtime = IntegrationRuntime()
         provisioner = WorkspaceProvisioner(
             persistence=SqlWorkspaceProvisioningPersistence(
                 sessions,
@@ -161,7 +187,7 @@ async def test_claim_provision_execute_and_persist_events_against_postgres(
                     branch=f"circular/run/{run_id}",
                 )
             ),
-            runtime=IntegrationRuntime(),
+            runtime=runtime,
             directories=directories,
             spec_factory=FakeWorkloadSpecFactory(
                 image="circular-runner:test",
@@ -174,7 +200,7 @@ async def test_claim_provision_execute_and_persist_events_against_postgres(
         assert workspace.status.value == "ready"
         assert provisioned.handle.resource_id == workspace.container_id
 
-        await executor.execute(run_id)
+        await executor.execute_runtime(run_id, runtime, provisioned.handle)
 
         async with sessions() as session:
             persisted = await session.get(RunRecord, run_id)
@@ -194,7 +220,10 @@ async def test_claim_provision_execute_and_persist_events_against_postgres(
             "workspace.ready",
             "run.started",
         ]
-        assert events[-1].type == "run.completed"
+        assert [event.type for event in events[-2:]] == [
+            "agent.message.completed",
+            "run.completed",
+        ]
     finally:
         try:
             async with sessions.begin() as session:

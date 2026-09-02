@@ -220,7 +220,6 @@ name = "circular-worker"
 version = "0.1.0"
 source = { editable = "apps/worker" }
 dependencies = [
-    { name = "circular-agents" },
     { name = "circular-git" },
     { name = "circular-runners" },
     { name = "circular-runtimes" },
@@ -230,7 +229,6 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
-    { name = "circular-agents", editable = "packages/agents" },
     { name = "circular-git", editable = "packages/git" },
     { name = "circular-runners", editable = "packages/runners" },
     { name = "circular-runtimes", editable = "packages/runtimes" },

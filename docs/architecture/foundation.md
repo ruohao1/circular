@@ -10,7 +10,7 @@ worker compose the same domain packages but do not call one another in-process.
 - `orchestration`: the deterministic Run lifecycle and transition policy.
 - `events`: normalized event names and backend-neutral event envelopes.
 - `agents`: backend capability contract plus the deterministic fake adapter.
-- `fake-agent-workload`: isolated deterministic process fixture for the future container
+- `fake-agent-workload`: isolated deterministic process fixture for the container
   execution path; it is not another control-plane process.
 - `storage`: SQLAlchemy mappings, repositories, event persistence, and queue claiming.
 - `runners`: execution coordination across backend, workspace, and event seams, including
@@ -47,9 +47,11 @@ post-start identity write fails, provisioning either records that immutable ID i
 failed Workspace transaction or permanently discards the just-created allocation through
 the runtime compensation boundary.
 
-Runner-side event ingestion can consume and persist fake-workload output, but the worker
-still retains the in-process fake backend after provisioning as a temporary compatibility
-path. Composing those two completed boundaries is the next integration step.
+The worker passes the exact live handle returned by provisioning to runtime execution.
+Before consuming output, one database read verifies that the Run is `running`, its
+Workspace is `ready`, and the persisted immutable resource ID matches the handle. The
+ingestor then commits each normalized fake-workload event independently so polling and SSE
+can expose progress before the process exits.
 
 Repository caches, worktrees, and artifacts are derived from internal UUIDs beneath
 worker-owned roots. The `runners` path module validates containment and translates a
@@ -60,12 +62,10 @@ local and Compose mappings.
 
 ## Deliberately deferred
 
-Real agent backends, container-event worker composition, authentication and RBAC, approval UI,
+Real agent backends, authentication and RBAC, approval UI,
 recursive delegation, Linear/GitHub adapters, LISTEN/NOTIFY wakeups, generated frontend
-contracts, billing, and distributed runners are not implemented. The fake workload image
-now exercises provisioning, and its output adapter is implemented, but the two are not yet
-connected in worker composition. These have explicit seams or storage fields where needed,
-but no speculative framework.
+contracts, billing, and distributed runners are not implemented. These have explicit seams
+or storage fields where needed, but no speculative framework.
 Cross-process container recovery and retained-container cleanup also remain worker
 lifecycle work. Active-cancellation coordination, including the executor preflight
 read-then-act race, remains in ISQ-175. Compose Docker CLI/socket access, runner-image

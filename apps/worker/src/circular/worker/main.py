@@ -2,7 +2,6 @@ import asyncio
 import logging
 from contextlib import suppress
 
-from circular.agents import FakeAgentBackend
 from circular.git import LocalRepositoryCache, LocalWorktreeManager
 from circular.runners import (
     FakeWorkloadSpecFactory,
@@ -43,7 +42,7 @@ async def worker_loop(settings: Settings, stop: asyncio.Event | None = None) -> 
     executor = RunExecutor(
         sessions,
         store,
-        {"fake": FakeAgentBackend(settings.fake_delay_seconds)},
+        {},
     )
     stop = stop or asyncio.Event()
     try:
@@ -66,8 +65,7 @@ async def worker_loop(settings: Settings, stop: asyncio.Event | None = None) -> 
                         "runtime_handle_id": provisioned.handle.id,
                     },
                 )
-                # Temporary pre-ISQ-168 compatibility path; container output is not ingested yet.
-                await executor.execute(run_id)
+                await executor.execute_runtime(run_id, runtime, provisioned.handle)
             except Exception:
                 logger.exception("run execution failed", extra={"run_id": str(run_id)})
     finally:

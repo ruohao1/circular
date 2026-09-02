@@ -32,6 +32,6 @@ See [docs/architecture/foundation.md](docs/architecture/foundation.md) for the p
 map and intentionally deferred work. Worker-owned filesystem roots and their local and
 Compose mappings are documented in
 [docs/development/execution-directories.md](docs/development/execution-directories.md).
-The deterministic process and image used to test the future container execution path are
+The deterministic process and image used to test the container execution path are
 documented in
 [docs/development/fake-agent-workload.md](docs/development/fake-agent-workload.md).

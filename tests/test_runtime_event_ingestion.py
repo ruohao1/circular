@@ -8,7 +8,7 @@ from typing import Any
 from uuid import UUID
 
 import pytest
-from circular.domain import RunStatus
+from circular.domain import RunStatus, WorkspaceStatus
 from circular.events import EventType
 from circular.runners import (
     BackendProcessError,
@@ -17,6 +17,7 @@ from circular.runners import (
     BackendStoppedError,
     EventPersistenceError,
     FakeBackendEventStream,
+    InvalidRunExecutionState,
     RunExecutor,
     RunNotReadyForRuntimeError,
     RuntimeCompletionError,
@@ -243,12 +244,26 @@ class RecordingTransaction(AbstractAsyncContextManager["RecordingTransaction"]):
         assert run_id == RUN_ID
         return self._sessions.run
 
+    async def execute(self, statement: object) -> Any:
+        del statement
+        if self._sessions.preflight_error is not None:
+            raise self._sessions.preflight_error
+        row = None
+        if self._sessions.run is not None:
+            row = (self._sessions.run, self._sessions.workspace)
+        return SimpleNamespace(one_or_none=lambda: row)
+
 
 class RecordingSessions:
     def __init__(self) -> None:
         self.committed: list[Any] = []
         self.transactions = 0
         self.run = SimpleNamespace(status=RunStatus.RUNNING.value)
+        self.workspace = SimpleNamespace(
+            status=WorkspaceStatus.READY.value,
+            container_id=HANDLE.resource_id,
+        )
+        self.preflight_error: Exception | None = None
 
     def begin(self) -> RecordingTransaction:
         self.transactions += 1
@@ -943,10 +958,68 @@ async def test_runtime_executor_rejects_a_non_running_run_before_consuming_outpu
 
     assert exc_info.value.status is RunStatus.PROVISIONING
     assert runtime.output_calls == 0
+    assert sessions.committed == []
     assert all(
         not hasattr(item, "data") or item.data != {"delta": "must not persist"}
         for item in sessions.committed
     )
+
+
+@pytest.mark.parametrize(
+    ("workspace", "message"),
+    [
+        (None, "requires a ready Workspace"),
+        (
+            SimpleNamespace(
+                status=WorkspaceStatus.PENDING.value,
+                container_id=HANDLE.resource_id,
+            ),
+            "requires a ready Workspace",
+        ),
+        (
+            SimpleNamespace(
+                status=WorkspaceStatus.READY.value,
+                container_id="different-resource",
+            ),
+            "does not match the provisioned runtime resource",
+        ),
+    ],
+)
+async def test_runtime_executor_rejects_an_unready_or_mismatched_workspace_without_mutation(
+    workspace: object | None,
+    message: str,
+) -> None:
+    runtime = CountingRuntime(())
+    sessions = RecordingSessions()
+    sessions.workspace = workspace
+    executor = RunExecutor(sessions, LifecycleStore(), {})
+
+    with pytest.raises(InvalidRunExecutionState, match=message):
+        await executor.execute_runtime(RUN_ID, runtime, HANDLE)
+
+    assert runtime.output_calls == 0
+    assert sessions.committed == []
+
+
+async def test_runtime_executor_fails_the_run_when_workspace_preflight_is_unavailable() -> None:
+    primary = OSError("workspace query unavailable")
+    runtime = CountingRuntime(())
+    sessions = RecordingSessions()
+    sessions.preflight_error = primary
+    executor = RunExecutor(sessions, LifecycleStore(), {})
+
+    with pytest.raises(OSError, match="workspace query unavailable") as exc_info:
+        await executor.execute_runtime(RUN_ID, runtime, HANDLE)
+
+    assert exc_info.value is primary
+    assert runtime.output_calls == 0
+    assert sessions.committed[0] == (
+        "transition",
+        RUN_ID,
+        RunStatus.FAILED,
+        "workspace query unavailable",
+    )
+    assert sessions.committed[1].type is EventType.RUN_FAILED
 
 
 async def test_protocol_failure_identifies_its_stream_and_line_without_echoing_values() -> None:

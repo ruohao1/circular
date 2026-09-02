@@ -78,7 +78,7 @@ class RunExecutor:
     ) -> None:
         """Finish an already-running Run from its started container output."""
         try:
-            await self._require_running(run_id)
+            await self._require_runtime_ready(run_id, handle)
         except InvalidRunExecutionState:
             raise
         except Exception as error:
@@ -95,14 +95,33 @@ class RunExecutor:
             await self._record_failure(run_id, error)
             raise
 
-    async def _require_running(self, run_id: UUID) -> None:
+    async def _require_runtime_ready(
+        self,
+        run_id: UUID,
+        handle: ContainerHandle,
+    ) -> None:
         async with self._sessions.begin() as session:
-            run = await session.get(RunRecord, run_id)
-            if run is None:
+            row = (
+                await session.execute(
+                    select(RunRecord, WorkspaceRecord)
+                    .outerjoin(WorkspaceRecord, WorkspaceRecord.run_id == RunRecord.id)
+                    .where(RunRecord.id == run_id)
+                )
+            ).one_or_none()
+            if row is None:
                 raise InvalidRunExecutionState(f"run {run_id} is not available for execution")
+            run, workspace = row
             status = RunStatus(run.status)
             if status is not RunStatus.RUNNING:
                 raise RunNotReadyForRuntimeError(run_id, status)
+            if workspace is None or WorkspaceStatus(workspace.status) is not WorkspaceStatus.READY:
+                raise InvalidRunExecutionState(
+                    f"run {run_id} requires a ready Workspace before runtime execution"
+                )
+            if workspace.container_id != handle.resource_id:
+                raise InvalidRunExecutionState(
+                    f"run {run_id} Workspace does not match the provisioned runtime resource"
+                )
 
     async def _complete(self, run_id: UUID) -> None:
         async with self._sessions.begin() as session:
@@ -124,8 +143,7 @@ class RunExecutor:
         except Exception as persistence_error:
             try:
                 error.add_note(
-                    f"failed to persist Run execution failure "
-                    f"({type(persistence_error).__name__})"
+                    f"failed to persist Run execution failure ({type(persistence_error).__name__})"
                 )
             except Exception:
                 return

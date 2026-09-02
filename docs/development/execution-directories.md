@@ -5,8 +5,8 @@ names, and other user-controlled strings never become path segments. A repositor
 path is `<repository root>/<repository UUID>`; worktree and artifact paths are
 `<corresponding root>/<Run UUID>`.
 
-The worker also needs two views of each worktree when it eventually asks the host Docker
-daemon to launch a Run container:
+The worker needs two views of each worktree when it asks the host Docker daemon to launch
+a Run container:
 
 1. the worker-visible path used to provision and inspect the worktree;
 2. the Docker-host-visible path used as the bind-mount source.
@@ -136,5 +136,4 @@ filesystem cleanup has settled.
 | `CIRCULAR_RUNNER_MEMORY_LIMIT_MB` | `2048` MiB |
 
 The worker uses the image and resource values when it builds the `ContainerSpec` for a
-claimed Run. The in-process fake backend retained before container event ingestion does
-not consume them.
+claimed Run, then sends the provisioned container's output through runtime event ingestion.

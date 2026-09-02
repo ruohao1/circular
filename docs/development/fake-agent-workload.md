@@ -1,10 +1,9 @@
 # Fake agent workload process
 
 The fake agent workload is a deterministic process and container image for exercising the
-future Run → container → worktree → backend execution path. It is not a control-plane
-process, a fourth Compose service, or the in-worker `FakeAgentBackend`. Workspace
-provisioning now starts the configured runner image with this version-1 request; output
-ingestion and replacement of the temporary in-worker fake execution path remain separate.
+Run → container → worktree → backend execution path. It is not a control-plane process or
+a fourth Compose service. Workspace provisioning starts the configured runner image with
+this version-1 request, and the worker consumes its output through runtime event ingestion.
 
 Its only interface is one UTF-8 encoded JSON object on standard input, UTF-8 JSON Lines on
 standard output and standard error, and the process exit code. The byte encoding is explicit
@@ -99,15 +98,17 @@ polling event reader and SSE endpoint can expose deltas while the backend is sti
 later protocol, process, or persistence failure does not roll back prior event commits.
 
 `RunExecutor.execute_runtime()` is the post-provisioning coordinator for an already-running Run.
-It verifies the Run state before consuming output, invokes the ingestor, and then performs the
-existing `running` to `finalizing` to `succeeded` transitions. Failures use the existing terminal
-path. A backend-reported error, or a valid decoded event rejected by version, identity, source,
-type, or data schema, attaches its raw object to `run.failed`; malformed bytes and ambiguous
-duplicate-key documents do not. Run state and `run.failed` use the same database-safe error
-projection, capped at 4,000 characters. If recording that failure also fails, the original
-execution error remains primary and, when possible, receives only the secondary exception type
-as a sanitized note. Workspace provisioning, container start, cancellation, and release remain
-separate lifecycle concerns.
+One database read verifies the Run is `running`, its Workspace is `ready`, and the Workspace's
+immutable container identity matches the exact live handle before output is consumed. It then
+invokes the ingestor and performs the existing `running` to `finalizing` to `succeeded`
+transitions. Invalid caller preconditions do not mutate lifecycle state; operational failures
+use the terminal path. A backend-reported error, or a valid decoded event rejected by version,
+identity, source, type, or data schema, attaches its raw object to `run.failed`; malformed bytes
+and ambiguous duplicate-key documents do not. Run state and `run.failed` use the same
+database-safe error projection, capped at 4,000 characters. If recording that failure also
+fails, the original execution error remains primary and, when possible, receives only the
+secondary exception type as a sanitized note. Cancellation and release remain separate
+lifecycle concerns.
 
 ## Build and run
 
