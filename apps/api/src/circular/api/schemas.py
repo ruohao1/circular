@@ -2,7 +2,7 @@ from datetime import datetime
 from typing import Any
 from uuid import UUID
 
-from circular.domain import RunStatus, TaskStatus
+from circular.domain import RunStatus, TaskStatus, WorkspaceStatus
 from pydantic import BaseModel, ConfigDict, Field
 
 
@@ -100,3 +100,33 @@ class EventRead(Schema):
     raw: dict[str, Any] | None
     occurred_at: datetime
     recorded_at: datetime
+
+
+class WorkspaceRead(Schema):
+    id: UUID
+    run_id: UUID
+    status: WorkspaceStatus
+    container_id: str | None
+
+
+class ArtifactRead(Schema):
+    id: UUID
+    run_id: UUID
+    kind: str
+    uri: str
+    metadata: dict[str, Any]
+
+
+class UsageRead(Schema):
+    input_tokens: int = 0
+    output_tokens: int = 0
+
+
+class RunExecutionRead(Schema):
+    run: RunRead
+    task: TaskRead
+    agent: AgentRead
+    workspace: WorkspaceRead | None
+    artifacts: list[ArtifactRead]
+    usage: UsageRead
+    last_event_sequence: int

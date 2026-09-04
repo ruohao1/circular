@@ -15,6 +15,14 @@ from circular.runners.executor import (
     RunExecutor,
     RunNotReadyForRuntimeError,
 )
+from circular.runners.finalization import (
+    InvalidRunFinalizationState,
+    RunFinalizationContext,
+    RunFinalizationPersistence,
+    RunFinalizer,
+    SqlRunFinalizationPersistence,
+    diff_artifact_id_for_run,
+)
 from circular.runners.paths import ExecutionDirectories, InvalidExecutionPath, RunPaths
 from circular.runners.provisioning import (
     ContainerIdentityPersistenceError,
@@ -49,19 +57,25 @@ __all__ = [
     "InvalidExecutionPath",
     "InvalidRunProvisioningStatus",
     "InvalidRunExecutionState",
+    "InvalidRunFinalizationState",
     "MissingRunRepository",
     "ProvisionedWorkspace",
     "RunExecutor",
+    "RunFinalizationContext",
+    "RunFinalizationPersistence",
+    "RunFinalizer",
     "RunNotReadyForRuntimeError",
     "RunPaths",
     "RuntimeCompletionError",
     "RuntimeEventIngestor",
     "RuntimeOutputError",
+    "SqlRunFinalizationPersistence",
     "SqlWorkspaceProvisioningPersistence",
     "WorkspaceProvisioner",
     "WorkspaceProvisioningCompensationError",
     "WorkspaceProvisioningContext",
     "WorkspaceProvisioningPersistence",
     "WorkspaceProvisioningConflict",
+    "diff_artifact_id_for_run",
     "workspace_id_for_run",
 ]

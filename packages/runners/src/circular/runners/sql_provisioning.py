@@ -86,6 +86,7 @@ class SqlWorkspaceProvisioningPersistence:
             task_title=task.title,
             task_description=task.description,
             instructions=agent.instructions,
+            backend_config=agent.backend_config,
         )
 
     async def create_pending(self, workspace: Workspace) -> Workspace:

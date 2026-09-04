@@ -2,7 +2,7 @@
 
 The fake agent workload is a deterministic process and container image for exercising the
 Run → container → worktree → backend execution path. It is not a control-plane process or
-a fourth Compose service. Workspace provisioning starts the configured runner image with
+a persistent Compose service. Workspace provisioning starts the configured runner image with
 this version-1 request, and the worker consumes its output through runtime event ingestion.
 
 Its only interface is one UTF-8 encoded JSON object on standard input, UTF-8 JSON Lines on
@@ -108,7 +108,17 @@ and ambiguous duplicate-key documents do not. Run state and `run.failed` use the
 database-safe error projection, capped at 4,000 characters. If recording that failure also
 fails, the original execution error remains primary and, when possible, receives only the
 secondary exception type as a sanitized note. Cancellation and release remain separate
-lifecycle concerns.
+lifecycle concerns owned by `RunSupervisor`.
+
+The worker passes `--write-output` to the workload. After validating the request, the
+workload creates `circular-result-<Run UUID>.txt` in its working directory without
+overwriting existing files. This gives finalization a real untracked file to capture.
+The flag is optional for standalone protocol tests. A `before_events` failure does not
+create output; an `after_first_event` failure retains its partial output.
+
+Agent `backend_config` can set `delay_ms` and `failure` using the values above. Other
+configuration is not passed through as environment variables or Docker settings. By
+default, the worker derives the delay from `CIRCULAR_FAKE_DELAY_SECONDS`.
 
 ## Build and run
 

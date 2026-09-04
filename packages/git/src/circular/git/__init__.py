@@ -8,6 +8,12 @@ from circular.git.cache import (
     RepositoryFetchError,
     RepositoryLockError,
 )
+from circular.git.diff import (
+    GitDiff,
+    GitDiffCaptureError,
+    GitDiffCollector,
+    LocalGitDiffCollector,
+)
 from circular.git.worktrees import (
     InvalidWorktreePath,
     InvalidWorktreeRepository,
@@ -24,10 +30,14 @@ from circular.git.worktrees import (
 )
 
 __all__ = [
+    "GitDiff",
+    "GitDiffCaptureError",
+    "GitDiffCollector",
     "InvalidRepositoryCache",
     "InvalidWorktreePath",
     "InvalidWorktreeRepository",
     "LocalRepositoryCache",
+    "LocalGitDiffCollector",
     "LocalWorktreeManager",
     "ProvisionedWorktree",
     "RepositoryCache",

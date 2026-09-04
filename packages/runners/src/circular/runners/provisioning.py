@@ -56,6 +56,7 @@ class WorkspaceProvisioningContext:
     task_title: str
     task_description: str
     instructions: str
+    backend_config: dict | None = None
 
 
 class WorkspaceProvisioningPersistence(Protocol):
@@ -123,6 +124,13 @@ class FakeWorkloadSpecFactory:
         context: WorkspaceProvisioningContext,
         docker_host_worktree: Path,
     ) -> ContainerSpec:
+        config = context.backend_config or {}
+        delay = config.get("delay_ms", self.delay_ms)
+        failure = config.get("failure", "none")
+        if type(delay) is not int or not 0 <= delay <= 10_000:
+            raise ValueError("fake delay_ms must be an integer from 0 through 10000")
+        if failure not in {"none", "before_events", "after_first_event"}:
+            raise ValueError("unsupported fake failure mode")
         request = {
             "protocol_version": 1,
             "run": {
@@ -131,7 +139,7 @@ class FakeWorkloadSpecFactory:
                 "task_description": context.task_description,
                 "instructions": context.instructions,
             },
-            "behavior": {"delay_ms": self.delay_ms, "failure": "none"},
+            "behavior": {"delay_ms": delay, "failure": failure},
         }
         stdin = (
             json.dumps(request, ensure_ascii=True, separators=(",", ":"), sort_keys=True).encode(
@@ -143,7 +151,7 @@ class FakeWorkloadSpecFactory:
             run_id=context.run_id,
             image=self.image,
             worktree=docker_host_worktree,
-            command=(),
+            command=("--write-output",),
             stdin=stdin,
             cpu_limit=float(self.cpu_limit),
             memory_limit_mb=self.memory_limit_mb,

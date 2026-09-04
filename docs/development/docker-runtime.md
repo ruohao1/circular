@@ -118,9 +118,15 @@ identity nor proof of release.
 Calling `start()` repeatedly with the exact same resolved launch is idempotent only within
 one adapter instance. A changed stdin or environment value is an in-process conflict even
 though those confidential values are excluded from labels. Any deterministic name already
-present in Docker is a typed conflict and is never adopted, stopped, or removed. Crash
-recovery, reconciliation, and cleanup of durably recorded containers belong to the later
-workspace cleanup slice; `discard()` does not implement that lifecycle.
+present in Docker is a typed conflict and is never adopted by `start()`.
+
+The worker cleaner uses `release(run_id, resource_id)` for terminal cleanup and recovery.
+It verifies the persisted immutable ID (or reconciles the deterministic name if a crash
+preceded identity persistence), managed/Run labels, and the exact single worktree mount
+before removal. An absent resource is an idempotent no-op; ambiguous or foreign ownership
+fails closed. The owning Run row remains locked through resource removal so an expired
+worker cannot race a replacement owner. `discard()` remains the live-handle compensation
+boundary, while `release()` can operate in a replacement worker process.
 
 Startup reservations are per deterministic Run name. Concurrent calls for one Run remain
 serialized for idempotence, while unrelated Runs can create and verify containers in

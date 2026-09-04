@@ -245,7 +245,7 @@ async def test_claimed_run_is_running_only_after_its_workspace_is_ready(
     assert runtime.spec.run_id == RUN_ID
     assert runtime.spec.worktree == directories.run_paths(RUN_ID).docker_host_worktree
     assert runtime.spec.image == "circular-runner:test"
-    assert runtime.spec.command == ()
+    assert runtime.spec.command == ("--write-output",)
     assert runtime.spec.cpu_limit == 1.5
     assert runtime.spec.memory_limit_mb == 768
     assert runtime.spec.environment == {}

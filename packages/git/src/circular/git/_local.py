@@ -5,7 +5,7 @@ import fcntl
 import os
 import signal
 import stat
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator, Callable, Mapping
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -14,7 +14,10 @@ class GitLaunchError(RuntimeError):
     """The local Git executable could not be launched."""
 
 
-async def run_git(*arguments: str) -> tuple[bytes, int]:
+async def run_git(
+    *arguments: str,
+    extra_environment: Mapping[str, str] | None = None,
+) -> tuple[bytes, int]:
     """Run one credential-noninteractive Git command without a shell.
 
     All Git subprocesses use a separate process group. Cancellation terminates
@@ -26,6 +29,11 @@ async def run_git(*arguments: str) -> tuple[bytes, int]:
     environment["GIT_ALLOW_PROTOCOL"] = "file:https"
     environment["GIT_TERMINAL_PROMPT"] = "0"
     environment["GCM_INTERACTIVE"] = "Never"
+    safe_directory: tuple[str, ...] = ()
+    if "-C" in arguments:
+        safe_directory = ("-c", f"safe.directory={arguments[arguments.index('-C') + 1]}")
+    if extra_environment is not None:
+        environment.update(extra_environment)
     try:
         process = await asyncio.create_subprocess_exec(
             "git",
@@ -37,6 +45,7 @@ async def run_git(*arguments: str) -> tuple[bytes, int]:
             "protocol.https.allow=always",
             "-c",
             "core.hooksPath=/dev/null",
+            *safe_directory,
             *arguments,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,

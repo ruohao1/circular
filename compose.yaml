@@ -33,6 +33,12 @@ services:
     command: ["uv", "run", "circular-api"]
     environment:
       DATABASE_URL: postgresql+psycopg://circular:circular@postgres:5432/circular
+      CIRCULAR_ARTIFACT_ROOT: /var/lib/circular/artifacts
+    volumes:
+      - type: bind
+        source: ${CIRCULAR_EXECUTION_HOST_ROOT:-${PWD}/.circular}/artifacts
+        target: /var/lib/circular/artifacts
+        read_only: true
     ports:
       - "8000:8000"
     depends_on:
@@ -44,9 +50,11 @@ services:
       context: .
       dockerfile: infra/python.Dockerfile
     command: ["uv", "run", "circular-worker"]
+    stop_grace_period: 90s
     environment:
       DATABASE_URL: postgresql+psycopg://circular:circular@postgres:5432/circular
       CIRCULAR_POLL_INTERVAL_SECONDS: ${CIRCULAR_POLL_INTERVAL_SECONDS:-1}
+      CIRCULAR_FAKE_DELAY_SECONDS: ${CIRCULAR_FAKE_DELAY_SECONDS:-0.05}
       CIRCULAR_REPOSITORY_CACHE_ROOT: /var/lib/circular/repositories
       CIRCULAR_WORKTREE_ROOT: /var/lib/circular/worktrees
       CIRCULAR_ARTIFACT_ROOT: /var/lib/circular/artifacts
@@ -55,12 +63,23 @@ services:
       CIRCULAR_RUNNER_CPU_LIMIT: ${CIRCULAR_RUNNER_CPU_LIMIT:-1}
       CIRCULAR_RUNNER_MEMORY_LIMIT_MB: ${CIRCULAR_RUNNER_MEMORY_LIMIT_MB:-2048}
     volumes:
+      # The worker is trusted infrastructure. Run containers never receive this mount.
+      - /var/run/docker.sock:/var/run/docker.sock
       - type: bind
         source: ${CIRCULAR_EXECUTION_HOST_ROOT:-${PWD}/.circular}
         target: /var/lib/circular
     depends_on:
       migrate:
         condition: service_completed_successfully
+      runner-image:
+        condition: service_completed_successfully
+
+  runner-image:
+    image: ${CIRCULAR_RUNNER_IMAGE:-circular-runner:dev}
+    build:
+      context: .
+      dockerfile: infra/fake-agent-workload.Dockerfile
+    entrypoint: ["python", "-c", "pass"]
 
   web:
     build:

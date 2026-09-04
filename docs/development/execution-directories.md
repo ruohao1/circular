@@ -46,6 +46,16 @@ absolute directory when the data should live elsewhere. If the worker and Docker
 do not share a host filesystem, bind-path translation is insufficient; a remote-volume
 adapter would be a separate execution model.
 
+The trusted worker image includes Git and the Docker CLI; only the worker receives
+`/var/run/docker.sock`. Compose builds `circular-runner:dev` through the one-shot
+`runner-image` build service. Run containers receive neither this socket nor the worker's
+environment or source tree. The API mounts only the artifact root, read-only.
+
+A local non-root worker uses its own UID/GID for agent containers. The root Compose
+worker assigns each new worktree to UID/GID 65532 before launch and uses that non-root
+container identity. This avoids an unwritable bind mount without running the agent as root.
+Compose permits 90 seconds for worker shutdown and resource cleanup.
+
 `DockerRuntime` fixes the worktree's destination inside a Run container at `/workspace`.
 The adapter validates that the source is the direct canonical UUID child beneath this
 Docker-host root. The host path may be daemon-visible without existing in the worker's
@@ -89,6 +99,11 @@ private same-root staging worktree is published with `git worktree move` and
 only then exposed at the Run path. Before returning, provisioning atomically
 installs and fsyncs a sibling ownership receipt that binds the Run UUID,
 Repository UUID, and the target directory's no-follow device/inode identity.
+Private staging directories also receive a durable ownership receipt before Git
+allocation starts. Release reconciles these receipts and exact registered staging
+paths under the Run and Repository locks, including after a worker process crash.
+Legacy staging directories require verified linked Git ownership; a matching
+filename alone never authorizes deletion. Unverifiable allocations fail closed.
 Provision rollback uses exact-path Git-aware removal and compare-deletes only
 its unchanged new branch; only after that durable rollback completes does it
 remove an installed receipt. It never performs Repository-wide worktree
@@ -100,10 +115,12 @@ Repositories from claiming the same Run target. Platform-owned Git commands
 disable Repository hooks, run with argv, and terminate and await their process
 group on cancellation before either lock is released.
 
-`release` is idempotent and preserves the Run branch for later diff, commit, and
-artifact handling. A present registered worktree must be clean; modified or
+`release` is idempotent and preserves the Run branch. By default, a present
+registered worktree must be clean; modified or
 untracked files, including ignored outputs, cause a typed failure and remain
-available for explicit recovery. If an interrupted release leaves only Git
+available for explicit recovery. The terminal worker cleaner explicitly requests
+`discard_changes=True` only after the final patch and output archive are durably retained;
+this does not bypass the ownership checks. If an interrupted release leaves only Git
 registration metadata, the manager verifies the exact Run path, branch, and
 registered HEAD against the current branch using byte-safe porcelain output
 before removing only that registration. If only the directory remains, its
@@ -137,3 +154,27 @@ filesystem cleanup has settled.
 
 The worker uses the image and resource values when it builds the `ContainerSpec` for a
 claimed Run, then sends the provisioned container's output through runtime event ingestion.
+
+## Retained artifacts
+
+Each terminal Run retains `git-diff.patch` (including untracked, non-ignored files and
+binary patches) and `worktree.tar` (including ignored output, excluding `.git`). The archive
+streams through a disk-backed temporary file and bounded-size artifact writes on an I/O
+thread, so large checkouts do not hit a fixed 32 MiB cap or block lease heartbeats.
+This requires temporary disk space as well as artifact-store space. Traversal failures
+are reported rather than silently omitting output. Archiving never follows symlinks and
+rejects special files. Treat a downloaded
+archive as untrusted output; do not extract it over a working repository.
+
+Before diff capture, the worker validates that the linked Git metadata belongs to this
+Run beneath the managed Repository cache. It then supplies that trusted Git directory
+explicitly, so an agent-written `.git` backpointer cannot redirect worker Git commands.
+
+Artifact bytes are atomically published at immutable `artifact://<Run UUID>/<name>` URIs.
+Matching writes are idempotent; a differing rewrite is refused.
+Publication fsyncs the file and directory ancestry before acknowledging durability,
+including existing directories that may remain from an interrupted publication.
+Content routes verify
+Run ownership, reject path traversal and symlinks, and check the stored SHA-256. Downloads
+continue to work after the Workspace is released. If retention fails, the worker retains
+the worktree for recovery, records a cleanup event, and preserves the original Run outcome.

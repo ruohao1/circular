@@ -7,6 +7,7 @@ import shutil
 import signal
 import stat
 import subprocess
+import sys
 from pathlib import Path
 from uuid import UUID, uuid4
 
@@ -24,6 +25,108 @@ from circular.git import (
     WorktreeReleaseError,
 )
 from circular.runners import ExecutionDirectories
+
+
+@pytest.mark.parametrize("crash_point", ["before_add", "after_add", "after_move"])
+async def test_release_recovers_a_worker_process_crash_during_provisioning(
+    tmp_path: Path, crash_point: str
+) -> None:
+    source = _create_repository(tmp_path / "source")
+    directories = _directories(tmp_path)
+    repository = await _cached_repository(directories, source)
+    run_id = uuid4()
+    child = await asyncio.create_subprocess_exec(
+        sys.executable,
+        "-c",
+        """
+import asyncio, os, sys
+from pathlib import Path
+from uuid import UUID
+import circular.git.worktrees as module
+from circular.runners import ExecutionDirectories
+root, repository, run_id, crash = sys.argv[1:]
+root = Path(root)
+directories = ExecutionDirectories(
+    root/'cache', root/'worktrees', root/'artifacts', root/'docker-worktrees'
+)
+real_git = module.run_git
+async def crash_at_boundary(*arguments):
+    operation = arguments[2:4]
+    if operation == ('worktree', 'add') and crash == 'before_add':
+        os._exit(77)
+    result = await real_git(*arguments)
+    if ((operation == ('worktree', 'add') and crash == 'after_add') or
+        (operation == ('worktree', 'move') and crash == 'after_move')):
+        os._exit(77)
+    return result
+module.run_git = crash_at_boundary
+asyncio.run(module.LocalWorktreeManager(directories).provision(
+    UUID(run_id), Path(repository), 'main'
+))
+""",
+        str(tmp_path),
+        str(repository),
+        str(run_id),
+        crash_point,
+    )
+    assert await asyncio.wait_for(child.wait(), 10) == 77
+    target = directories.run_paths(run_id).worktree
+    worktree = ProvisionedWorktree(run_id, repository, target, f"circular/run/{run_id}")
+
+    await LocalWorktreeManager(directories).release(worktree, discard_changes=True)
+    await LocalWorktreeManager(directories).release(worktree, discard_changes=True)
+
+    assert not target.exists()
+    assert not list(directories.worktree_root.glob(f".{run_id}.worktree-*"))
+    assert _git(repository, "worktree", "list", "--porcelain").count("worktree ") == 1
+
+
+@pytest.mark.parametrize("missing_directory", [False, True])
+async def test_release_reconciles_registered_staging_left_by_a_crash(
+    tmp_path: Path, missing_directory: bool
+) -> None:
+    source = _create_repository(tmp_path / "source")
+    directories = _directories(tmp_path)
+    repository = await _cached_repository(directories, source)
+    run_id = uuid4()
+    target = directories.run_paths(run_id).worktree
+    staging = target.with_name(f".{run_id}.worktree-crash")
+    branch = f"circular/run/{run_id}"
+    _git(repository, "worktree", "add", "-b", branch, str(staging), "main")
+    other_run = uuid4()
+    other_staging = target.with_name(f".{other_run}.worktree-crash")
+    _git(
+        repository, "worktree", "add", "-b", f"circular/run/{other_run}", str(other_staging), "main"
+    )
+    if missing_directory:
+        shutil.rmtree(staging)
+    worktree = ProvisionedWorktree(run_id, repository, target, branch)
+
+    await LocalWorktreeManager(directories).release(worktree, discard_changes=True)
+    await LocalWorktreeManager(directories).release(worktree, discard_changes=True)
+
+    assert not staging.exists()
+    assert str(staging) not in _git(repository, "worktree", "list", "--porcelain")
+    assert _git(repository, "rev-parse", branch)
+    assert other_staging.exists()
+    assert str(other_staging) in _git(repository, "worktree", "list", "--porcelain")
+
+
+async def test_staging_recovery_preserves_unverified_paths(tmp_path: Path) -> None:
+    source = _create_repository(tmp_path / "source")
+    directories = _directories(tmp_path)
+    repository = await _cached_repository(directories, source)
+    run_id = uuid4()
+    target = directories.run_paths(run_id).worktree
+    staging = target.with_name(f".{run_id}.worktree-foreign")
+    staging.mkdir(parents=True)
+    (staging / "keep").write_text("unverified output")
+    with pytest.raises(WorktreeReleaseError):
+        await LocalWorktreeManager(directories).release(
+            ProvisionedWorktree(run_id, repository, target, f"circular/run/{run_id}"),
+            discard_changes=True,
+        )
+    assert (staging / "keep").read_text() == "unverified output"
 
 
 @pytest.mark.asyncio
@@ -95,7 +198,11 @@ async def test_failed_provision_removes_installed_receipt_after_durable_rollback
 
     def fail_first_root_fsync(descriptor: int) -> None:
         nonlocal root_fsync_failed
-        if not root_fsync_failed and stat.S_ISDIR(os.fstat(descriptor).st_mode):
+        if (
+            not root_fsync_failed
+            and _ownership_marker(directories, run_id).exists()
+            and stat.S_ISDIR(os.fstat(descriptor).st_mode)
+        ):
             root_fsync_failed = True
             raise OSError("injected ownership marker durability failure")
         real_fsync(descriptor)
@@ -126,7 +233,11 @@ async def test_failed_provision_retains_installed_receipt_when_branch_rollback_f
 
     def fail_first_root_fsync(descriptor: int) -> None:
         nonlocal root_fsync_failed
-        if not root_fsync_failed and stat.S_ISDIR(os.fstat(descriptor).st_mode):
+        if (
+            not root_fsync_failed
+            and _ownership_marker(directories, run_id).exists()
+            and stat.S_ISDIR(os.fstat(descriptor).st_mode)
+        ):
             root_fsync_failed = True
             raise OSError("injected ownership marker durability failure")
         real_fsync(descriptor)

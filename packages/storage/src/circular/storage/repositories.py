@@ -1,16 +1,20 @@
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
 from circular.domain import Artifact, RunStatus, Workspace, WorkspaceStatus
 from circular.events import EventEnvelope, EventType
 from circular.orchestration import RunLifecycle, WorkspaceLifecycle
 from circular.storage.models import ArtifactRecord, EventRecord, RunRecord, WorkspaceRecord
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 
 class RunNotFoundError(LookupError):
+    pass
+
+
+class RunLeaseLostError(RuntimeError):
     pass
 
 
@@ -54,9 +58,21 @@ class WorkspaceContainerStatusError(ValueError):
 
 async def _lock_run(session: AsyncSession, run_id: UUID) -> RunRecord:
     """Acquire the first row lock for any write owned by a Run."""
-    run = await session.scalar(select(RunRecord).where(RunRecord.id == run_id).with_for_update())
+    run = await session.scalar(
+        select(RunRecord)
+        .where(RunRecord.id == run_id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
     if run is None:
         raise RunNotFoundError(str(run_id))
+    owner = session.info.get("worker_id")
+    if owner is not None and (
+        run.worker_id != owner
+        or run.lease_expires_at is None
+        or run.lease_expires_at <= datetime.now(UTC)
+    ):
+        raise RunLeaseLostError(f"worker no longer owns run {run_id}")
     return run
 
 
@@ -119,7 +135,18 @@ class RunEventReader:
 class RunStore:
     """Transactional interface for claiming, transitioning, and observing Runs."""
 
-    async def claim_next(self, session: AsyncSession, worker_id: str) -> RunRecord | None:
+    async def lock_for_execution(self, session: AsyncSession, run_id: UUID) -> RunRecord:
+        """Fence external resource mutations until this transaction ends.
+
+        Worker sessions carry their worker_id in session.info. Holding this row
+        lock prevents recovery from transferring the lease during a destructive
+        runtime/worktree operation; stale workers fail before touching resources.
+        """
+        return await _lock_run(session, run_id)
+
+    async def claim_next(
+        self, session: AsyncSession, worker_id: str, *, lease_seconds: float = 60
+    ) -> RunRecord | None:
         statement = self.claim_statement()
         run = await session.scalar(statement)
         if run is None:
@@ -129,7 +156,93 @@ class RunStore:
         run.status = RunStatus.PROVISIONING.value
         run.worker_id = worker_id
         run.claimed_at = datetime.now(UTC)
+        run.lease_expires_at = run.claimed_at + timedelta(seconds=lease_seconds)
         await session.flush()
+        return run
+
+    async def heartbeat(
+        self, session: AsyncSession, run_id: UUID, worker_id: str, *, lease_seconds: float = 60
+    ) -> None:
+        run = await _lock_run(session, run_id)
+        if run.worker_id != worker_id or (
+            run.lease_expires_at is None or run.lease_expires_at <= datetime.now(UTC)
+        ):
+            raise RunLeaseLostError(f"worker no longer owns run {run_id}")
+        run.lease_expires_at = datetime.now(UTC) + timedelta(seconds=lease_seconds)
+        await session.flush()
+
+    async def recover_expired(
+        self, session: AsyncSession, worker_id: str, *, lease_seconds: float = 60
+    ) -> RunRecord | None:
+        """Fence one expired owner, fail its attempt, and grant a bounded cleanup lease.
+
+        Failed attempts are never automatically rerun: allocation may have happened
+        immediately before a crash. A new user Run is the explicit retry boundary.
+        """
+        now = datetime.now(UTC)
+        statement = (
+            select(RunRecord)
+            .where(
+                RunRecord.status != RunStatus.QUEUED.value,
+                RunRecord.worker_id.is_not(None),
+                RunRecord.recovery_attempts < 3,
+                or_(
+                    RunRecord.lease_expires_at <= now,
+                    (RunRecord.lease_expires_at.is_(None))
+                    & (RunRecord.claimed_at < now - timedelta(seconds=lease_seconds)),
+                ),
+            )
+            .order_by(RunRecord.claimed_at, RunRecord.id)
+            .with_for_update(skip_locked=True)
+            .limit(1)
+        )
+        run = await session.scalar(statement)
+        if run is None:
+            return None
+        run.worker_id = worker_id
+        run.lease_expires_at = now + timedelta(seconds=lease_seconds)
+        run.recovery_attempts += 1
+        if not RunLifecycle.is_terminal(RunStatus(run.status)):
+            await self.transition(session, run.id, RunStatus.FAILED, error="worker lease expired")
+            await self.append_event(
+                session,
+                EventEnvelope(
+                    run_id=run.id,
+                    type=EventType.RUN_FAILED,
+                    source="worker-recovery",
+                    data={
+                        "error": "worker lease expired",
+                        "recovery_attempt": run.recovery_attempts,
+                    },
+                ),
+            )
+        await session.flush()
+        return run
+
+    async def release_claim(self, session: AsyncSession, run_id: UUID) -> bool:
+        run = await _lock_run(session, run_id)
+        if not RunLifecycle.is_terminal(RunStatus(run.status)):
+            # Keep interrupted decisions eligible for lease-based recovery.
+            return False
+        run.worker_id = None
+        run.lease_expires_at = None
+        await session.flush()
+        return True
+
+    async def cancel(self, session: AsyncSession, run_id: UUID) -> RunRecord:
+        run = await _lock_run(session, run_id)
+        if RunStatus(run.status) is RunStatus.CANCELLED:
+            return run
+        await self.transition(session, run_id, RunStatus.CANCELLED)
+        await self.append_event(
+            session,
+            EventEnvelope(
+                run_id=run_id,
+                type=EventType.RUN_CANCELLED,
+                source="api",
+                data={},
+            ),
+        )
         return run
 
     @staticmethod

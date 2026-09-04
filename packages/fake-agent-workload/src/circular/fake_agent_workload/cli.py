@@ -1,4 +1,5 @@
 import json
+import os
 import sys
 import time
 from dataclasses import dataclass
@@ -203,7 +204,9 @@ def _events(request: WorkloadRequest) -> tuple[dict[str, Any], ...]:
     )
 
 
-def _run(request: WorkloadRequest, stdout: BinaryIO, stderr: BinaryIO) -> int:
+def _run(
+    request: WorkloadRequest, stdout: BinaryIO, stderr: BinaryIO, *, write_output: bool = False
+) -> int:
     run_id = request.run.id
     behavior = request.behavior
     if behavior.failure is FailureMode.BEFORE_EVENTS:
@@ -217,6 +220,11 @@ def _run(request: WorkloadRequest, stdout: BinaryIO, stderr: BinaryIO) -> int:
         )
         return INJECTED_FAILURE_EXIT
 
+    if write_output:
+        name = f"circular-result-{run_id}.txt"
+        descriptor = os.open(name, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o644)
+        with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
+            stream.write(f"Fake container workload completed: {request.run.task_title}\n")
     for index, event in enumerate(_events(request)):
         time.sleep(behavior.delay_seconds)
         _write_json_line(stdout, event)
@@ -237,6 +245,8 @@ def main(
     stdin: BinaryIO | None = None,
     stdout: BinaryIO | None = None,
     stderr: BinaryIO | None = None,
+    *,
+    write_output: bool = False,
 ) -> int:
     input_stream = sys.stdin.buffer if stdin is None else stdin
     output_stream = sys.stdout.buffer if stdout is None else stdout
@@ -246,4 +256,4 @@ def main(
     except InvalidInput as error:
         _write_json_line(error_stream, _error("invalid_input", str(error)))
         return INVALID_INPUT_EXIT
-    return _run(request, output_stream, error_stream)
+    return _run(request, output_stream, error_stream, write_output=write_output)

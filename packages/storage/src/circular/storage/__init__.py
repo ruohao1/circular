@@ -1,3 +1,9 @@
+from circular.storage.artifact_content import (
+    ArtifactContentError,
+    ArtifactContentStore,
+    LocalArtifactContentStore,
+    StoredArtifactContent,
+)
 from circular.storage.database import create_engine, create_session_factory
 from circular.storage.models import (
     AgentRecord,
@@ -22,10 +28,13 @@ from circular.storage.repositories import (
 )
 
 __all__ = [
+    "ArtifactContentError",
+    "ArtifactContentStore",
     "AgentRecord",
     "ArtifactStore",
     "Base",
     "EventRecord",
+    "LocalArtifactContentStore",
     "ProjectRecord",
     "RepositoryRecord",
     "RunRecord",
@@ -33,6 +42,7 @@ __all__ = [
     "RunNotFoundError",
     "RunStore",
     "RunStatusMismatchError",
+    "StoredArtifactContent",
     "TaskRecord",
     "WorkspaceAlreadyExistsError",
     "WorkspaceContainerIdConflictError",

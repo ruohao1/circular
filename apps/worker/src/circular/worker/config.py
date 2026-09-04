@@ -1,5 +1,6 @@
 import socket
 from pathlib import Path
+from uuid import uuid4
 
 from circular.runners import ExecutionDirectories, InvalidExecutionPath
 from pydantic import Field, field_validator, model_validator
@@ -29,7 +30,7 @@ class Settings(BaseSettings):
         validation_alias="CIRCULAR_FAKE_DELAY_SECONDS",
     )
     worker_id: str = Field(
-        default_factory=socket.gethostname,
+        default_factory=lambda: f"{socket.gethostname()}:{uuid4()}",
         min_length=1,
         validation_alias="CIRCULAR_WORKER_ID",
     )

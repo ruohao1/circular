@@ -53,6 +53,27 @@ Workspace is `ready`, and the persisted immutable resource ID matches the handle
 ingestor then commits each normalized fake-workload event independently so polling and SSE
 can expose progress before the process exits.
 
+`RunSupervisor` keeps a 60-second PostgreSQL lease alive, observes cancellation, and
+owns a cancellation-shielded cleanup path. Finalization captures a binary-capable Git
+patch with a private index before marking a successful Run terminal. Cleanup stops and
+removes the exact container, retains the worktree output, and only then releases the
+owned worktree. Artifacts and their integrity metadata live outside the worktree.
+Cleanup failures are separate Workspace events and never replace the Run's primary error.
+The supervisor retries terminal-decision persistence before cleanup. Cleanup and claim
+release require a terminal Run; failed terminal writes retain the lease and resources
+for recovery instead of leaving an ownerless active Run. Production and integration
+tests use the same worker execution builder, including ownership and lease fencing.
+
+An expired owner is fenced by the Run row lock. Recovery fails an interrupted attempt
+and reconciles its persisted resources; it does not automatically repeat agent execution.
+At most three cleanup recovery attempts are made. A still-unreleased Workspace then
+requires operator attention. A fresh Run is the explicit execution retry boundary.
+
+The web launcher creates a Task followed by a queued Run. The execution page combines a
+coherent HTTP snapshot with ordered event history and cursor-based SSE. The frontend
+schema types are generated from FastAPI's OpenAPI document; `pnpm contracts:check`
+detects stale checked-in contracts.
+
 Repository caches, worktrees, and artifacts are derived from internal UUIDs beneath
 worker-owned roots. The `runners` path module validates containment and translates a
 worker-visible worktree into the equivalent Docker-host-visible source path. Process-
@@ -63,13 +84,14 @@ local and Compose mappings.
 ## Deliberately deferred
 
 Real agent backends, authentication and RBAC, approval UI,
-recursive delegation, Linear/GitHub adapters, LISTEN/NOTIFY wakeups, generated frontend
-contracts, billing, and distributed runners are not implemented. These have explicit seams
+recursive delegation, Linear/GitHub adapters, LISTEN/NOTIFY wakeups,
+billing, and distributed runners are not implemented. These have explicit seams
 or storage fields where needed, but no speculative framework.
-Cross-process container recovery and retained-container cleanup also remain worker
-lifecycle work. Active-cancellation coordination, including the executor preflight
-read-then-act race, remains in ISQ-175. Compose Docker CLI/socket access, runner-image
-composition, and writable worktree ownership for the container UID remain in ISQ-176.
 The fake-workload spec factory stays injected behind the generic spec-factory port; a
 separate production factory can replace it when real backend execution is introduced.
-Production output backpressure or durable spooling also remains worker lifecycle work.
+Production event-output backpressure or durable spooling and artifact garbage collection
+remain future work. Worktree archives use disk-backed streaming without a fixed size cap;
+disk exhaustion or other retention errors preserve the worktree and record cleanup failure
+instead of deleting unretained output. Agent containers cannot use the shared Git metadata;
+supporting commits
+inside real backends requires a dedicated, isolated Git-metadata design.

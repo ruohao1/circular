@@ -406,6 +406,54 @@ class DockerRuntime:
                 raise error from cancelled
             raise
 
+    async def release(self, run_id: UUID, resource_id: str | None) -> None:
+        """Release a persisted allocation, including one left by another worker.
+
+        Inspect ownership and the sole worktree mount before removing an immutable
+        ID. With no persisted ID, the deterministic name reconciles a crash between
+        Docker creation and the identity write.
+        """
+        run_id = _validate_run_id(run_id)
+        name = f"circular-run-{run_id.hex}"
+        if resource_id is not None and _CONTAINER_ID.fullmatch(resource_id) is None:
+            raise ContainerDiscardError("persisted container ID is invalid")
+        execution = self._executions.get(name)
+        if execution is not None:
+            if resource_id is not None and execution.container_id != resource_id:
+                raise ContainerDiscardError("persisted container identity does not match")
+            await self.discard(execution.handle)
+            return
+        result, stdout = await self._run_cli(
+            ("container", "inspect", resource_id or name), capture_stdout=True
+        )
+        if result != 0:
+            if await self._container_name_is_absent(name):
+                return
+            raise ContainerDiscardError("could not confirm that the Run container is absent")
+        container = _decoded_container_inspection(stdout)
+        config = container.get("Config", {})
+        labels = config.get("Labels", {}) if isinstance(config, dict) else {}
+        mounts = container.get("Mounts")
+        identifier = container.get("Id")
+        if not (
+            isinstance(identifier, str)
+            and _CONTAINER_ID.fullmatch(identifier)
+            and (resource_id is None or resource_id == identifier)
+            and container.get("Name") == f"/{name}"
+            and isinstance(labels, dict)
+            and labels.get("io.circular.managed") == "true"
+            and labels.get("io.circular.run_id") == str(run_id)
+            and isinstance(mounts, list)
+            and len(mounts) == 1
+            and mounts[0].get("Type") == "bind"
+            and mounts[0].get("Source") == str(self._worktree_root / str(run_id))
+            and mounts[0].get("Destination") == "/workspace"
+        ):
+            raise ContainerDiscardError("container ownership could not be verified")
+        result, _ = await self._run_cli(("rm", "--force", "--volumes", identifier))
+        if result != 0:
+            raise ContainerDiscardError("Docker could not release the Run container")
+
     async def _discard_execution(self, execution: _Execution) -> None:
         stop_failure: DockerRuntimeError | None = None
         try:

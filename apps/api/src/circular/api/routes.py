@@ -1,4 +1,5 @@
 import asyncio
+import hashlib
 import json
 from collections.abc import AsyncIterator
 from uuid import UUID
@@ -14,24 +15,28 @@ from circular.api.schemas import (
     RepositoryCreate,
     RepositoryRead,
     RunCreate,
+    RunExecutionRead,
     RunRead,
     TaskCreate,
     TaskRead,
 )
 from circular.domain import RunStatus
-from circular.events import EventEnvelope, EventType
 from circular.storage import (
     AgentRecord,
+    ArtifactContentError,
+    ArtifactStore,
     EventRecord,
+    LocalArtifactContentStore,
     ProjectRecord,
     RepositoryRecord,
     RunEventReader,
     RunRecord,
     TaskRecord,
 )
+from circular.storage.models import ArtifactRecord, WorkspaceRecord
 from circular.storage.repositories import RunStore
-from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
-from fastapi.responses import StreamingResponse
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, status
+from fastapi.responses import Response, StreamingResponse
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -154,30 +159,29 @@ async def create_run(body: RunCreate, session: AsyncSession = Depends(get_sessio
 async def cancel_run(run_id: UUID, session: AsyncSession = Depends(get_session)) -> RunRecord:
     store = RunStore()
     try:
-        record = await store.transition(session, run_id, RunStatus.CANCELLED)
+        record = await store.cancel(session, run_id)
     except LookupError as error:
         raise HTTPException(status_code=404, detail="run not found") from error
     except ValueError as error:
         raise HTTPException(status_code=409, detail=str(error)) from error
-    await store.append_event(
-        session,
-        EventEnvelope(
-            run_id=run_id,
-            type=EventType.RUN_CANCELLED,
-            source="api",
-            data={},
-        ),
-    )
     await session.commit()
     await session.refresh(record)
     return record
 
 
 @router.get("/runs", response_model=list[RunRead])
-async def list_runs(task_id: UUID | None = None, session: AsyncSession = Depends(get_session)):
+async def list_runs(
+    task_id: UUID | None = None,
+    project_id: UUID | None = None,
+    session: AsyncSession = Depends(get_session),
+):
     statement = select(RunRecord).order_by(RunRecord.created_at.desc())
     if task_id is not None:
         statement = statement.where(RunRecord.task_id == task_id)
+    if project_id is not None:
+        statement = statement.join(TaskRecord, TaskRecord.id == RunRecord.task_id).where(
+            TaskRecord.project_id == project_id
+        )
     return list(await session.scalars(statement))
 
 
@@ -186,11 +190,90 @@ async def get_run(run_id: UUID, session: AsyncSession = Depends(get_session)):
     return await _require(session, RunRecord, run_id, "run")
 
 
+@router.get("/runs/{run_id}/execution", response_model=RunExecutionRead)
+async def get_run_execution(run_id: UUID, session: AsyncSession = Depends(get_session)):
+    # All writers lock the owning Run, so this shared lock keeps the projection
+    # and its last-event cursor consistent through the end of this transaction.
+    run = await session.scalar(
+        select(RunRecord).where(RunRecord.id == run_id).with_for_update(read=True)
+    )
+    if run is None:
+        raise HTTPException(status_code=404, detail="run not found")
+    task = await _require(session, TaskRecord, run.task_id, "task")
+    agent = await _require(session, AgentRecord, run.agent_id, "agent")
+    workspace = await session.scalar(
+        select(WorkspaceRecord).where(WorkspaceRecord.run_id == run_id)
+    )
+    artifacts = await ArtifactStore().list_for_run(session, run_id)
+    usage_event = await session.scalar(
+        select(EventRecord)
+        .where(EventRecord.run_id == run_id, EventRecord.type == "usage.updated")
+        .order_by(EventRecord.sequence.desc())
+        .limit(1)
+    )
+    last = await session.scalar(
+        select(func.coalesce(func.max(EventRecord.sequence), 0)).where(EventRecord.run_id == run_id)
+    )
+    usage = usage_event.data if usage_event is not None else {}
+    return RunExecutionRead.model_validate(
+        {
+            "run": run,
+            "task": task,
+            "agent": agent,
+            "workspace": workspace,
+            "artifacts": list(artifacts),
+            "usage": usage,
+            "last_event_sequence": last,
+        }
+    )
+
+
+@router.get(
+    "/runs/{run_id}/artifacts/{artifact_id}/content",
+    response_class=Response,
+    responses={
+        200: {
+            "content": {
+                "application/octet-stream": {"schema": {"type": "string", "format": "binary"}}
+            }
+        }
+    },
+)
+async def get_artifact_content(
+    run_id: UUID, artifact_id: UUID, session: AsyncSession = Depends(get_session)
+) -> Response:
+    artifact = await session.scalar(
+        select(ArtifactRecord).where(
+            ArtifactRecord.id == artifact_id, ArtifactRecord.run_id == run_id
+        )
+    )
+    if artifact is None:
+        raise HTTPException(status_code=404, detail="artifact not found")
+    try:
+        content = await LocalArtifactContentStore(get_settings().artifact_root.resolve()).read(
+            run_id, artifact.uri
+        )
+    except ArtifactContentError as error:
+        raise HTTPException(status_code=404, detail="artifact content unavailable") from error
+    expected_hash = artifact.artifact_metadata.get("sha256")
+    if expected_hash and hashlib.sha256(content).hexdigest() != expected_hash:
+        raise HTTPException(status_code=409, detail="artifact integrity check failed")
+    extension = "patch" if artifact.kind == "diff" else "tar"
+    return Response(
+        content,
+        media_type="application/octet-stream",
+        headers={
+            "Content-Disposition": f'attachment; filename="{artifact.id}.{extension}"',
+            "X-Content-Type-Options": "nosniff",
+        },
+    )
+
+
 @router.get("/runs/{run_id}/events", response_model=list[EventRead])
 async def list_run_events(
     run_id: UUID,
-    after: int = 0,
-    limit: int = 200,
+    after: int = Query(default=0, ge=0),
+    limit: int = Query(default=200, ge=1, le=1000),
     session: AsyncSession = Depends(get_session),
 ):
     await _require(session, RunRecord, run_id, "run")
@@ -228,13 +311,14 @@ async def stream_run_events(
     run_id: UUID,
     request: Request,
     last_event_id: int = Depends(_parse_last_event_id),
+    after: int = Query(default=0, ge=0),
     events: RunEventReader = Depends(get_run_event_reader),
 ) -> StreamingResponse:
     if not await events.run_exists(run_id):
         raise HTTPException(status_code=404, detail="run not found")
 
     async def stream() -> AsyncIterator[str]:
-        cursor = last_event_id
+        cursor = max(last_event_id, after)
         while not await request.is_disconnected():
             records = await events.read_after(run_id, cursor)
             if not records:

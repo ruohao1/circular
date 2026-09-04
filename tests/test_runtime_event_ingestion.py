@@ -299,6 +299,14 @@ class LifecycleStore(RecordingStore):
         session.pending.append(("transition", run_id, target, error))
 
 
+class RecordingFinalizer:
+    def __init__(self, sessions: RecordingSessions) -> None:
+        self._sessions = sessions
+
+    async def finalize(self, run_id: UUID) -> None:
+        self._sessions.committed.append(("finalize", run_id))
+
+
 class FailureRecordingStore(LifecycleStore):
     async def transition(
         self,
@@ -829,16 +837,17 @@ async def test_runtime_executor_ingests_then_completes_an_already_running_run() 
         )
     )
     sessions = RecordingSessions()
-    executor = RunExecutor(sessions, LifecycleStore(), {})
+    executor = RunExecutor(sessions, LifecycleStore(), {}, RecordingFinalizer(sessions))  # type: ignore[arg-type]
 
     await executor.execute_runtime(RUN_ID, runtime, HANDLE)
 
     assert sessions.committed[0].type is EventType.USAGE_UPDATED
-    assert sessions.committed[1:3] == [
+    assert sessions.committed[1:4] == [
         ("transition", RUN_ID, RunStatus.FINALIZING, None),
+        ("finalize", RUN_ID),
         ("transition", RUN_ID, RunStatus.SUCCEEDED, None),
     ]
-    assert sessions.committed[3].type is EventType.RUN_COMPLETED
+    assert sessions.committed[4].type is EventType.RUN_COMPLETED
 
 
 async def test_runtime_executor_persists_backend_error_raw_on_run_failure() -> None:

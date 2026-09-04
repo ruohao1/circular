@@ -8,6 +8,7 @@ from circular.runners.event_ingestion import (
     BackendReportedError,
     RuntimeEventIngestor,
 )
+from circular.runners.finalization import RunFinalizer
 from circular.runtimes import ContainerHandle, Runtime
 from circular.storage.models import AgentRecord, RunRecord, TaskRecord, WorkspaceRecord
 from circular.storage.repositories import RunStore
@@ -45,10 +46,12 @@ class RunExecutor:
         sessions: async_sessionmaker[AsyncSession],
         store: RunStore,
         backends: dict[str, AgentBackend],
+        finalizer: RunFinalizer | None = None,
     ) -> None:
         self._sessions = sessions
         self._store = store
         self._backends = backends
+        self._finalizer = finalizer
 
     async def execute(self, run_id: UUID) -> None:
         try:
@@ -126,6 +129,9 @@ class RunExecutor:
     async def _complete(self, run_id: UUID) -> None:
         async with self._sessions.begin() as session:
             await self._store.transition(session, run_id, RunStatus.FINALIZING)
+        if self._finalizer is not None:
+            await self._finalizer.finalize(run_id)
+        async with self._sessions.begin() as session:
             await self._store.transition(session, run_id, RunStatus.SUCCEEDED)
             await self._store.append_event(
                 session,
