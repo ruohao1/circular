@@ -1,0 +1,9 @@
+# The browser job's PostgreSQL service already occupies port 5432.
+# Publish this independent Compose stack only on the ephemeral runner's loopback.
+services:
+  postgres:
+    ports: !override ["127.0.0.1:5433:5432"]
+  api:
+    ports: !override ["127.0.0.1:8000:8000"]
+  web:
+    ports: !override ["127.0.0.1:5173:5173"]

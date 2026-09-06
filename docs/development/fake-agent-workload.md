@@ -7,7 +7,7 @@ this version-1 request, and the worker consumes its output through runtime event
 
 Its only interface is one UTF-8 encoded JSON object on standard input, UTF-8 JSON Lines on
 standard output and standard error, and the process exit code. The byte encoding is explicit
-and does not change with `PYTHONIOENCODING`. The process reads no environment-based
+and does not depend on the host locale. The process reads no environment-based
 configuration and does not need or accept a database URL, platform credentials, or the
 control-plane source tree.
 
@@ -56,17 +56,17 @@ identical output. JSON strings are ASCII-escaped and records are written directl
 bytes. Every record is flushed before the next delay or injected failure.
 
 Invalid input writes one record to standard error with code `invalid_input` and exits `2`.
-Malformed UTF-8 is invalid input and never produces a Python traceback. Validation messages
+Malformed UTF-8 is invalid input and never produces a stack trace. Validation messages
 identify field names but never echo field values. An injected failure writes one
 `injected_failure` record to standard error and exits `20`; its record includes the Run ID.
 Success leaves standard error empty and exits `0`.
 
 The runner-side ingestion adapter translates these records into backend-neutral
-`EventEnvelope` values and preserves each complete decoded wire object in `raw`.
+persisted Event records and preserves each complete decoded wire object in `raw`.
 
 ## Worker event ingestion
 
-`FakeBackendEventStream` consumes the backend-neutral `Runtime.output()` iterator. Runtime
+The Go Supervisor consumes the backend-neutral `Docker.Output()` iterator. Runtime
 chunks are transport details: one record may span chunks (including inside a multibyte UTF-8
 character), one chunk may contain several records, and stdout and stderr keep independent
 partial-line buffers. A record is accepted only after its terminating newline. Each line is
@@ -79,25 +79,23 @@ types are execution failures rather than silently dropped facts. It rejects malf
 duplicate JSON fields, non-standard constants such as `NaN`, numeric values that decode as
 non-finite, lone Unicode surrogates, unknown versions, and invalid type-specific data. The
 normalized `data` and the complete decoded wire object remain separately available on the
-envelope.
+Event.
 
 Version 1 stderr records are errors, not normalized events. The two workload-defined shapes are
 supported: `invalid_input` without a Run ID and `injected_failure` with the matching canonical
-Run ID. A valid record raises `BackendReportedError` carrying its decoded raw object. Malformed
+Run ID. A valid record produces a backend failure carrying its decoded raw object. Malformed
 stderr, an unexplained nonzero exit, a stopped execution, output observation failure, and result
-observation failure have distinct typed errors. Synchronous output-iterator acquisition and
-iterator cleanup failures are output observation failures too; ordinary output failures still
-wait for the terminal process result, while cancellation propagates unchanged. A protocol or
-backend-reported failure observed before process completion takes precedence over output cleanup
-and the exit status.
+observation failure produce separate safe failure messages. A protocol or backend-reported
+failure takes precedence over the terminal exit status; cancellation remains owned by
+the Supervisor and its cleanup path.
 
-`RuntimeEventIngestor` commits every normalized event in its own transaction. PostgreSQL's
+The Supervisor's ingestor commits every normalized event in its own transaction. PostgreSQL's
 per-Run lock remains the sequence allocator, so concurrent writers retain one contiguous event
 sequence. Because each record commits before the next output chunk is requested, the existing
 polling event reader and SSE endpoint can expose deltas while the backend is still running. A
 later protocol, process, or persistence failure does not roll back prior event commits.
 
-`RunExecutor.execute_runtime()` is the post-provisioning coordinator for an already-running Run.
+`execution.Supervisor` coordinates execution after provisioning.
 One database read verifies the Run is `running`, its Workspace is `ready`, and the Workspace's
 immutable container identity matches the exact live handle before output is consumed. It then
 invokes the ingestor and performs the existing `running` to `finalizing` to `succeeded`
@@ -108,7 +106,7 @@ and ambiguous duplicate-key documents do not. Run state and `run.failed` use the
 database-safe error projection, capped at 4,000 characters. If recording that failure also
 fails, the original execution error remains primary and, when possible, receives only the
 secondary exception type as a sanitized note. Cancellation and release remain separate
-lifecycle concerns owned by `RunSupervisor`.
+lifecycle concerns owned by `execution.Supervisor`.
 
 The worker passes `--write-output` to the workload. After validating the request, the
 workload creates `circular-result-<Run UUID>.txt` in its working directory without
@@ -131,7 +129,7 @@ docker build \
   .
 ```
 
-The image copies only the workload package. A hardened smoke invocation needs no host
+The image contains only a static Go workload binary in a scratch filesystem. A hardened smoke invocation needs no host
 mounts or network access:
 
 ```bash
@@ -147,5 +145,6 @@ printf '%s\n' '{"protocol_version":1,"run":{"id":"00000000-0000-4000-8000-000000
 The real image smoke test is opt-in because it builds and starts Docker resources:
 
 ```bash
-CIRCULAR_RUN_DOCKER_TESTS=1 uv run pytest -q tests/test_fake_agent_workload_image.py
+go test ./internal/fakeworkload
+CIRCULAR_RUN_DOCKER_TESTS=1 go test -race ./internal/runtimes -count=1
 ```

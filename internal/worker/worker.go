@@ -25,7 +25,7 @@ type Executor interface {
 	Execute(context.Context, Claim, string) error
 }
 
-// Run processes one Run at a time, matching the existing Python worker. Scale
+// Run processes one Run at a time. Scale
 // with distinct workers; PostgreSQL's row lock is the only claim authority.
 func Run(ctx context.Context, queue Queue, executor Executor, workerID string, poll time.Duration) error {
 	if err := ValidateID(workerID); err != nil {
@@ -59,7 +59,7 @@ func Run(ctx context.Context, queue Queue, executor Executor, workerID string, p
 			// backend output in a persisted error. Execution logs remain separate.
 			slog.Warn("Run executor exited unsuccessfully", "run_id", claim.RunID)
 		}
-		// A child crash must not leave an active Run ownerless. This bounded,
+		// An executor failure must not leave an active Run ownerless. This bounded,
 		// cancellation-independent write retains the claim for normal recovery;
 		// it never releases resources or replaces an existing terminal outcome.
 		settleCtx, settleCancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)

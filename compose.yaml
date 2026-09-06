@@ -18,10 +18,10 @@ services:
   migrate:
     build:
       context: .
-      dockerfile: infra/python.Dockerfile
-    command: ["uv", "run", "alembic", "upgrade", "head"]
+      dockerfile: infra/go.Dockerfile
+      target: migrate
     environment:
-      DATABASE_URL: postgresql+psycopg://circular:circular@postgres:5432/circular
+      DATABASE_URL: postgresql://circular:circular@postgres:5432/circular
     depends_on:
       postgres:
         condition: service_healthy
@@ -29,10 +29,10 @@ services:
   api:
     build:
       context: .
-      dockerfile: infra/python.Dockerfile
-    command: ["uv", "run", "circular-api"]
+      dockerfile: infra/go.Dockerfile
+      target: api
     environment:
-      DATABASE_URL: postgresql+psycopg://circular:circular@postgres:5432/circular
+      DATABASE_URL: postgresql://circular:circular@postgres:5432/circular
       CIRCULAR_ARTIFACT_ROOT: /var/lib/circular/artifacts
     volumes:
       - type: bind
@@ -48,11 +48,11 @@ services:
   worker:
     build:
       context: .
-      dockerfile: infra/python.Dockerfile
-    command: ["uv", "run", "circular-worker"]
+      dockerfile: infra/go.Dockerfile
+      target: worker
     stop_grace_period: 90s
     environment:
-      DATABASE_URL: postgresql+psycopg://circular:circular@postgres:5432/circular
+      DATABASE_URL: postgresql://circular:circular@postgres:5432/circular
       CIRCULAR_POLL_INTERVAL_SECONDS: ${CIRCULAR_POLL_INTERVAL_SECONDS:-1}
       CIRCULAR_FAKE_DELAY_SECONDS: ${CIRCULAR_FAKE_DELAY_SECONDS:-0.05}
       CIRCULAR_REPOSITORY_CACHE_ROOT: /var/lib/circular/repositories
@@ -79,7 +79,7 @@ services:
     build:
       context: .
       dockerfile: infra/fake-agent-workload.Dockerfile
-    entrypoint: ["python", "-c", "pass"]
+    entrypoint: ["/circular-fake-workload", "--help"]
 
   web:
     build:

@@ -16,20 +16,18 @@ type Config struct {
 	DatabaseURL string
 	WorkerID    string
 	Poll        time.Duration
-	Python      string
 }
 
-// LoadConfig consumes the same environment as the Python worker. The CLI loads
+// LoadConfig consumes trusted worker settings. The CLI loads
 // .env before calling this function; explicit environment values take precedence.
 func LoadConfig(getenv func(string) string) (Config, error) {
 	config := Config{
 		DatabaseURL: getenv("DATABASE_URL"),
 		WorkerID:    getenv("CIRCULAR_WORKER_ID"),
-		Python:      getenv("CIRCULAR_EXECUTOR_PYTHON"),
 		Poll:        time.Second,
 	}
 	if config.DatabaseURL == "" {
-		config.DatabaseURL = "postgresql+psycopg://circular:circular@localhost:5432/circular"
+		config.DatabaseURL = "postgresql://circular:circular@localhost:5432/circular"
 	}
 	if config.WorkerID == "" {
 		host, err := os.Hostname()
@@ -41,8 +39,8 @@ func LoadConfig(getenv func(string) string) (Config, error) {
 	if err := ValidateID(config.WorkerID); err != nil {
 		return Config{}, err
 	}
-	if config.Python == "" {
-		config.Python = "python3"
+	if selected := getenv("CIRCULAR_GO_EXECUTOR"); selected != "" && selected != "go" {
+		return Config{}, fmt.Errorf("CIRCULAR_GO_EXECUTOR is retired; remove it to use native Go execution")
 	}
 	if value := getenv("CIRCULAR_POLL_INTERVAL_SECONDS"); value != "" {
 		seconds, err := strconv.ParseFloat(strings.TrimSpace(value), 64)

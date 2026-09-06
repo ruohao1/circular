@@ -1,11 +1,13 @@
-FROM python:3.12-slim-bookworm
+FROM golang:1.27.1-bookworm AS build
+WORKDIR /src
+COPY go.mod go.sum ./
+RUN go mod download
+COPY internal/fakeworkload ./internal/fakeworkload
+COPY cmd/circular-fake-workload ./cmd/circular-fake-workload
+RUN CGO_ENABLED=0 go build -trimpath -o /circular-fake-workload ./cmd/circular-fake-workload
 
-ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1 \
-    PYTHONPATH=/opt/circular-workload/src
-
-WORKDIR /opt/circular-workload
-COPY --chown=65532:65532 packages/fake-agent-workload/src ./src
-
+FROM scratch
+COPY --from=build /circular-fake-workload /circular-fake-workload
+WORKDIR /workspace
 USER 65532:65532
-ENTRYPOINT ["python", "-m", "circular.fake_agent_workload"]
+ENTRYPOINT ["/circular-fake-workload"]

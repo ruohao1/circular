@@ -1,0 +1,190 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  GOTOOLCHAIN: local
+
+jobs:
+  backend:
+    name: Go / PostgreSQL / Docker
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_DB: circular_test
+          POSTGRES_USER: circular
+          POSTGRES_PASSWORD: circular-test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U circular -d circular_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      TEST_DATABASE_URL: postgresql://circular:circular-test@127.0.0.1:5432/circular_test
+      CIRCULAR_RUN_DOCKER_TESTS: '1'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+      - name: Guard the Go-only backend
+        run: |
+          circular_python_files=$(git ls-files -- '*.py' '*.pyc' '*pyproject.toml' '*uv.lock' '*alembic.ini')
+          if [[ -n "$circular_python_files" ]]; then
+            printf 'Retired Python files must not return:\n%s\n' "$circular_python_files"
+            exit 1
+          fi
+      - name: Check Go formatting
+        run: |
+          circular_unformatted=$(gofmt -l cmd internal contracts)
+          if [[ -n "$circular_unformatted" ]]; then
+            printf 'Run gofmt on:\n%s\n' "$circular_unformatted"
+            exit 1
+          fi
+      - name: Verify module checksums and tidy state
+        run: |
+          go mod download
+          go mod verify
+          go mod tidy -diff
+      - name: Vet and build
+        run: |
+          go vet ./...
+          go build ./...
+      - name: Check Docker availability
+        run: docker info
+      - name: Run race, database, isolation, and worker-process tests
+        run: go test -race ./... -count=1 -timeout=300s
+
+  frontend:
+    name: Frontend / contracts
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '22'
+          package-manager-cache: false
+      - name: Install locked frontend tools
+        run: |
+          corepack enable
+          corepack pnpm install --frozen-lockfile
+      - name: Check generated contracts
+        run: corepack pnpm contracts:check
+      - name: Typecheck
+        run: corepack pnpm typecheck
+      - name: Test
+        run: corepack pnpm test
+      - name: Build
+        run: corepack pnpm build
+
+  browser:
+    name: Browser / local and Compose
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_DB: circular_test
+          POSTGRES_USER: circular
+          POSTGRES_PASSWORD: circular-test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U circular -d circular_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      TEST_DATABASE_URL: postgresql://circular:circular-test@127.0.0.1:5432/circular_test
+      COMPOSE_PROJECT_NAME: circular-ci
+      CIRCULAR_RUNNER_IMAGE: circular-ci-runner:test
+      PLAYWRIGHT_HTML_OPEN: never
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '22'
+          package-manager-cache: false
+      - name: Install locked browser tools
+        run: |
+          corepack enable
+          corepack pnpm install --frozen-lockfile
+          corepack pnpm exec playwright install --with-deps chromium
+      - name: Run browser scenarios on the local Go stack
+        env:
+          PLAYWRIGHT_HTML_OUTPUT_DIR: playwright-report/local
+        run: corepack pnpm test:e2e --forbid-only --reporter=line,html --output=test-results/local
+      - name: Allocate the disposable Compose execution root
+        id: compose_root
+        run: |
+          circular_ci_root=$(mktemp -d "$RUNNER_TEMP/circular-compose-XXXXXX")
+          printf 'CIRCULAR_EXECUTION_HOST_ROOT=%s\n' "$circular_ci_root" >> "$GITHUB_ENV"
+      - name: Build and start the default Go-only deployment
+        run: >-
+          docker compose --env-file .env.example -f compose.yaml -f .github/compose.ci.yaml
+          up --build --detach --wait --wait-timeout 120
+      - name: Wait for the Compose HTTP endpoints
+        run: |
+          for circular_ci_url in http://127.0.0.1:8000/api/v1/health http://127.0.0.1:5173; do
+            curl --fail --silent --show-error --retry 30 --retry-delay 1 \
+              --retry-all-errors --max-time 5 --retry-max-time 60 \
+              --output /dev/null "$circular_ci_url"
+          done
+      - name: Run browser scenarios on Compose
+        env:
+          CIRCULAR_E2E_COMPOSE: '1'
+          PLAYWRIGHT_HTML_OUTPUT_DIR: playwright-report/compose
+        run: corepack pnpm test:e2e --forbid-only --reporter=line,html --output=test-results/compose
+      - name: Collect Compose diagnostics on failure
+        if: ${{ failure() && steps.compose_root.outcome == 'success' }}
+        run: |
+          docker compose --env-file .env.example -f compose.yaml -f .github/compose.ci.yaml ps --all
+          docker compose --env-file .env.example -f compose.yaml -f .github/compose.ci.yaml logs --no-color --tail=200
+      - name: Remove only the disposable Compose stack and its database volume
+        if: ${{ always() && steps.compose_root.outcome == 'success' }}
+        run: >-
+          docker compose --env-file .env.example -f compose.yaml -f .github/compose.ci.yaml
+          down --volumes --timeout 90
+      - name: Upload browser failure reports and traces
+        if: ${{ failure() && !cancelled() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: browser-failure-reports
+          path: |
+            playwright-report/
+            test-results/
+          if-no-files-found: ignore
+          retention-days: 7

@@ -13,14 +13,13 @@ func TestConfigurationUsesExistingWorkerEnvironment(t *testing.T) {
 		"DATABASE_URL":                   "postgresql+psycopg://test:test@localhost/test",
 		"CIRCULAR_WORKER_ID":             "go-worker",
 		"CIRCULAR_POLL_INTERVAL_SECONDS": "0.125",
-		"CIRCULAR_EXECUTOR_PYTHON":       "/trusted/.venv/bin/python",
 	}
 	config, err := worker.LoadConfig(func(key string) string { return env[key] })
 	if err != nil {
 		t.Fatal(err)
 	}
 	if config.DatabaseURL != env["DATABASE_URL"] || config.WorkerID != "go-worker" ||
-		config.Poll != 125*time.Millisecond || config.Python != env["CIRCULAR_EXECUTOR_PYTHON"] {
+		config.Poll != 125*time.Millisecond {
 		t.Fatal("configuration did not preserve the worker contract")
 	}
 }

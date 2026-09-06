@@ -1,11 +1,9 @@
 .git
 .env
-.venv
 .circular
 node_modules
 **/node_modules
 **/dist
-**/__pycache__
-.pytest_cache
-.ruff_cache
 playwright-report
+
+test-results

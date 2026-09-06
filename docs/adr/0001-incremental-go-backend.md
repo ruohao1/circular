@@ -8,3 +8,6 @@ Python remains available until the Go execution modules pass the same behavioral
 checks, so this bridge is a migration step rather than a completed Go rewrite.
 Eino is a separate optional backend decision and does not own Circular's Run
 lifecycle, claims, or resource cleanup.
+
+Status: implemented. The bridge was retired after the native execution, API, migration,
+runner, and test cutover. See [Go-only cutover](../development/go-migration.md).

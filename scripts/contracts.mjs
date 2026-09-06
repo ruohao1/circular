@@ -20,7 +20,9 @@ function run(command, args) {
   return result.stdout;
 }
 try {
-  const schema = run("uv", ["run", "python", "scripts/export_openapi.py"]);
+  // Contract-first: Go embeds this exact document; TypeScript is generated from it.
+  const schema = readFileSync("contracts/openapi.json", "utf8");
+  JSON.parse(schema);
   writeFileSync(join(directory, "openapi.json"), schema);
   run("corepack", [
     "pnpm",
@@ -32,7 +34,6 @@ try {
     join(directory, "api.ts"),
   ]);
   for (const [source, target] of [
-    ["openapi.json", "contracts/openapi.json"],
     ["api.ts", "apps/web/src/generated/api.ts"],
   ]) {
     const output = readFileSync(join(directory, source), "utf8");

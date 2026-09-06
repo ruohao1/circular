@@ -1,4 +1,4 @@
-// circular-worker-go is migration stage one: Go claims, Python resource execution.
+// circular-worker-go owns durable claims and native Run execution.
 package main
 
 import (
@@ -8,23 +8,40 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
-	"os/exec"
 	"os/signal"
 	"syscall"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/joho/godotenv"
+	"github.com/ruohao1/circular/internal/execution"
 	"github.com/ruohao1/circular/internal/postgres"
 	"github.com/ruohao1/circular/internal/worker"
 )
 
 func main() {
-	check := flag.Bool("check", false, "check configuration and execution bridge without claiming Runs")
+	check := flag.Bool("check", false, "check native execution configuration without claiming Runs")
 	flag.Parse()
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 	defer stop()
-	if err := run(ctx, *check); err != nil {
+	// Cleanup shields caller cancellation while it publishes output and releases
+	// owned resources. Bound the whole process as well as individual operations,
+	// leaving five seconds inside Compose's 90-second termination grace period.
+	finished := make(chan error, 1)
+	go func() { finished <- run(ctx, *check) }()
+	var err error
+	select {
+	case err = <-finished:
+	case <-ctx.Done():
+		timer := time.NewTimer(85 * time.Second)
+		defer timer.Stop()
+		select {
+		case err = <-finished:
+		case <-timer.C:
+			err = fmt.Errorf("worker shutdown deadline exceeded; unfinished claims retain recovery leases")
+		}
+	}
+	if err != nil {
 		slog.Error("Go worker stopped", "error", err)
 		os.Exit(1)
 	}
@@ -44,30 +61,26 @@ func run(ctx context.Context, check bool) error {
 		return fmt.Errorf("DATABASE_URL is not a valid PostgreSQL configuration")
 	}
 	poolConfig.ConnConfig.ConnectTimeout = 5 * time.Second
-	python, err := exec.LookPath(config.Python)
-	if err != nil {
-		return fmt.Errorf("Python execution bridge is unavailable; configure CIRCULAR_EXECUTOR_PYTHON")
-	}
-	preflightCtx, preflightCancel := context.WithTimeout(ctx, 10*time.Second)
-	preflight := exec.CommandContext(preflightCtx, python, "-m", "circular.worker.execute_run", "--check")
-	preflight.Stdout, preflight.Stderr = os.Stdout, os.Stderr
-	err = preflight.Run()
-	preflightCancel()
-	if err != nil {
-		return fmt.Errorf("Python execution bridge preflight failed; no Runs were claimed")
-	}
 	if check {
-		slog.Info("Go worker configuration and Python execution bridge are valid; no Runs claimed")
-		return nil
+		poolConfig.MinConns = 0
+		poolConfig.MinIdleConns = 0
 	}
 	pool, err := pgxpool.NewWithConfig(ctx, poolConfig)
 	if err != nil {
 		return fmt.Errorf("initialize worker database pool")
 	}
 	defer pool.Close()
-	executor := worker.ProcessExecutor{
-		Command:     []string{python, "-m", "circular.worker.execute_run"},
-		GracePeriod: 80 * time.Second, // Leave room inside Compose's 90-second grace.
+	native, err := execution.LoadConfig(os.Getenv)
+	if err != nil {
+		return err
+	}
+	executor, err := execution.NewSupervisor(pool, config.WorkerID, native)
+	if err != nil {
+		return fmt.Errorf("Go execution configuration is invalid: %w", err)
+	}
+	if check {
+		slog.Info("Go execution configuration is valid; no Runs claimed")
+		return nil
 	}
 	err = worker.Run(ctx, postgres.NewQueue(pool), executor, config.WorkerID, config.Poll)
 	if err != nil {

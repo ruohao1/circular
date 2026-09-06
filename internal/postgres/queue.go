@@ -16,7 +16,7 @@ import (
 	"github.com/ruohao1/circular/internal/worker"
 )
 
-// LeaseDuration and MaxRecoveries match RunStore and RunSupervisor in Python.
+// LeaseDuration and MaxRecoveries preserve the established durable claim contract.
 const LeaseDuration = 60 * time.Second
 const MaxRecoveries = 3
 
@@ -26,7 +26,7 @@ type Queue struct{ pool *pgxpool.Pool }
 
 func NewQueue(pool *pgxpool.Pool) *Queue { return &Queue{pool: pool} }
 
-// DatabaseURL accepts the same URL passed to the temporary Python executor.
+// DatabaseURL accepts native PostgreSQL URLs and the historical driver prefix.
 func DatabaseURL(value string) string {
 	if strings.HasPrefix(value, "postgresql+psycopg://") {
 		return "postgresql://" + strings.TrimPrefix(value, "postgresql+psycopg://")
@@ -153,7 +153,7 @@ func (q *Queue) ReconcileExit(ctx context.Context, runID uuid.UUID, owner string
 }
 
 // The caller holds the Run row lock through both state and event writes. Event
-// sequence allocation therefore interoperates with existing Python writers.
+// sequence allocation therefore remains serialized with resource and API writers.
 func failRun(ctx context.Context, tx pgx.Tx, id uuid.UUID, current runstate.Status,
 	message, source string, data map[string]any, now time.Time) error {
 	if err := runstate.Validate(current, runstate.Failed); err != nil {

@@ -6,10 +6,10 @@
     "contracts:generate": "node scripts/contracts.mjs",
     "contracts:check": "node scripts/contracts.mjs --check",
     "test:e2e": "playwright test",
-    "dev": "pnpm --filter @circular/web dev",
-    "build": "pnpm --filter @circular/web build",
-    "test": "pnpm --filter @circular/web test",
-    "typecheck": "pnpm --filter @circular/web typecheck"
+    "dev": "corepack pnpm --filter @circular/web dev",
+    "build": "corepack pnpm --filter @circular/web build",
+    "test": "corepack pnpm --filter @circular/web test",
+    "typecheck": "corepack pnpm --filter @circular/web typecheck"
   },
   "devDependencies": {
     "@playwright/test": "^1.62.1",

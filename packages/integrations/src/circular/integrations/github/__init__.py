@@ -1,1 +1,0 @@
-"""GitHub App adapter placeholder."""

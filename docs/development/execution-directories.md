@@ -11,13 +11,13 @@ a Run container:
 1. the worker-visible path used to provision and inspect the worktree;
 2. the Docker-host-visible path used as the bind-mount source.
 
-`ExecutionDirectories` performs that translation and rejects relative roots, `..`
+the Go execution configuration and path adapters performs that translation and rejects relative roots, `..`
 traversal, existing symlinks that resolve outside the worker root, and filesystem-root
 configuration. It does not create directories or grant the worker Docker access.
 
 ## Local worker defaults
 
-Run `circular-worker` from the repository root with the settings unset:
+Run `go run ./cmd/circular-worker-go` from the repository root with the settings unset:
 
 | Purpose | Worker path | Docker host path |
 | --- | --- | --- |
@@ -56,7 +56,7 @@ worker assigns each new worktree to UID/GID 65532 before launch and uses that no
 container identity. This avoids an unwritable bind mount without running the agent as root.
 Compose permits 90 seconds for worker shutdown and resource cleanup.
 
-`DockerRuntime` fixes the worktree's destination inside a Run container at `/workspace`.
+`runtimes.Docker` fixes the worktree's destination inside a Run container at `/workspace`.
 The adapter validates that the source is the direct canonical UUID child beneath this
 Docker-host root. The host path may be daemon-visible without existing in the worker's
 filesystem namespace; known local symlinks are rejected, while the trusted worker remains
@@ -64,8 +64,8 @@ responsible for provisioning the corresponding host path before launch.
 
 ## Local Repository cache
 
-`LocalRepositoryCache` accepts a Repository UUID and its registered clone URL, then
-returns the validated checkout at the path derived by `ExecutionDirectories`. Clone
+`git.Local` accepts a Repository UUID and its registered clone URL, then
+returns the validated checkout at the path derived by the Go execution configuration and path adapters. Clone
 URLs, Repository names, and remote ref names never become path fragments. A first
 checkout is cloned with no working-tree files into a same-root staging directory,
 validated, and atomically renamed into the UUID target. The result can be used as the
@@ -74,24 +74,24 @@ source for linked Git worktrees.
 Reuse updates `origin` to the current registered URL, runs `fetch --prune`, and advances
 the checkout's local default branch so `HEAD` resolves to the fetched commit. If that
 fetch fails after the URL change, the cache attempts to restore the prior origin before
-raising a credential-free `RepositoryFetchError`. Git runs as argv without a shell.
+raising a credential-free Git fetch error. Git runs as argv without a shell.
 The MVP permits only local-file and HTTPS transports; other Git protocol helpers,
 including `ext`, are disabled.
 
-Updates are serialized per Repository with an advisory `fcntl.flock` and a bounded
+Updates are serialized per Repository with an advisory `flock` and a bounded
 30-second default acquisition timeout. Separate Repository UUIDs use separate lock
 files and can proceed independently. This is deliberately a Linux/POSIX, worker-local
 filesystem implementation: every worker sharing a cache root must cooperate with the
 same locks, and network filesystems whose advisory-lock or atomic-rename semantics are
 unreliable are unsupported. Cache filesystem metadata operations are short synchronous
 operations against this trusted local root; Git processes and lock waits remain
-asynchronous. Each Git command runs in its own process group; caller cancellation stops
+cancellation-aware. Each Git command runs in its own process group; caller cancellation stops
 and awaits that group before the cache lock is released. Agent containers do not
 receive the Repository cache root.
 
 ## Local Run worktrees
 
-`LocalWorktreeManager` provisions one linked worktree at
+`git.Local` provisions one linked worktree at
 `<worktree root>/<Run UUID>` on the deterministic branch
 `circular/run/<Run UUID>`. The requested base ref is resolved to a commit before
 the branch is created; ref text never becomes a path or branch fragment. A
@@ -119,7 +119,7 @@ group on cancellation before either lock is released.
 registered worktree must be clean; modified or
 untracked files, including ignored outputs, cause a typed failure and remain
 available for explicit recovery. The terminal worker cleaner explicitly requests
-`discard_changes=True` only after the final patch and output archive are durably retained;
+`DiscardChanges: true` only after the final patch and output archive are durably retained;
 this does not bypass the ownership checks. If an interrupted release leaves only Git
 registration metadata, the manager verifies the exact Run path, branch, and
 registered HEAD against the current branch using byte-safe porcelain output
@@ -152,15 +152,14 @@ filesystem cleanup has settled.
 | `CIRCULAR_RUNNER_CPU_LIMIT` | `1` CPU |
 | `CIRCULAR_RUNNER_MEMORY_LIMIT_MB` | `2048` MiB |
 
-The worker uses the image and resource values when it builds the `ContainerSpec` for a
+The worker uses the image and resource values when it builds the `runtimes.Spec` for a
 claimed Run, then sends the provisioned container's output through runtime event ingestion.
 
 ## Retained artifacts
 
 Each terminal Run retains `git-diff.patch` (including untracked, non-ignored files and
 binary patches) and `worktree.tar` (including ignored output, excluding `.git`). The archive
-streams through a disk-backed temporary file and bounded-size artifact writes on an I/O
-thread, so large checkouts do not hit a fixed 32 MiB cap or block lease heartbeats.
+streams through a disk-backed temporary file and bounded-size artifact writes outside the heartbeat goroutine, so large checkouts do not hit a fixed 32 MiB cap or block lease heartbeats.
 This requires temporary disk space as well as artifact-store space. Traversal failures
 are reported rather than silently omitting output. Archiving never follows symlinks and
 rejects special files. Treat a downloaded

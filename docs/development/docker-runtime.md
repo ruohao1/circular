@@ -1,15 +1,15 @@
 # Docker runtime adapter
 
-`DockerRuntime` is the execution-isolation adapter behind the shared `Runtime` interface.
+`runtimes.Docker` owns the control plane's container execution boundary.
 It controls Docker; it does not implement an agent reasoning loop, normalize backend
 events, provision Git worktrees, or decide Run lifecycle transitions. The worker composes
 it behind workspace provisioning and passes its exact live handle to event ingestion.
 
 ## Resolved policy
 
-Every `ContainerSpec` identifies one Run with a UUID and carries the exact one-shot bytes
-to write to standard input before EOF. `DockerRuntime.resolve()` validates the request and
-returns a frozen, side-effect-free `DockerContainerPlan` for inspection before launch. The
+Every `runtimes.Spec` identifies one Run with a UUID and carries the exact one-shot bytes
+to write to standard input before EOF. `Docker.Resolve()` validates the request and
+returns a frozen, side-effect-free runtime plan for inspection before launch. The
 plan contains no environment values and hides stdin from its representation.
 
 The adapter enforces:
@@ -71,26 +71,26 @@ remains no environment, and the worker must not place platform credentials in a 
 The adapter runs `docker create --interactive`, followed by
 `docker start --attach --interactive`. It drains stdout and stderr immediately into one
 stream in the order the adapter observes chunks, writes stdin once, and closes it. Input
-delivery and EOF are bounded by the Docker operation timeout. `start()` does not expose a
+delivery and EOF are bounded by the Docker operation timeout. `Start()` does not expose a
 handle until inspection proves the immutable container is running or already exited. After
 the attached client finishes, inspection of that same immutable identity supplies the
 authoritative exit status; a Docker `wait` process is not involved.
 
-The returned `ContainerHandle` deliberately has two identities. Its adapter-local `id`
-routes live `output`, `wait`, and `stop` calls, while `resource_id` is the verified,
+The returned `runtimes.Handle` deliberately has two identities. Its adapter-local `ID`
+routes live `output`, `wait`, and `stop` calls, while `ResourceID` is the verified,
 immutable full Docker ID that workspace provisioning persists for later ownership checks
 and cleanup. Live consumers retain the original complete handle; they do not reconstruct
 one from the persisted resource ID. Every live operation compares both fields, so a
 same-name replacement or a forged resource identity is rejected.
 
 Chunk boundaries are transport details and may not align with backend event records. Output
-is a one-consumer stream; it remains available after fast completion, and `wait()` never
-depends on the caller consuming it. `RuntimeEventIngestor` consumes this stream while a Run is
+is a one-consumer stream; it remains available after fast completion, and `Wait()` never
+depends on the caller consuming it. The Go Supervisor's ingestor consumes this stream while a Run is
 active and bounds each backend JSON Line to 1 MiB, but the runtime's MVP queue remains
 intentionally unbounded so the adapter can always drain child pipes. Production-scale output
 still requires bounded backpressure or durable spooling between the pipe pump and consumer.
 
-`wait()` is cancellation-shielded and returns one stable result. `stop()` is bounded,
+`Wait()` is cancellation-shielded and returns one stable result. `Stop()` is bounded,
 idempotent, shared by concurrent callers, and completes the owned stop operation before
 propagating caller cancellation. Every create attempt adds a cryptographically random,
 ephemeral nonce label that is not part of the stable resolved plan. If create times out, is
@@ -106,26 +106,26 @@ failure retains the original failure as its cause. Rejection cleanup also remove
 volumes created from image declarations. Every post-create policy inspect, start, stop, kill,
 and cleanup operation targets the immutable ID.
 
-`discard()` is a narrower operation than general Workspace cleanup. It exists only to
+`Discard()` is a narrower operation than general Workspace cleanup. It exists only to
 compensate a container that was created but could not be durably handed off: it finishes
 termination and permanently removes that exact immutable resource, including anonymous
 volumes. The operation is cancellation-safe and shared by concurrent callers. After it
 succeeds, live operations reject the released handle, repeated discard is a tombstoned
-no-op, and a later `start()` may create a fresh allocation rather than reuse the removed
+no-op, and a later `Start()` may create a fresh allocation rather than reuse the removed
 execution. Failure is typed and prominent because the caller then has neither a durable
 identity nor proof of release.
 
-Calling `start()` repeatedly with the exact same resolved launch is idempotent only within
+Calling `Start()` repeatedly with the exact same resolved launch is idempotent only within
 one adapter instance. A changed stdin or environment value is an in-process conflict even
 though those confidential values are excluded from labels. Any deterministic name already
-present in Docker is a typed conflict and is never adopted by `start()`.
+present in Docker is a typed conflict and is never adopted by `Start()`.
 
-The worker cleaner uses `release(run_id, resource_id)` for terminal cleanup and recovery.
+The worker cleaner uses `Release(ctx, runID, resourceID)` for terminal cleanup and recovery.
 It verifies the persisted immutable ID (or reconciles the deterministic name if a crash
 preceded identity persistence), managed/Run labels, and the exact single worktree mount
 before removal. An absent resource is an idempotent no-op; ambiguous or foreign ownership
 fails closed. The owning Run row remains locked through resource removal so an expired
-worker cannot race a replacement owner. `discard()` remains the live-handle compensation
+worker cannot race a replacement owner. `Discard()` remains the live-handle compensation
 boundary, while `release()` can operate in a replacement worker process.
 
 Startup reservations are per deterministic Run name. Concurrent calls for one Run remain
@@ -138,11 +138,11 @@ environment values are never included.
 ## Verification
 
 Pure policy and CLI-boundary tests run in the normal suite. The real Docker security smoke
-builds the isolated fake workload image, launches it through `DockerRuntime`, inspects the
+builds the isolated fake workload image, launches it through `runtimes.Docker`, inspects the
 resulting container policy, and removes only the uniquely labeled test container. It also
-builds a hostile fixture image with an extra `VOLUME` and a host-visible entrypoint marker,
+builds a hostile fixture image with an extra `VOLUME` and a Run-scoped output file,
 proving the policy gate removes the created container without ever starting it:
 
 ```bash
-CIRCULAR_RUN_DOCKER_TESTS=1 uv run pytest -q tests/test_docker_runtime_image.py
+CIRCULAR_RUN_DOCKER_TESTS=1 go test -race ./internal/runtimes -count=1
 ```

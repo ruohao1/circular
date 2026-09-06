@@ -3,96 +3,19 @@ package postgres_test
 import (
 	"context"
 	"errors"
-	"net/url"
-	"os"
-	"os/exec"
-	"path/filepath"
-	"runtime"
-	"strings"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/ruohao1/circular/internal/postgres"
+	"github.com/ruohao1/circular/internal/testsupport"
 	"github.com/ruohao1/circular/internal/worker"
 )
 
-// Each test gets a new schema built by the actual Alembic migrations. Neither
+// Each test gets a new schema built by the production Go migrations. Neither
 // claiming nor cleanup can see unrelated Run rows in the supplied database.
-func database(t *testing.T) *pgxpool.Pool {
-	t.Helper()
-	dsn := os.Getenv("TEST_DATABASE_URL")
-	if dsn == "" {
-		t.Skip("TEST_DATABASE_URL is required for real PostgreSQL parity tests")
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-	admin, err := pgxpool.New(ctx, postgres.DatabaseURL(dsn))
-	if err != nil {
-		t.Fatal(err)
-	}
-	schema := "circular_go_test_" + strings.ReplaceAll(uuid.NewString(), "-", "")
-	quotedSchema := pgx.Identifier{schema}.Sanitize()
-	if _, err := admin.Exec(ctx, "CREATE SCHEMA "+quotedSchema); err != nil {
-		admin.Close()
-		t.Fatal(err)
-	}
-	var pool *pgxpool.Pool
-	t.Cleanup(func() {
-		if pool != nil {
-			pool.Close()
-		}
-		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cleanupCancel()
-		if _, err := admin.Exec(cleanupCtx, "DROP SCHEMA "+quotedSchema+" CASCADE"); err != nil {
-			t.Errorf("remove test-owned schema %s: %v", schema, err)
-		}
-		admin.Close()
-	})
-	runPython(t, dsn, schema, "-m", "alembic", "upgrade", "head")
-	config, err := pgxpool.ParseConfig(postgres.DatabaseURL(dsn))
-	if err != nil {
-		t.Fatal(err)
-	}
-	config.ConnConfig.RuntimeParams["search_path"] = schema
-	pool, err = pgxpool.NewWithConfig(ctx, config)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return pool
-}
-
-func runPython(t *testing.T, dsn, schema string, args ...string) []byte {
-	t.Helper()
-	parsed, err := url.Parse(postgres.DatabaseURL(dsn))
-	if err != nil || parsed.Scheme == "" {
-		t.Fatal("TEST_DATABASE_URL must be a PostgreSQL URL")
-	}
-	parsed.Scheme = "postgresql+psycopg"
-	query := parsed.Query()
-	query.Del("options")
-	parsed.RawQuery = query.Encode()
-	_, filename, _, _ := runtime.Caller(0)
-	root := filepath.Clean(filepath.Join(filepath.Dir(filename), "../.."))
-	python := os.Getenv("CIRCULAR_EXECUTOR_PYTHON")
-	if python == "" {
-		python = filepath.Join(root, ".venv/bin/python")
-	}
-	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
-	defer cancel()
-	command := exec.CommandContext(ctx, python, args...)
-	command.Dir = root
-	// libpq's environment setting keeps the test schema out of Alembic's
-	// ConfigParser-interpolated URL while still using the real migrations.
-	command.Env = append(os.Environ(), "DATABASE_URL="+parsed.String(), "PGOPTIONS=-csearch_path="+schema)
-	output, err := command.CombinedOutput()
-	if err != nil {
-		t.Fatalf("run Python against isolated schema: %v\n%s", err, output)
-	}
-	return output
-}
+func database(t *testing.T) *pgxpool.Pool { t.Helper(); return testsupport.Database(t) }
 
 func seed(t *testing.T, pool *pgxpool.Pool, count int) []uuid.UUID {
 	t.Helper()
@@ -215,7 +138,7 @@ func TestLockedRunIsSkippedAndRollbackMakesItClaimable(t *testing.T) {
 	}
 }
 
-func TestPythonAndGoClaimersShareRowLocksAndRecoveryFencing(t *testing.T) {
+func TestIndependentPoolsShareRowLocksAndRecoveryFencing(t *testing.T) {
 	pool := database(t)
 	ids := seed(t, pool, 3)
 	q := postgres.NewQueue(pool)
@@ -227,25 +150,17 @@ func TestPythonAndGoClaimersShareRowLocksAndRecoveryFencing(t *testing.T) {
 	if _, err := tx.Exec(t.Context(), `SELECT id FROM runs WHERE id = $1 FOR UPDATE`, ids[0]); err != nil {
 		t.Fatal(err)
 	}
-	schema := pool.Config().ConnConfig.RuntimeParams["search_path"]
-	output := runPython(t, os.Getenv("TEST_DATABASE_URL"), schema, "-c", `
-import asyncio, os
-from circular.storage import RunStore, create_engine, create_session_factory
-async def main():
-    engine = create_engine(os.environ["DATABASE_URL"])
-    try:
-        async with create_session_factory(engine).begin() as session:
-            run = await RunStore().claim_next(session, "python-worker")
-            print(run.id)
-    finally:
-        await engine.dispose()
-asyncio.run(main())
-`)
-	if strings.TrimSpace(string(output)) != ids[1].String() {
-		t.Fatalf("Python did not skip the Go-held row lock: %s", output)
+	otherPool, err := pgxpool.NewWithConfig(t.Context(), pool.Config())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer otherPool.Close()
+	other := postgres.NewQueue(otherPool)
+	if claim := acquire(t, other, "other-worker"); claim == nil || claim.RunID != ids[1] {
+		t.Fatal("independent pool did not skip the held row lock")
 	}
 	if claim := acquire(t, q, "go-worker"); claim == nil || claim.RunID != ids[2] {
-		t.Fatal("Go did not honor both the row lock and Python's committed claim")
+		t.Fatal("Go did not honor both the row lock and the other pool's committed claim")
 	}
 	if err := tx.Rollback(t.Context()); err != nil {
 		t.Fatal(err)
@@ -255,29 +170,11 @@ asyncio.run(main())
 	}
 	expire(t, pool, ids[1])
 	if claim := acquire(t, q, "go-recovery"); claim == nil || !claim.Recovery || claim.RunID != ids[1] {
-		t.Fatal("Go could not recover the expired Python claim")
+		t.Fatal("Go could not recover the expired claim")
 	}
-	runPython(t, os.Getenv("TEST_DATABASE_URL"), schema, "-c", `
-import asyncio, os, sys
-from uuid import UUID
-from circular.storage import RunStore, create_engine, create_session_factory
-from circular.storage.repositories import RunLeaseLostError
-async def main():
-    engine = create_engine(os.environ["DATABASE_URL"])
-    sessions = create_session_factory(engine)
-    sessions.configure(info={"worker_id": "python-worker"})
-    try:
-        try:
-            async with sessions.begin() as session:
-                await RunStore().lock_for_execution(session, UUID(sys.argv[1]))
-        except RunLeaseLostError:
-            pass
-        else:
-            raise AssertionError("stale Python owner bypassed the Go recovery fence")
-    finally:
-        await engine.dispose()
-asyncio.run(main())
-`, ids[1].String())
+	if err := other.ReconcileExit(t.Context(), ids[1], "other-worker"); !errors.Is(err, postgres.ErrLeaseLost) {
+		t.Fatalf("stale pool owner bypassed recovery fence: %v", err)
+	}
 }
 
 func TestQueuedCancellationAllocatesNoClaim(t *testing.T) {

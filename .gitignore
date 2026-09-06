@@ -1,10 +1,5 @@
 .env
-.venv/
 .circular/
-__pycache__/
-.pytest_cache/
-.ruff_cache/
-*.pyc
 node_modules/
 dist/
 *.tsbuildinfo

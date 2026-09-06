@@ -26,7 +26,7 @@ export default defineConfig({
     ? []
     : [
         {
-          command: "uv run python scripts/e2e_stack.py",
+          command: "node scripts/e2e-stack.mjs",
           url: "http://127.0.0.1:18000/api/v1/health",
           timeout: 120_000,
           reuseExistingServer: false,
