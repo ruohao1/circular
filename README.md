@@ -47,6 +47,11 @@ docker build -f infra/fake-agent-workload.Dockerfile -t circular-runner:dev .
 A local repository path is also
 accepted when it is accessible to that worker and Git's ownership checks pass.
 
+An opt-in Go worker is available as the first stage of the backend migration. It
+currently delegates per-Run execution to Python; the default stack is unchanged.
+See [Go migration](docs/development/go-migration.md) for setup, rollback, verification,
+and the remaining work.
+
 ## Verification
 
 Use a disposable migrated PostgreSQL database, with no unrelated workers attached:

@@ -1,0 +1,8 @@
+# Opt-in migration stage one. The default deployment remains unchanged.
+# docker compose -f compose.yaml -f compose.go.yaml up --build
+services:
+  worker:
+    build:
+      context: .
+      dockerfile: infra/go-worker.Dockerfile
+    command: ["/usr/local/bin/circular-worker-go"]

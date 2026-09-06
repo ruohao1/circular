@@ -4,6 +4,11 @@ The control plane is a modular monorepo with three deployable processes: a React
 application, a FastAPI application, and an asynchronous Python worker. The API and
 worker compose the same domain packages but do not call one another in-process.
 
+An [incremental Go migration](../development/go-migration.md) now provides an opt-in
+worker. Go owns its queue claims, expired-owner recovery, and executor process
+supervision; a temporary Python per-Run executor retains the resource lifecycle
+described below. The default deployment and HTTP contracts are unchanged.
+
 ## Package map
 
 - `domain`: dependency-light entities, identifiers, and domain vocabulary.

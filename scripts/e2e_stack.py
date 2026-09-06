@@ -78,7 +78,10 @@ def main() -> None:
         env=environment,
     )
     worker = subprocess.Popen(
-        [sys.executable, "-c", "from circular.worker.main import run; run()"], env=environment
+        [os.environ["CIRCULAR_E2E_GO_WORKER"]]
+        if os.environ.get("CIRCULAR_E2E_GO_WORKER")
+        else [sys.executable, "-c", "from circular.worker.main import run; run()"],
+        env={**environment, "CIRCULAR_EXECUTOR_PYTHON": sys.executable},
     )
     stopping = False
 

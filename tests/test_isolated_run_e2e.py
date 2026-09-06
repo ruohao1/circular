@@ -4,7 +4,9 @@ import asyncio
 import io
 import json
 import os
+import signal
 import subprocess
+import sys
 import tarfile
 from contextlib import asynccontextmanager, suppress
 from datetime import UTC, datetime, timedelta
@@ -31,6 +33,9 @@ from circular.storage import (
     create_engine,
     create_session_factory,
 )
+from circular.storage.repositories import RunLeaseLostError
+from circular.worker.config import Settings
+from circular.worker.execute_run import execute_claim
 from circular.worker.execution import build_supervisor
 from sqlalchemy import delete, select
 
@@ -370,6 +375,206 @@ async def test_queued_cancellation_never_provisions(tmp_path):
         assert detail["run"]["status"] == "cancelled"
         assert detail["workspace"] is None
         assert not directories.run_paths(run_id).worktree.exists()
+
+
+def bridge_settings(directories, worker_id="isq162-test-worker"):
+    return Settings(
+        _env_file=None,
+        DATABASE_URL=DATABASE_URL,
+        CIRCULAR_WORKER_ID=worker_id,
+        CIRCULAR_REPOSITORY_CACHE_ROOT=directories.repository_cache_root,
+        CIRCULAR_WORKTREE_ROOT=directories.worktree_root,
+        CIRCULAR_DOCKER_WORKTREE_ROOT=directories.docker_worktree_root,
+        CIRCULAR_ARTIFACT_ROOT=directories.artifact_root,
+        CIRCULAR_RUNNER_IMAGE=IMAGE,
+    )
+
+
+def bridge_environment(directories, worker_id="isq162-test-worker"):
+    return {
+        **os.environ,
+        "DATABASE_URL": DATABASE_URL,
+        "CIRCULAR_WORKER_ID": worker_id,
+        "CIRCULAR_REPOSITORY_CACHE_ROOT": str(directories.repository_cache_root),
+        "CIRCULAR_WORKTREE_ROOT": str(directories.worktree_root),
+        "CIRCULAR_DOCKER_WORKTREE_ROOT": str(directories.docker_worktree_root),
+        "CIRCULAR_ARTIFACT_ROOT": str(directories.artifact_root),
+        "CIRCULAR_RUNNER_IMAGE": IMAGE,
+        "CIRCULAR_EXECUTOR_PYTHON": sys.executable,
+        "CIRCULAR_POLL_INTERVAL_SECONDS": "0.05",
+    }
+
+
+async def test_execution_bridge_fences_stale_owner_before_resource_access(tmp_path):
+    async with system(tmp_path) as setup:
+        client, sessions, store, _, _, directories, run_id = setup
+        await claim(sessions, store, run_id)
+        with pytest.raises(RunLeaseLostError):
+            await execute_claim(
+                bridge_settings(directories, "stale-worker"), run_id, asyncio.Event()
+            )
+        detail = (await client.get(f"runs/{run_id}/execution")).json()
+        assert detail["run"]["status"] == "provisioning"
+        assert detail["workspace"] is None
+        assert not directories.run_paths(run_id).worktree.exists()
+        async with sessions() as session:
+            assert (await session.get(RunRecord, run_id)).worker_id == "isq162-test-worker"
+
+
+async def test_execution_bridge_cli_preserves_prestartup_cancellation_and_explicit_owner(tmp_path):
+    async with system(tmp_path) as setup:
+        client, sessions, store, _, _, directories, run_id = setup
+        await claim(sessions, store, run_id)
+        assert (await client.post(f"runs/{run_id}/cancel")).status_code == 200
+        process = await asyncio.create_subprocess_exec(
+            sys.executable,
+            "-m",
+            "circular.worker.execute_run",
+            f"--run-id={run_id}",
+            "--worker-id=isq162-test-worker",
+            env=bridge_environment(directories, "must-not-override-explicit-claim-owner"),
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        try:
+            output, error = await asyncio.wait_for(process.communicate(), 20)
+            assert process.returncode == 0, (output, error)
+        finally:
+            if process.returncode is None:
+                process.kill()
+                await process.wait()
+        detail = (await client.get(f"runs/{run_id}/execution")).json()
+        assert detail["run"]["status"] == "cancelled"
+        assert detail["workspace"] is None
+        assert not directories.run_paths(run_id).worktree.exists()
+        events = (await client.get(f"runs/{run_id}/events")).json()
+        assert [event["type"] for event in events].count("run.cancelled") == 1
+        assert not any(event["type"] == "run.failed" for event in events)
+        async with sessions() as session:
+            run = await session.get(RunRecord, run_id)
+            assert run.worker_id is None
+            assert run.lease_expires_at is None
+
+
+async def test_execution_bridge_prestartup_shutdown_does_not_allocate(tmp_path):
+    async with system(tmp_path) as setup:
+        client, sessions, store, _, _, directories, run_id = setup
+        await claim(sessions, store, run_id)
+        stop = asyncio.Event()
+        stop.set()
+        await execute_claim(bridge_settings(directories), run_id, stop)
+        detail = (await client.get(f"runs/{run_id}/execution")).json()
+        assert detail["run"]["status"] == "failed"
+        assert detail["workspace"] is None
+        assert not directories.run_paths(run_id).worktree.exists()
+        async with sessions() as session:
+            assert (await session.get(RunRecord, run_id)).worker_id is None
+
+
+def executor_child(worker_pid):
+    """Resolve only the Python bridge directly owned by this test's Go process."""
+    children = set()
+    for task in Path(f"/proc/{worker_pid}/task").iterdir():
+        with suppress(FileNotFoundError):
+            children.update(int(pid) for pid in (task / "children").read_text().split())
+    matches = []
+    for pid in children:
+        with suppress(FileNotFoundError):
+            if b"circular.worker.execute_run" in Path(f"/proc/{pid}/cmdline").read_bytes():
+                matches.append(pid)
+    assert len(matches) == 1, matches
+    assert os.getpgid(matches[0]) == matches[0]
+    return matches[0]
+
+
+@asynccontextmanager
+async def go_worker(directories):
+    process = await asyncio.create_subprocess_exec(
+        os.environ["CIRCULAR_E2E_GO_WORKER"],
+        env=bridge_environment(directories),
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    output = asyncio.create_task(process.communicate())
+    try:
+        yield process, output
+    finally:
+        if process.returncode is None:
+            process.terminate()
+        try:
+            await asyncio.wait_for(asyncio.shield(output), 90)
+        except TimeoutError:
+            # Only exact processes created by this fixture are eligible for force-stop.
+            if process.returncode is None:
+                os.killpg(executor_child(process.pid), signal.SIGKILL)
+                process.kill()
+            await asyncio.wait_for(output, 10)
+            raise
+
+
+@pytest.mark.skipif(
+    not os.getenv("CIRCULAR_E2E_GO_WORKER"), reason="a built Go worker binary is required"
+)
+async def test_go_worker_shutdown_settles_and_cleans_real_resources(tmp_path):
+    async with system(tmp_path, behavior={"delay_ms": 10000}) as setup:
+        client, sessions, _, _, _, directories, run_id = setup
+        async with go_worker(directories) as (process, output):
+            await wait_for(client, run_id, {"running"})
+            process.terminate()
+            stdout, stderr = await asyncio.wait_for(asyncio.shield(output), 90)
+            assert process.returncode == 0, (stdout, stderr)
+        detail = (await client.get(f"runs/{run_id}/execution")).json()
+        assert detail["run"]["status"] == "failed"
+        assert detail["workspace"]["status"] == "released"
+        assert {item["kind"] for item in detail["artifacts"]} == {"diff", "workspace"}
+        assert not directories.run_paths(run_id).worktree.exists()
+        assert not command("docker", "ps", "-aq", "--filter", f"label=io.circular.run_id={run_id}")
+        async with sessions() as session:
+            run = await session.get(RunRecord, run_id)
+            assert run.worker_id is None
+            assert run.lease_expires_at is None
+
+
+@pytest.mark.skipif(
+    not os.getenv("CIRCULAR_E2E_GO_WORKER") or sys.platform != "linux",
+    reason="a built Go worker and Linux process inspection are required",
+)
+async def test_go_worker_recovers_crashed_executor_without_rerunning_attempt(tmp_path):
+    async with system(tmp_path, behavior={"delay_ms": 10000}) as setup:
+        client, sessions, _, _, _, directories, run_id = setup
+        async with go_worker(directories) as (process, _):
+            await wait_for(client, run_id, {"running"})
+            os.killpg(executor_child(process.pid), signal.SIGKILL)
+            failed = await wait_for(client, run_id, {"failed"})
+            assert failed["run"]["error"] == "executor process exited without a terminal outcome"
+            async with sessions.begin() as session:
+                run = await session.get(RunRecord, run_id, with_for_update=True)
+                assert run.worker_id == "isq162-test-worker"
+                # Advance the recovery eligibility of this fixture only, avoiding
+                # a minute-long wait without changing the production lease.
+                run.lease_expires_at = datetime.now(UTC) - timedelta(seconds=1)
+            async with asyncio.timeout(30):
+                while True:
+                    async with sessions() as session:
+                        run = await session.get(RunRecord, run_id)
+                        if run.worker_id is None:
+                            assert run.recovery_attempts == 1
+                            break
+                    await asyncio.sleep(0.05)
+            detail = (await client.get(f"runs/{run_id}/execution")).json()
+            assert detail["run"]["error"] == failed["run"]["error"]
+            assert detail["workspace"]["status"] == "released"
+            assert {item["kind"] for item in detail["artifacts"]} == {"diff", "workspace"}
+            events = (await client.get(f"runs/{run_id}/events")).json()
+            types = [event["type"] for event in events]
+            assert types.count("run.failed") == 1
+            assert types.count("run.started") == 1
+            assert "run.completed" not in types
+            assert [event["sequence"] for event in events] == list(range(1, len(events) + 1))
+            assert not directories.run_paths(run_id).worktree.exists()
+            assert not command(
+                "docker", "ps", "-aq", "--filter", f"label=io.circular.run_id={run_id}"
+            )
 
 
 async def test_provisioning_failure_releases_the_allocated_worktree(tmp_path):
