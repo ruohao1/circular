@@ -1,4 +1,7 @@
-# Managed execution directories
+---
+title: "Managed execution directories"
+description: "Repository caches, run worktrees, retained artifacts, and their ownership rules."
+---
 
 The worker owns three filesystem roots. Repository and Run names, remote URLs, branch
 names, and other user-controlled strings never become path segments. A repository cache
@@ -19,11 +22,11 @@ configuration. It does not create directories or grant the worker Docker access.
 
 Run `go run ./cmd/circular-worker-go` from the repository root with the settings unset:
 
-| Purpose | Worker path | Docker host path |
-| --- | --- | --- |
-| Repository cache | `<repo>/.circular/repositories/<repository UUID>` | Not mounted |
-| Run worktree | `<repo>/.circular/worktrees/<Run UUID>` | Same as worker path |
-| Run artifacts | `<repo>/.circular/artifacts/<Run UUID>` | Not mounted |
+| Purpose          | Worker path                                       | Docker host path    |
+| ---------------- | ------------------------------------------------- | ------------------- |
+| Repository cache | `<repo>/.circular/repositories/<repository UUID>` | Not mounted         |
+| Run worktree     | `<repo>/.circular/worktrees/<Run UUID>`           | Same as worker path |
+| Run artifacts    | `<repo>/.circular/artifacts/<Run UUID>`           | Not mounted         |
 
 Relative worker-root overrides are resolved once against the worker's current working
 directory. `CIRCULAR_DOCKER_WORKTREE_ROOT`, when explicitly set, must be absolute because
@@ -34,11 +37,11 @@ the Docker daemon interprets it in the host filesystem namespace.
 Compose bind-mounts `${CIRCULAR_EXECUTION_HOST_ROOT:-$PWD/.circular}` at
 `/var/lib/circular` in the trusted worker container. The resulting mapping is:
 
-| Purpose | Docker host | Worker container |
-| --- | --- | --- |
+| Purpose          | Docker host                   | Worker container                 |
+| ---------------- | ----------------------------- | -------------------------------- |
 | Repository cache | `$PWD/.circular/repositories` | `/var/lib/circular/repositories` |
-| Run worktrees | `$PWD/.circular/worktrees` | `/var/lib/circular/worktrees` |
-| Run artifacts | `$PWD/.circular/artifacts` | `/var/lib/circular/artifacts` |
+| Run worktrees    | `$PWD/.circular/worktrees`    | `/var/lib/circular/worktrees`    |
+| Run artifacts    | `$PWD/.circular/artifacts`    | `/var/lib/circular/artifacts`    |
 
 Compose therefore sets `CIRCULAR_DOCKER_WORKTREE_ROOT` to the absolute host-side
 `$PWD/.circular/worktrees` by default. Set `CIRCULAR_EXECUTION_HOST_ROOT` to another
@@ -142,15 +145,15 @@ filesystem cleanup has settled.
 
 ## Worker settings
 
-| Environment variable | Local default |
-| --- | --- |
-| `CIRCULAR_REPOSITORY_CACHE_ROOT` | `.circular/repositories` |
-| `CIRCULAR_WORKTREE_ROOT` | `.circular/worktrees` |
-| `CIRCULAR_ARTIFACT_ROOT` | `.circular/artifacts` |
-| `CIRCULAR_DOCKER_WORKTREE_ROOT` | Resolved worker worktree root |
-| `CIRCULAR_RUNNER_IMAGE` | `circular-runner:dev` |
-| `CIRCULAR_RUNNER_CPU_LIMIT` | `1` CPU |
-| `CIRCULAR_RUNNER_MEMORY_LIMIT_MB` | `2048` MiB |
+| Environment variable              | Local default                 |
+| --------------------------------- | ----------------------------- |
+| `CIRCULAR_REPOSITORY_CACHE_ROOT`  | `.circular/repositories`      |
+| `CIRCULAR_WORKTREE_ROOT`          | `.circular/worktrees`         |
+| `CIRCULAR_ARTIFACT_ROOT`          | `.circular/artifacts`         |
+| `CIRCULAR_DOCKER_WORKTREE_ROOT`   | Resolved worker worktree root |
+| `CIRCULAR_RUNNER_IMAGE`           | `circular-runner:dev`         |
+| `CIRCULAR_RUNNER_CPU_LIMIT`       | `1` CPU                       |
+| `CIRCULAR_RUNNER_MEMORY_LIMIT_MB` | `2048` MiB                    |
 
 The worker uses the image and resource values when it builds the `runtimes.Spec` for a
 claimed Run, then sends the provisioned container's output through runtime event ingestion.
@@ -177,3 +180,13 @@ Content routes verify
 Run ownership, reject path traversal and symlinks, and check the stored SHA-256. Downloads
 continue to work after the Workspace is released. If retention fails, the worker retains
 the worktree for recovery, records a cleanup event, and preserves the original Run outcome.
+
+## PR review input bundles
+
+Workers keep repository caches, per-run worktrees, retained artifacts, review input bundles, and Codex authentication in separate roots. Review input bundles are stored at `CIRCULAR_REVIEW_CONTEXT_ROOT` (default `.circular/review-contexts`), with one direct UUID directory per review run.
+
+The worker writes and verifies `context.json` and `diff.patch` before container startup. Docker mounts the source at `/workspace` and the bundle at `/review-context`, both read-only. The runner's writable scratch space is its bounded `/tmp` mount. The shared repository cache is never mounted into a runner.
+
+With Compose, the worker path is `/var/lib/circular/review-contexts`. The daemon sees `${CIRCULAR_EXECUTION_HOST_ROOT:-${PWD}/.circular}/review-contexts`. Set `CIRCULAR_DOCKER_REVIEW_CONTEXT_ROOT` only when that daemon-visible path differs. This uses the worker's existing execution-root bind; the API receives no review-context write mount.
+
+Cleanup verifies retained `pr_review_context`, `pr_review_diff`, and available `pr_review_report` artifacts before removing the input bundle. These artifacts are distinct from coding diffs and cannot trigger another pull request. Recovery checks the review purpose, captured context digest, exact bind sources, and read-only flags before removing a review container.

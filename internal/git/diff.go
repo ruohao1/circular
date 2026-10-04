@@ -17,6 +17,8 @@ type Diff struct {
 	Content        []byte
 	ChangedFiles   int
 	ContainsBinary bool
+	BaseCommit     string
+	BaseRef        string
 }
 
 func (d Diff) Empty() bool { return d.ChangedFiles == 0 }
@@ -32,6 +34,15 @@ func (l *Local) Capture(ctx context.Context, worktree string) (diff Diff, result
 	directory, err := l.trustedGitDirectory(worktree, runID)
 	if err != nil {
 		return Diff{}, ErrDiff
+	}
+	repository := filepath.Dir(filepath.Dir(filepath.Dir(directory)))
+	repositoryID, err := l.repositoryID(repository)
+	if err != nil {
+		return Diff{}, ErrDiff
+	}
+	base, err := l.readBase(ctx, repository, repositoryID, runID)
+	if err != nil {
+		return Diff{}, errors.Join(ErrDiff, err)
 	}
 	file, err := os.CreateTemp(filepath.Dir(worktree), "."+runID.String()+".diff-index-")
 	if err != nil {
@@ -56,9 +67,9 @@ func (l *Local) Capture(ctx context.Context, worktree string) (diff Diff, result
 	commands := [][]string{
 		{"read-tree", "HEAD"},
 		{"add", "--all", "--", "."},
-		{"diff", "--cached", "--binary", "--full-index", "--no-ext-diff", "--no-textconv", "--no-color", "HEAD", "--"},
-		{"diff", "--cached", "--name-only", "-z", "HEAD", "--"},
-		{"diff", "--cached", "--numstat", "-z", "HEAD", "--"},
+		{"diff", "--cached", "--binary", "--full-index", "--no-ext-diff", "--no-textconv", "--no-color", base.Commit, "--"},
+		{"diff", "--cached", "--name-only", "-z", base.Commit, "--"},
+		{"diff", "--cached", "--numstat", "-z", base.Commit, "--"},
 	}
 	outputs := make([][]byte, 0, len(commands))
 	for _, args := range commands {
@@ -69,6 +80,7 @@ func (l *Local) Capture(ctx context.Context, worktree string) (diff Diff, result
 		outputs = append(outputs, output)
 	}
 	diff.Content = outputs[2]
+	diff.BaseCommit, diff.BaseRef = base.Commit, base.Ref
 	for _, name := range bytes.Split(outputs[3], []byte{0}) {
 		if len(name) != 0 {
 			diff.ChangedFiles++

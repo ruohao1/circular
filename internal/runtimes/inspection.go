@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math"
 	"reflect"
 	"regexp"
 	"strconv"
@@ -60,17 +61,90 @@ func stringsEqual(value any, expected []string) bool {
 	return true
 }
 
+// Docker's --tmpfs mounts appear in HostConfig.Tmpfs, separately from Mounts.
+// Only the exact bounded /tmp policy we create is eligible for startup/recovery;
+// image volumes and all other mounts remain forbidden by the bind-mount check.
+func inspectedTemporaryStorage(host map[string]any) (int64, bool) {
+	if host == nil {
+		return 0, false
+	}
+	if host["Tmpfs"] == nil {
+		return 0, true
+	}
+	mounts, ok := host["Tmpfs"].(map[string]any)
+	if !ok {
+		return 0, false
+	}
+	if len(mounts) == 0 {
+		return 0, true
+	}
+	options, ok := mounts["/tmp"].(string)
+	if !ok || len(mounts) != 1 {
+		return 0, false
+	}
+	size := strings.TrimSuffix(strings.TrimPrefix(options, "rw,nosuid,nodev,exec,size="), "m,mode=1777")
+	megabytes, err := strconv.ParseInt(size, 10, 64)
+	memory, validMemory := integer(host["Memory"])
+	if err != nil || megabytes <= 0 || megabytes > math.MaxInt64/(1024*1024) ||
+		!validMemory || megabytes*1024*1024 > memory || options != temporaryStorageOptions(megabytes) {
+		return 0, false
+	}
+	return megabytes, true
+}
+
+// Each container has its Run worktree and optionally one credential directory.
+// The caller must compare the returned credential source with its trusted plan
+// or recovery configuration; arbitrary bind sources are never adopted.
+func inspectedBindMounts(value any, worktree, reviewContext string) (string, bool) {
+	mounts, ok := value.([]any)
+	review := reviewContext != ""
+	min, max := 1, 2
+	if review {
+		min, max = 2, 3
+	}
+	if !ok || len(mounts) < min || len(mounts) > max {
+		return "", false
+	}
+	workspaceSeen, contextSeen, credentials := false, false, ""
+	for _, value := range mounts {
+		mount := object(value)
+		if mount["Type"] != "bind" {
+			return "", false
+		}
+		switch mount["Destination"] {
+		case "/workspace":
+			if workspaceSeen || mount["Source"] != worktree || mount["RW"] != !review {
+				return "", false
+			}
+			workspaceSeen = true
+		case "/review-context":
+			if !review || contextSeen || mount["Source"] != reviewContext || mount["RW"] != false {
+				return "", false
+			}
+			contextSeen = true
+		case credentialDestination:
+			source, ok := mount["Source"].(string)
+			if !ok || source == "" || credentials != "" || mount["RW"] != true {
+				return "", false
+			}
+			credentials = source
+		default:
+			return "", false
+		}
+	}
+	return credentials, workspaceSeen && contextSeen == review
+}
+
 func (d *Docker) verifyPolicy(ctx context.Context, id string, plan Plan, nonce string) error {
 	container, err := d.inspect(ctx, id)
 	if err != nil {
 		return err
 	}
 	config, host := object(container["Config"]), object(container["HostConfig"])
-	mounts, ok := container["Mounts"].([]any)
-	if !ok || len(mounts) != 1 {
+	credentials, mountsOK := inspectedBindMounts(container["Mounts"], plan.WorktreeSource, plan.ReviewContextSource)
+	if !mountsOK || credentials != plan.CredentialSource {
 		return fmt.Errorf("%w: container mount policy mismatch", ErrStart)
 	}
-	mount := object(mounts[0])
 	reserved := map[string]any{}
 	for name, value := range object(config["Labels"]) {
 		if strings.HasPrefix(name, "io.circular.") {
@@ -83,14 +157,15 @@ func (d *Docker) verifyPolicy(ctx context.Context, id string, plan Plan, nonce s
 	}
 	cpu, cpuOK := integer(host["NanoCpus"])
 	memory, memoryOK := integer(host["Memory"])
+	temporaryStorage, temporaryStorageOK := inspectedTemporaryStorage(host)
 	roundedCPU, _ := strconv.ParseFloat(strconv.FormatFloat(plan.CPULimit, 'g', 15, 64), 64)
 	restart := map[string]any{"Name": "no", "MaximumRetryCount": json.Number("0")}
-	if container["Id"] != id || mount["Type"] != "bind" || mount["Source"] != plan.WorktreeSource ||
-		mount["Destination"] != plan.WorktreeDestination || mount["RW"] != true ||
+	if container["Id"] != id ||
 		!reflect.DeepEqual(reserved, labels) || config["User"] != plan.ContainerUser || config["WorkingDir"] != plan.WorkingDirectory ||
 		host["NetworkMode"] != plan.NetworkMode || host["ReadonlyRootfs"] != true ||
 		!stringsEqual(host["CapDrop"], plan.CapDrop) || !stringsEqual(host["SecurityOpt"], plan.SecurityOptions) ||
 		!cpuOK || cpu != int64(roundedCPU*1e9) || !memoryOK || memory != plan.MemoryLimitMB*1024*1024 ||
+		!temporaryStorageOK || temporaryStorage != plan.TemporaryStorageMB ||
 		!reflect.DeepEqual(host["RestartPolicy"], restart) {
 		return fmt.Errorf("%w: container policy does not match the resolved Run plan", ErrStart)
 	}

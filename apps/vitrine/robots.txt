@@ -1,0 +1,6 @@
+User-agent: *
+Allow: /
+Disallow: /api/
+Disallow: /mcp
+Disallow: /webhooks/
+Sitemap: https://circular.ruohao.dev/sitemap.xml

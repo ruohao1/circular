@@ -136,7 +136,7 @@ func TestDiffEventFailureRollsBackArtifactAndConcurrentRetryPreservesReplay(t *t
 	for range cap(done) {
 		go func() {
 			done <- f.store.WithRun(t.Context(), f.worktree.RunID, func(r *postgres.RunResources) error {
-				_, err := r.PersistDiff(f.worktree.Path, content, 1, false)
+				_, err := r.PersistDiff(f.worktree.Path, content, 1, false, "", "")
 				return err
 			})
 		}()
@@ -149,7 +149,7 @@ func TestDiffEventFailureRollsBackArtifactAndConcurrentRetryPreservesReplay(t *t
 	conflict := content
 	conflict.SHA256 = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 	if err := f.store.WithRun(t.Context(), f.worktree.RunID, func(r *postgres.RunResources) error {
-		_, err := r.PersistDiff(f.worktree.Path, conflict, 1, false)
+		_, err := r.PersistDiff(f.worktree.Path, conflict, 1, false, "", "")
 		return err
 	}); !errors.Is(err, postgres.ErrResourceConflict) {
 		t.Fatal("conflicting final diff metadata was overwritten")

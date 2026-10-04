@@ -11,7 +11,10 @@ import (
 	"github.com/ruohao1/circular/internal/runstate"
 )
 
-func (r *RunResources) PersistDiff(worktree string, content artifacts.Content, changedFiles int, containsBinary bool) (artifacts.Record, error) {
+func (r *RunResources) PersistDiff(worktree string, content artifacts.Content, changedFiles int, containsBinary bool, baseCommit, baseRef string) (artifacts.Record, error) {
+	if r.kind == runstate.PRReview {
+		return artifacts.Record{}, ErrResourceState
+	}
 	if changedFiles < 0 || changedFiles == 0 && (containsBinary || content.SizeBytes != 0) {
 		return artifacts.Record{}, ErrResourceState
 	}
@@ -19,6 +22,13 @@ func (r *RunResources) PersistDiff(worktree string, content artifacts.Content, c
 		return artifacts.Record{}, err
 	}
 	a := artifacts.Record{ID: artifacts.DiffID(r.id), RunID: r.id, Kind: "diff", URI: content.URI, Metadata: map[string]any{"media_type": "text/x-diff", "size_bytes": content.SizeBytes, "sha256": content.SHA256, "changed_files": changedFiles, "contains_binary": containsBinary, "empty": changedFiles == 0}}
+	if baseCommit != "" {
+		digest, err := hex.DecodeString(baseCommit)
+		if err != nil || (len(digest) != 20 && len(digest) != 32) || strings.ToLower(baseCommit) != baseCommit || strings.ContainsRune(baseRef, 0) {
+			return artifacts.Record{}, ErrResourceState
+		}
+		a.Metadata["base_commit"], a.Metadata["base_ref"] = baseCommit, baseRef
+	}
 	return a, r.persistArtifact(worktree, a, "worker")
 }
 

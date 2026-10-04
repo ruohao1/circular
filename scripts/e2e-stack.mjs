@@ -26,6 +26,7 @@ try {
   const binary = join(root, "circular-e2e-stack");
   await run("go", ["build", "-o", binary, "./cmd/circular-e2e-stack"]);
   await run("docker", ["build", "-f", "infra/fake-agent-workload.Dockerfile", "-t", "circular-isq162-runner:test", "."]);
+  await run("docker", ["build", "-f", "infra/review-fixture-workload.Dockerfile", "-t", "circular-review-fixture:test", "."]);
   await run(binary, []);
 } catch (error) {
   if (!stopping) { console.error(error.message); process.exitCode = 1; }

@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/ruohao1/circular/internal/runstate"
 	"github.com/ruohao1/circular/internal/runtimes"
 )
 
@@ -146,6 +147,84 @@ func TestRealDockerRunsExistingFakeProtocol(t *testing.T) {
 	}
 	if output, err := dockerCommand(ctx, "container", "ls", "-aq", "--filter", "label=io.circular.run_id="+spec.RunID.String()); err != nil || strings.TrimSpace(string(output)) != "" {
 		t.Fatalf("Run container leaked: %v %s", err, output)
+	}
+}
+
+func TestRealDockerTemporaryStorageCanBeReleasedAfterRecovery(t *testing.T) {
+	d, spec := realRuntime(t, 1000, realImage)
+	spec.TemporaryStorageMB = 64
+	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
+	defer cancel()
+	handle, err := d.Start(ctx, spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Use the image's existing fixture binary as the non-root write probe. The
+	// primary workload remains running while this second invocation writes /tmp.
+	probe := exec.CommandContext(ctx, "docker", "exec", "--interactive", "--workdir", "/tmp", handle.ResourceID, "/circular-fake-workload", "--write-output")
+	probe.Stdin = strings.NewReader(fmt.Sprintf(`{"protocol_version":1,"run":{"id":%q,"task_title":"Check temporary storage","task_description":"","instructions":""},"behavior":{"delay_ms":0,"failure":"none"}}`, spec.RunID.String()))
+	if output, err := probe.CombinedOutput(); err != nil {
+		t.Fatalf("non-root workload cannot write temporary storage: %v %s", err, output)
+	}
+	result, err := d.Wait(ctx, handle)
+	if err != nil || result.ExitCode == nil || *result.ExitCode != 0 {
+		t.Fatalf("temporary storage workload did not complete: %+v %v", result, err)
+	}
+	recovered, err := runtimes.NewDocker(runtimes.DockerConfig{WorktreeRoot: filepath.Dir(spec.Worktree)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := recovered.Release(ctx, spec.RunID, handle.ResourceID); err != nil {
+		t.Fatalf("replacement worker could not release temporary storage: %v", err)
+	}
+	if _, err := dockerCommand(ctx, "container", "inspect", handle.ResourceID); err == nil {
+		t.Fatal("recovered temporary storage container remains")
+	}
+}
+
+func TestRealDockerCredentialMountIsSeparateAndSurvivesRelease(t *testing.T) {
+	_, spec := realRuntime(t, 1000, realImage)
+	credentials := filepath.Join(t.TempDir(), "test-auth")
+	if err := os.Mkdir(credentials, 0777); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(credentials, 0777); err != nil {
+		t.Fatal(err)
+	} // Only this empty, disposable fixture directory is shared with the Run.
+	config := runtimes.DockerConfig{WorktreeRoot: filepath.Dir(spec.Worktree), CredentialRoot: credentials}
+	d, err := runtimes.NewDocker(config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	spec.UseCredentials = true
+	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
+	defer cancel()
+	handle, err := d.Start(ctx, spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	probe := exec.CommandContext(ctx, "docker", "exec", "--interactive", "--workdir", "/codex-auth", handle.ResourceID, "/circular-fake-workload", "--write-output")
+	probe.Stdin = strings.NewReader(fmt.Sprintf(`{"protocol_version":1,"run":{"id":%q,"task_title":"Check separate auth storage","task_description":"","instructions":""},"behavior":{"delay_ms":0,"failure":"none"}}`, spec.RunID.String()))
+	if output, err := probe.CombinedOutput(); err != nil {
+		t.Fatalf("non-root workload cannot update its auth directory: %v %s", err, output)
+	}
+	result, err := d.Wait(ctx, handle)
+	if err != nil || result.ExitCode == nil || *result.ExitCode != 0 {
+		t.Fatalf("credential mount workload did not complete: %+v %v", result, err)
+	}
+	recovered, err := runtimes.NewDocker(config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := recovered.Release(ctx, spec.RunID, handle.ResourceID); err != nil {
+		t.Fatalf("replacement worker could not release credential container: %v", err)
+	}
+	marker := "circular-result-" + spec.RunID.String() + ".txt"
+	if _, err := os.Stat(filepath.Join(credentials, marker)); err != nil {
+		t.Fatalf("auth directory update did not survive container cleanup: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(spec.Worktree, marker)); !errors.Is(err, os.ErrNotExist) {
+		t.Fatal("auth directory writes reached the Run worktree")
 	}
 }
 
@@ -290,5 +369,45 @@ func TestRealDockerImmediateStopIsStable(t *testing.T) {
 				t.Fatal(err)
 			}
 		})
+	}
+}
+
+func TestRealDockerReviewSourceAndContextAreReadOnly(t *testing.T) {
+	_, spec := realRuntime(t, 4000, realImage)
+	root := filepath.Join(t.TempDir(), "review-contexts")
+	path := filepath.Join(root, spec.RunID.String())
+	if err := os.MkdirAll(path, 0777); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(path, 0777); err != nil {
+		t.Fatal(err)
+	}
+	d, err := runtimes.NewDocker(runtimes.DockerConfig{WorktreeRoot: filepath.Dir(spec.Worktree), ReviewContextRoot: root, StopTimeout: time.Second, OperationTimeout: 5 * time.Second})
+	if err != nil {
+		t.Fatal(err)
+	}
+	spec.Kind = runstate.PRReview
+	spec.Review = &runtimes.ReviewMount{ContextSHA256: strings.Repeat("a", 64)}
+	spec.TemporaryStorageMB = 64
+	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
+	defer cancel()
+	handle, err := d.Start(ctx, spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, destination := range []string{"/workspace", "/review-context", "/tmp"} {
+		probe := exec.CommandContext(ctx, "docker", "exec", "--interactive", "--workdir", destination, handle.ResourceID, "/circular-fake-workload", "--write-output")
+		probe.Stdin = strings.NewReader(fmt.Sprintf(`{"protocol_version":1,"run":{"id":%q,"task_title":"Write probe","task_description":"","instructions":""},"behavior":{"delay_ms":0,"failure":"none"}}`, spec.RunID.String()))
+		output, err := probe.CombinedOutput()
+		if destination == "/tmp" {
+			if err != nil {
+				t.Fatalf("scratch write failed: %v %s", err, output)
+			}
+		} else if err == nil {
+			t.Fatalf("%s accepted source mutation: %v %s", destination, err, output)
+		}
+	}
+	if err := d.ReleaseReview(ctx, spec.RunID, handle.ResourceID, spec.Review.ContextSHA256); err != nil {
+		t.Fatal(err)
 	}
 }

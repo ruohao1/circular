@@ -80,8 +80,9 @@ func TestFinalDiffAndEventsCommitAtomicallyAndIdenticalRetriesDoNotDuplicate(t *
 		t.Fatal(err)
 	}
 	rollback := errors.New("caller rejects transaction")
+	const baseCommit = "0123456789abcdef0123456789abcdef01234567"
 	if err := store.WithRun(t.Context(), id, func(r *postgres.RunResources) error {
-		if _, err := r.PersistDiff(path, content, 1, false); err != nil {
+		if _, err := r.PersistDiff(path, content, 1, false, baseCommit, "main"); err != nil {
 			return err
 		}
 		return rollback
@@ -93,7 +94,10 @@ func TestFinalDiffAndEventsCommitAtomicallyAndIdenticalRetriesDoNotDuplicate(t *
 		t.Fatal("rolled back diff became visible")
 	}
 	for range 2 {
-		if err := store.WithRun(t.Context(), id, func(r *postgres.RunResources) error { _, err := r.PersistDiff(path, content, 1, false); return err }); err != nil {
+		if err := store.WithRun(t.Context(), id, func(r *postgres.RunResources) error {
+			_, err := r.PersistDiff(path, content, 1, false, baseCommit, "main")
+			return err
+		}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -107,6 +111,9 @@ func TestFinalDiffAndEventsCommitAtomicallyAndIdenticalRetriesDoNotDuplicate(t *
 		t.Fatal(s.Artifacts)
 	}
 	a := s.Artifacts[0]
+	if a.Metadata["base_commit"] != baseCommit || a.Metadata["base_ref"] != "main" {
+		t.Fatalf("original run base was not retained: %v", a.Metadata)
+	}
 	if a.Metadata["changed_files"].(json.Number).String() != "1" || a.Metadata["empty"] != false || a.Metadata["size_bytes"].(json.Number).String() != "5" {
 		t.Fatal(a.Metadata)
 	}

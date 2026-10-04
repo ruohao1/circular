@@ -9,12 +9,23 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/ruohao1/circular/internal/prreviews"
+	"github.com/ruohao1/circular/internal/runstate"
 )
 
 // Release reconciles a persisted allocation, including a crash before its ID was
 // stored (resourceID == ""). Callers must hold the Run's durable lease/row lock
 // while mutating resources; this module does not grant or transfer Run ownership.
 func (d *Docker) Release(ctx context.Context, runID uuid.UUID, resourceID string) error {
+	return d.release(ctx, runID, resourceID, nil)
+}
+
+// ReleaseReview verifies the retained context identity before adopting a crashed
+// review container for cleanup. Ordinary Release preserves the legacy policy.
+func (d *Docker) ReleaseReview(ctx context.Context, runID uuid.UUID, resourceID, contextSHA256 string) error {
+	return d.release(ctx, runID, resourceID, &ReviewMount{ContextSHA256: contextSHA256})
+}
+func (d *Docker) release(ctx context.Context, runID uuid.UUID, resourceID string, review *ReviewMount) error {
 	if resourceID != "" && !containerID.MatchString(resourceID) {
 		return fmt.Errorf("%w: persisted identity is invalid", ErrDiscard)
 	}
@@ -31,6 +42,9 @@ func (d *Docker) Release(ctx context.Context, runID uuid.UUID, resourceID string
 	e := d.executions[name]
 	d.mu.Unlock()
 	if e != nil {
+		if (review != nil) != (e.launch.plan.Kind == runstate.PRReview) || review != nil && e.launch.plan.ReviewContextSHA256 != review.ContextSHA256 {
+			return ErrDiscard
+		}
 		if resourceID != "" && resourceID != e.handle.ResourceID {
 			return fmt.Errorf("%w: persisted identity does not match", ErrDiscard)
 		}
@@ -61,14 +75,27 @@ func (d *Docker) Release(ctx context.Context, runID uuid.UUID, resourceID string
 	}
 	id, validID := container["Id"].(string)
 	labels := object(object(container["Config"])["Labels"])
-	mounts, validMounts := container["Mounts"].([]any)
-	if !validMounts || len(mounts) != 1 {
+	reviewSource := ""
+	if review != nil {
+		if d.config.ReviewContextRoot == "" || !prreviews.DigestPattern.MatchString(review.ContextSHA256) || labels["io.circular.kind"] != "pr_review" || labels["io.circular.review_context_sha256"] != review.ContextSHA256 {
+			return ErrDiscard
+		}
+		reviewSource = filepath.Join(d.config.ReviewContextRoot, runID.String())
+		canonical, err := resolveMissing(reviewSource)
+		if err != nil || canonical != reviewSource || isSymlink(reviewSource) {
+			return ErrDiscard
+		}
+	} else if labels["io.circular.kind"] != nil || labels["io.circular.review_context_sha256"] != nil {
+		return ErrDiscard
+	}
+	credentials, validMounts := inspectedBindMounts(container["Mounts"], filepath.Join(d.config.WorktreeRoot, runID.String()), reviewSource)
+	if !validMounts || credentials != "" && credentials != d.config.CredentialRoot {
 		return fmt.Errorf("%w: container ownership could not be verified", ErrDiscard)
 	}
-	mount := object(mounts[0])
+	_, temporaryStorageOK := inspectedTemporaryStorage(object(container["HostConfig"]))
 	if !validID || !containerID.MatchString(id) || (resourceID != "" && resourceID != id) ||
-		container["Name"] != "/"+name || labels["io.circular.managed"] != "true" || labels["io.circular.run_id"] != runID.String() ||
-		mount["Type"] != "bind" || mount["Source"] != filepath.Join(d.config.WorktreeRoot, runID.String()) || mount["Destination"] != "/workspace" {
+		!temporaryStorageOK ||
+		container["Name"] != "/"+name || labels["io.circular.managed"] != "true" || labels["io.circular.run_id"] != runID.String() {
 		return fmt.Errorf("%w: container ownership could not be verified", ErrDiscard)
 	}
 	if err := d.remove(owned, id); err != nil {

@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 	git "github.com/ruohao1/circular/internal/git"
 	"github.com/ruohao1/circular/internal/postgres"
+	"github.com/ruohao1/circular/internal/runstate"
 	"github.com/ruohao1/circular/internal/runtimes"
 )
 
@@ -56,6 +57,9 @@ func (r *Retention) Cleanup(caller context.Context, id uuid.UUID, docker *runtim
 		if initial.Workspace != nil && initial.Workspace.ContainerID != nil {
 			containerID = *initial.Workspace.ContainerID
 		}
+		if initial.Kind == runstate.PRReview {
+			return docker.ReleaseReview(ctx, id, containerID, initial.ReviewContextSHA256)
+		}
 		return docker.Release(ctx, id, containerID)
 	}); err != nil {
 		return err
@@ -71,12 +75,19 @@ func (r *Retention) Cleanup(caller context.Context, id uuid.UUID, docker *runtim
 	if err != nil {
 		return err
 	}
+	if initial.Kind == runstate.PRReview {
+		if err := r.FinalizePRReview(ctx, id); err != nil {
+			return err
+		}
+	}
 	if present {
 		if initial.RepositoryID == nil {
 			return ErrRetention
 		}
-		if err := r.Retain(ctx, id); err != nil {
-			return err
+		if initial.Kind != runstate.PRReview {
+			if err := r.Retain(ctx, id); err != nil {
+				return err
+			}
 		}
 	}
 	return r.store.WithRun(ctx, id, func(run *postgres.RunResources) error {
@@ -113,6 +124,11 @@ func (r *Retention) Cleanup(caller context.Context, id uuid.UUID, docker *runtim
 				}
 			} else if present {
 				return ErrRetention
+			}
+		}
+		if current.Kind == runstate.PRReview {
+			if err := r.removeReviewContext(ctx, current); err != nil {
+				return err
 			}
 		}
 		return run.ReleaseWorkspace()

@@ -21,7 +21,7 @@ import (
 
 func main() {
 	openapi := flag.Bool("openapi", false, "print the checked-in HTTP contract without connecting")
-	listen := flag.String("listen", ":8000", "HTTP listen address")
+	listen := flag.String("listen", "127.0.0.1:8000", "HTTP listen address")
 	flag.Parse()
 	if *openapi {
 		_, _ = os.Stdout.Write(contracts.OpenAPI)
@@ -59,6 +59,13 @@ func main() {
 		slog.Error("cannot initialize API")
 		os.Exit(1)
 	}
+	backgroundCtx, cancelBackground := context.WithCancel(ctx)
+	backgroundDone := make(chan error, 1)
+	go func() { backgroundDone <- httpapi.RunBackground(backgroundCtx, pool, config) }()
+	defer func() {
+		cancelBackground()
+		<-backgroundDone
+	}()
 	server := &http.Server{Addr: *listen, Handler: handler, BaseContext: func(net.Listener) context.Context { return ctx }, ReadHeaderTimeout: 5 * time.Second, IdleTimeout: 2 * time.Minute}
 	finished := make(chan error, 1)
 	go func() { finished <- server.ListenAndServe() }()

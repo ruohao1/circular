@@ -1,6 +1,9 @@
-# Go-only CI
+---
+title: "Go-only CI"
+description: "Continuous integration checks, test isolation, and local reproduction."
+---
 
-The [CI workflow](../../.github/workflows/ci.yml) runs three independent jobs on
+The [CI workflow](https://github.com/ruohao1/circular/blob/main/.github/workflows/ci.yml) runs three independent jobs on
 GitHub-hosted Ubuntu 24.04 runners for pull requests, pushes to `main`, and manual runs.
 
 - **Go / PostgreSQL / Docker** checks the Go-only source guard, formatting, module
@@ -34,13 +37,19 @@ and `mktemp` execution root. Its ports are loopback-only and its PostgreSQL port
 and targets only that project, never unrelated Docker resources. The hosted runner
 is disposable if a job is forcibly terminated.
 
-Run containers retain the same isolation policy as development: non-root, no network,
+Fake Run containers retain the same isolation policy as development: non-root, no network,
 one Run worktree mount, no Docker socket, and no control-plane credentials. The
 trusted worker alone receives the socket in the Compose deployment.
 
+Codex decoder, wrapper and PostgreSQL integration tests use synthetic credentials
+and fixture output. They make no provider requests. The tmpfs Docker test verifies
+the optional temporary storage used by Codex. A separate real Docker test checks
+the dedicated auth mount and recovery without real credentials. A live provider smoke test remains
+an explicitly configured local check described in [Codex backend](codex-backend.md).
+
 ## Local reproduction
 
-Use the [README verification commands](../../README.md#verification) with an explicitly
+Use the [verification commands](local-development.md#verification) with an explicitly
 configured disposable PostgreSQL database. For browser report output matching CI:
 
 ```bash

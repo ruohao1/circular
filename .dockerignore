@@ -1,9 +1,11 @@
 .git
 .env
 .circular
+infra/production/.local
 node_modules
 **/node_modules
 **/dist
+**/.source
 playwright-report
 
 test-results

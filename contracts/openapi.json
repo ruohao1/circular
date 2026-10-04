@@ -37,6 +37,124 @@
         "title": "AgentCreate",
         "type": "object"
       },
+      "AgentProposalCreate": {
+        "properties": {
+          "instructions": {
+            "maxLength": 20000,
+            "minLength": 1,
+            "type": "string"
+          },
+          "model": {
+            "description": "Codex model identifier. Omit to use Astra.",
+            "maxLength": 200,
+            "type": "string"
+          },
+          "model_reason": {
+            "description": "Why the orchestrating agent recommends this model and reasoning effort for this role.",
+            "maxLength": 1000,
+            "type": "string"
+          },
+          "name": {
+            "maxLength": 200,
+            "minLength": 1,
+            "type": "string"
+          },
+          "purpose": {
+            "maxLength": 2000,
+            "minLength": 1,
+            "type": "string"
+          },
+          "reasoning_effort": {
+            "description": "Reasoning effort. Omit to use the selected model default.",
+            "maxLength": 20,
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "purpose",
+          "instructions"
+        ],
+        "title": "AgentProposalCreate",
+        "type": "object"
+      },
+      "AgentProposalRead": {
+        "properties": {
+          "agent_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "backend_config": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "created_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "instructions": {
+            "maxLength": 20000,
+            "minLength": 1,
+            "type": "string"
+          },
+          "model_reason": {
+            "description": "Why the orchestrating agent recommends this model and reasoning effort for this role.",
+            "type": "string"
+          },
+          "name": {
+            "maxLength": 200,
+            "minLength": 1,
+            "type": "string"
+          },
+          "purpose": {
+            "maxLength": 2000,
+            "minLength": 1,
+            "type": "string"
+          },
+          "run_id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "pending",
+              "created",
+              "dismissed"
+            ],
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "run_id",
+          "name",
+          "purpose",
+          "instructions",
+          "backend_config",
+          "status",
+          "agent_id",
+          "created_at",
+          "updated_at",
+          "model_reason"
+        ],
+        "title": "AgentProposalRead",
+        "type": "object"
+      },
       "AgentRead": {
         "properties": {
           "backend": {
@@ -74,6 +192,18 @@
             "title": "Name",
             "type": "string"
           },
+          "preset": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Built-in agent identity; null for a custom agent.",
+            "title": "Preset"
+          },
           "project_id": {
             "format": "uuid",
             "title": "Project Id",
@@ -91,9 +221,24 @@
           "id",
           "enabled",
           "created_at",
-          "updated_at"
+          "updated_at",
+          "preset"
         ],
         "title": "AgentRead",
+        "type": "object"
+      },
+      "AgentUpdate": {
+        "properties": {
+          "backend_config": {
+            "additionalProperties": true,
+            "description": "Codex model and reasoning_effort settings. Empty settings use GPT-6-Astra with low reasoning.",
+            "type": "object"
+          }
+        },
+        "required": [
+          "backend_config"
+        ],
+        "title": "AgentUpdate",
         "type": "object"
       },
       "ArtifactRead": {
@@ -130,6 +275,166 @@
           "metadata"
         ],
         "title": "ArtifactRead",
+        "type": "object"
+      },
+      "CodexModel": {
+        "properties": {
+          "default_reasoning_effort": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "reasoning_efforts": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "default_reasoning_effort",
+          "reasoning_efforts"
+        ],
+        "title": "CodexModel",
+        "type": "object"
+      },
+      "CodexModelCatalog": {
+        "description": "Model choices verified against the bundled Codex runner. Account availability can differ.",
+        "properties": {
+          "default_model": {
+            "type": "string"
+          },
+          "models": {
+            "items": {
+              "$ref": "#/components/schemas/CodexModel"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "default_model",
+          "models"
+        ],
+        "title": "CodexModelCatalog",
+        "type": "object"
+      },
+      "ConnectionDisconnect": {
+        "properties": {
+          "disconnected": {
+            "type": "boolean"
+          },
+          "revocation_confirmed": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "disconnected",
+          "revocation_confirmed"
+        ],
+        "type": "object"
+      },
+      "ConnectionRead": {
+        "properties": {
+          "account_name": {
+            "type": "string"
+          },
+          "account_url": {
+            "type": "string"
+          },
+          "app_client_id": {
+            "type": "string"
+          },
+          "app_editable": {
+            "type": "boolean"
+          },
+          "app_slug": {
+            "type": "string"
+          },
+          "callback_url": {
+            "type": "string"
+          },
+          "configured": {
+            "type": "boolean"
+          },
+          "identity_mode": {
+            "enum": [
+              "user",
+              "app"
+            ],
+            "type": "string"
+          },
+          "installation_url": {
+            "type": "string"
+          },
+          "provider": {
+            "enum": [
+              "github",
+              "linear"
+            ],
+            "type": "string"
+          },
+          "registration_url": {
+            "type": "string"
+          },
+          "setup_available": {
+            "type": "boolean"
+          },
+          "status": {
+            "enum": [
+              "not_configured",
+              "disconnected",
+              "connected",
+              "reconnect_required"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "provider",
+          "configured",
+          "status",
+          "account_name",
+          "account_url",
+          "callback_url",
+          "installation_url",
+          "setup_available",
+          "app_editable",
+          "app_client_id",
+          "registration_url",
+          "app_slug",
+          "identity_mode"
+        ],
+        "type": "object"
+      },
+      "ConnectionStart": {
+        "properties": {
+          "authorization_url": {
+            "format": "uri",
+            "type": "string"
+          }
+        },
+        "required": [
+          "authorization_url"
+        ],
+        "type": "object"
+      },
+      "DiscoveryCreate": {
+        "properties": {
+          "repository_id": {
+            "format": "uuid",
+            "type": "string"
+          }
+        },
+        "required": [
+          "repository_id"
+        ],
+        "title": "DiscoveryCreate",
         "type": "object"
       },
       "EventRead": {
@@ -203,6 +508,379 @@
         "title": "EventRead",
         "type": "object"
       },
+      "GitHubAppRegistration": {
+        "additionalProperties": false,
+        "properties": {
+          "organization": {
+            "default": "",
+            "maxLength": 39,
+            "type": "string"
+          }
+        },
+        "required": [],
+        "type": "object"
+      },
+      "GitHubAppRegistrationRead": {
+        "additionalProperties": false,
+        "properties": {
+          "manifest": {
+            "type": "string"
+          },
+          "registration_url": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "registration_url",
+          "manifest"
+        ],
+        "type": "object"
+      },
+      "GitHubAppUpdate": {
+        "properties": {
+          "app_url": {
+            "maxLength": 512,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "app_url"
+        ],
+        "type": "object"
+      },
+      "GitHubIdentityKey": {
+        "additionalProperties": false,
+        "properties": {
+          "private_key": {
+            "default": "",
+            "maxLength": 65536,
+            "type": "string",
+            "writeOnly": true
+          }
+        },
+        "required": [],
+        "type": "object"
+      },
+      "GitHubImport": {
+        "properties": {
+          "installation_id": {
+            "maxLength": 20,
+            "minLength": 1,
+            "type": "string"
+          },
+          "page": {
+            "default": "1",
+            "maxLength": 5,
+            "minLength": 1,
+            "type": "string"
+          },
+          "repository_id": {
+            "maxLength": 20,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "installation_id",
+          "repository_id"
+        ],
+        "type": "object"
+      },
+      "GitHubInstallation": {
+        "properties": {
+          "account": {
+            "type": "string"
+          },
+          "account_type": {
+            "enum": [
+              "User",
+              "Organization",
+              ""
+            ],
+            "type": "string"
+          },
+          "can_create": {
+            "type": "boolean"
+          },
+          "id": {
+            "type": "string"
+          },
+          "management_url": {
+            "type": "string"
+          },
+          "permission_message": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "account",
+          "management_url",
+          "account_type",
+          "can_create",
+          "permission_message"
+        ],
+        "type": "object"
+      },
+      "GitHubInstallationPage": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/GitHubInstallation"
+            },
+            "type": "array"
+          },
+          "next_page": {
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "items",
+          "next_page"
+        ],
+        "type": "object"
+      },
+      "GitHubRepository": {
+        "properties": {
+          "clone_url": {
+            "type": "string"
+          },
+          "default_branch": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "installation_id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "private": {
+            "type": "boolean"
+          },
+          "url": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "installation_id",
+          "name",
+          "clone_url",
+          "url",
+          "default_branch",
+          "private"
+        ],
+        "type": "object"
+      },
+      "GitHubRepositoryCreate": {
+        "properties": {
+          "description": {
+            "default": "",
+            "maxLength": 350,
+            "type": "string"
+          },
+          "installation_id": {
+            "maxLength": 20,
+            "minLength": 1,
+            "type": "string"
+          },
+          "name": {
+            "maxLength": 100,
+            "minLength": 1,
+            "type": "string"
+          },
+          "request_key": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "visibility": {
+            "default": "private",
+            "enum": [
+              "private",
+              "public"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "installation_id",
+          "name",
+          "request_key"
+        ],
+        "title": "GitHubRepositoryCreate",
+        "type": "object"
+      },
+      "GitHubRepositoryCreation": {
+        "properties": {
+          "github_repository_id": {
+            "type": "string"
+          },
+          "management_url": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "repository_id": {
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "attached",
+              "needs_access",
+              "uncertain"
+            ],
+            "type": "string"
+          },
+          "url": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "repository_id",
+          "github_repository_id",
+          "name",
+          "url",
+          "management_url",
+          "message",
+          "status"
+        ],
+        "title": "GitHubRepositoryCreation",
+        "type": "object"
+      },
+      "GitHubRepositoryPage": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/GitHubRepository"
+            },
+            "type": "array"
+          },
+          "next_page": {
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "items",
+          "next_page"
+        ],
+        "type": "object"
+      },
+      "GitHubRunDeliveryRead": {
+        "properties": {
+          "base_branch": {
+            "type": "string"
+          },
+          "base_commit": {
+            "type": "string"
+          },
+          "branch": {
+            "type": "string"
+          },
+          "draft": {
+            "type": "boolean"
+          },
+          "error": {
+            "type": "string"
+          },
+          "number": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "publisher": {
+            "$ref": "#/components/schemas/PublisherIdentity"
+          },
+          "pull_request_url": {
+            "type": "string"
+          },
+          "retryable": {
+            "type": "boolean"
+          },
+          "status": {
+            "enum": [
+              "not_ready",
+              "not_requested",
+              "pending",
+              "retrying",
+              "delivered",
+              "failed",
+              "uncertain",
+              "no_changes"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "pull_request_url",
+          "number",
+          "branch",
+          "base_branch",
+          "base_commit",
+          "draft",
+          "error",
+          "retryable"
+        ],
+        "type": "object"
+      },
+      "GitHubRunDeliveryRequest": {
+        "additionalProperties": false,
+        "properties": {},
+        "type": "object"
+      },
+      "GitHubRunDeliverySettingsRead": {
+        "properties": {
+          "authorized": {
+            "type": "boolean"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "failed_count": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "last_error": {
+            "type": "string"
+          },
+          "pending_count": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "permission_message": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "enabled",
+          "authorized",
+          "permission_message",
+          "pending_count",
+          "failed_count",
+          "last_error"
+        ],
+        "type": "object"
+      },
+      "GitHubRunDeliverySettingsUpdate": {
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "enabled"
+        ],
+        "type": "object"
+      },
       "HTTPValidationError": {
         "properties": {
           "detail": {
@@ -214,6 +892,1104 @@
           }
         },
         "title": "HTTPValidationError",
+        "type": "object"
+      },
+      "IdentityBind": {
+        "additionalProperties": false,
+        "properties": {
+          "identity_id": {
+            "format": "uuid",
+            "type": "string"
+          }
+        },
+        "required": [
+          "identity_id"
+        ],
+        "type": "object"
+      },
+      "IdentityDetach": {
+        "additionalProperties": false,
+        "properties": {},
+        "required": [],
+        "type": "object"
+      },
+      "IdentityStatus": {
+        "additionalProperties": false,
+        "properties": {
+          "account_id": {
+            "type": "string"
+          },
+          "account_name": {
+            "type": "string"
+          },
+          "actor_id": {
+            "type": "string"
+          },
+          "actor_login": {
+            "type": "string"
+          },
+          "actor_name": {
+            "type": "string"
+          },
+          "affected_projects": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "avatar_url": {
+            "type": "string"
+          },
+          "capabilities": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "environment_managed": {
+            "type": "boolean"
+          },
+          "identity_id": {
+            "type": "string"
+          },
+          "mode": {
+            "enum": [
+              "user",
+              "app"
+            ],
+            "type": "string"
+          },
+          "provider": {
+            "enum": [
+              "github",
+              "linear"
+            ],
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "available",
+              "enabled",
+              "disabled",
+              "needs_setup",
+              "needs_access",
+              "reconnect_required"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "provider",
+          "mode",
+          "identity_id",
+          "account_id",
+          "account_name",
+          "actor_id",
+          "actor_name",
+          "actor_login",
+          "avatar_url",
+          "status",
+          "reason",
+          "environment_managed",
+          "capabilities",
+          "affected_projects"
+        ],
+        "type": "object"
+      },
+      "IntegrationProblem": {
+        "properties": {
+          "detail": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "detail"
+        ],
+        "type": "object"
+      },
+      "LinearAppSetup": {
+        "additionalProperties": false,
+        "properties": {
+          "client_id": {
+            "maxLength": 200,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "client_id"
+        ],
+        "type": "object"
+      },
+      "LinearIdentityConnect": {
+        "additionalProperties": false,
+        "properties": {
+          "purpose": {
+            "default": "identity",
+            "enum": [
+              "identity",
+              "agent"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [],
+        "type": "object"
+      },
+      "LinearImport": {
+        "properties": {
+          "issue_id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "repository_id": {
+            "format": "uuid",
+            "type": "string"
+          }
+        },
+        "required": [
+          "repository_id",
+          "issue_id"
+        ],
+        "type": "object"
+      },
+      "LinearIssue": {
+        "properties": {
+          "description": {
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "identifier": {
+            "type": "string"
+          },
+          "state": {
+            "properties": {
+              "name": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "name"
+            ],
+            "type": "object"
+          },
+          "title": {
+            "type": "string"
+          },
+          "url": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "identifier",
+          "title",
+          "url",
+          "description",
+          "state"
+        ],
+        "type": "object"
+      },
+      "LinearIssuePage": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/LinearIssue"
+            },
+            "type": "array"
+          },
+          "next_cursor": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "items",
+          "next_cursor"
+        ],
+        "type": "object"
+      },
+      "LinearProject": {
+        "properties": {
+          "id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name"
+        ],
+        "type": "object"
+      },
+      "LinearProjectPage": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/LinearProject"
+            },
+            "type": "array"
+          },
+          "next_cursor": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "items",
+          "next_cursor"
+        ],
+        "type": "object"
+      },
+      "LinearRunDeliveryRead": {
+        "additionalProperties": false,
+        "properties": {
+          "error": {
+            "type": "string"
+          },
+          "issue_url": {
+            "type": "string"
+          },
+          "last_delivered_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "publisher": {
+            "$ref": "#/components/schemas/PublisherIdentity"
+          },
+          "status": {
+            "enum": [
+              "not_linked",
+              "disabled",
+              "pending",
+              "retrying",
+              "delivered",
+              "failed",
+              "skipped",
+              "reconnect_required",
+              "uncertain"
+            ],
+            "type": "string"
+          },
+          "request_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "issue_url",
+          "status",
+          "error",
+          "last_delivered_at"
+        ],
+        "title": "LinearRunDeliveryRead",
+        "type": "object"
+      },
+      "LinearRunUpdatesRead": {
+        "additionalProperties": false,
+        "properties": {
+          "authorized": {
+            "type": "boolean"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "failed_count": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "last_error": {
+            "type": "string"
+          },
+          "pending_count": {
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "enabled",
+          "authorized",
+          "pending_count",
+          "failed_count",
+          "last_error"
+        ],
+        "title": "LinearRunUpdatesRead",
+        "type": "object"
+      },
+      "LinearRunUpdatesUpdate": {
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "enabled"
+        ],
+        "title": "LinearRunUpdatesUpdate",
+        "type": "object"
+      },
+      "LinearTeam": {
+        "properties": {
+          "id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "key": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "key"
+        ],
+        "type": "object"
+      },
+      "LinearTeamPage": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/LinearTeam"
+            },
+            "type": "array"
+          },
+          "next_cursor": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "items",
+          "next_cursor"
+        ],
+        "type": "object"
+      },
+      "MCPActivityRead": {
+        "properties": {
+          "access": {
+            "enum": [
+              "control",
+              "read-only"
+            ],
+            "type": "string"
+          },
+          "at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "client_name": {
+            "maxLength": 80,
+            "type": "string"
+          },
+          "client_version": {
+            "maxLength": 80,
+            "type": "string"
+          }
+        },
+        "required": [
+          "client_name",
+          "client_version",
+          "access",
+          "at"
+        ],
+        "title": "MCPActivityRead",
+        "type": "object"
+      },
+      "MCPConnectionRead": {
+        "properties": {
+          "available": {
+            "type": "boolean"
+          },
+          "last_activity": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MCPActivityRead"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "read_only_url": {
+            "format": "uri",
+            "type": "string"
+          },
+          "url": {
+            "format": "uri",
+            "type": "string"
+          }
+        },
+        "required": [
+          "available",
+          "url",
+          "read_only_url",
+          "last_activity"
+        ],
+        "title": "MCPConnectionRead",
+        "type": "object"
+      },
+      "PRReviewCheck": {
+        "additionalProperties": false,
+        "properties": {
+          "evidence": {
+            "type": "string"
+          },
+          "method": {
+            "type": "string"
+          },
+          "not_run_reason": {
+            "type": "string"
+          },
+          "outcome": {
+            "enum": [
+              "passed",
+              "failed",
+              "not_run"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "method",
+          "outcome",
+          "evidence",
+          "not_run_reason"
+        ],
+        "type": "object"
+      },
+      "PRReviewEmpty": {
+        "additionalProperties": false,
+        "properties": {},
+        "required": [],
+        "type": "object"
+      },
+      "PRReviewEvidence": {
+        "additionalProperties": false,
+        "properties": {
+          "artifact_id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "event_sequence": {
+            "type": "integer"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "limitation": {
+            "type": "string"
+          },
+          "sha256": {
+            "type": "string"
+          },
+          "source_run_id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "text": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "source_run_id",
+          "artifact_id",
+          "event_sequence",
+          "kind",
+          "sha256",
+          "text",
+          "limitation"
+        ],
+        "type": "object"
+      },
+      "PRReviewFinding": {
+        "additionalProperties": false,
+        "properties": {
+          "consequence": {
+            "type": "string"
+          },
+          "end_line": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "evidence": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          },
+          "severity": {
+            "enum": [
+              "critical",
+              "high",
+              "medium",
+              "low"
+            ],
+            "type": "string"
+          },
+          "side": {
+            "enum": [
+              "base",
+              "head"
+            ],
+            "type": "string"
+          },
+          "start_line": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "suggested_fix": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "severity",
+          "title",
+          "path",
+          "evidence",
+          "consequence",
+          "suggested_fix",
+          "side",
+          "start_line",
+          "end_line"
+        ],
+        "type": "object"
+      },
+      "PRReviewFreshness": {
+        "additionalProperties": false,
+        "properties": {
+          "checked_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "error": {
+            "type": "string"
+          },
+          "observed_base_sha": {
+            "type": "string"
+          },
+          "observed_head_sha": {
+            "type": "string"
+          },
+          "pr_state": {
+            "enum": [
+              "unknown",
+              "open",
+              "closed",
+              "merged",
+              "unavailable"
+            ],
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "unknown",
+              "current",
+              "outdated",
+              "unavailable"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "pr_state",
+          "observed_base_sha",
+          "observed_head_sha",
+          "error",
+          "checked_at"
+        ],
+        "type": "object"
+      },
+      "PRReviewIdentity": {
+        "additionalProperties": false,
+        "properties": {
+          "base_ref": {
+            "type": "string"
+          },
+          "base_sha": {
+            "type": "string"
+          },
+          "github_repository_id": {
+            "type": "string"
+          },
+          "head_ref": {
+            "type": "string"
+          },
+          "head_sha": {
+            "type": "string"
+          },
+          "installation_id": {
+            "type": "string"
+          },
+          "number": {
+            "type": "integer"
+          },
+          "repository_name": {
+            "type": "string"
+          },
+          "url": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "installation_id",
+          "github_repository_id",
+          "repository_name",
+          "url",
+          "base_ref",
+          "head_ref",
+          "base_sha",
+          "head_sha",
+          "number"
+        ],
+        "type": "object"
+      },
+      "PRReviewLaunch": {
+        "additionalProperties": false,
+        "properties": {
+          "expected_input_fingerprint": {
+            "maxLength": 64,
+            "minLength": 64,
+            "pattern": "^[0-9a-f]{64}$",
+            "type": "string"
+          },
+          "mode": {
+            "enum": [
+              "normal",
+              "again"
+            ],
+            "type": "string"
+          },
+          "previous_review_id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "request_key": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "reviewer_id": {
+            "format": "uuid",
+            "type": "string"
+          }
+        },
+        "required": [
+          "request_key",
+          "expected_input_fingerprint",
+          "mode"
+        ],
+        "type": "object"
+      },
+      "PRReviewPage": {
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/PRReviewRead"
+            },
+            "maxItems": 100,
+            "type": "array"
+          },
+          "next_cursor": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "items",
+          "next_cursor"
+        ],
+        "type": "object"
+      },
+      "PRReviewPreparation": {
+        "additionalProperties": false,
+        "properties": {
+          "ready": {
+            "type": "boolean"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "snapshot": {
+            "$ref": "#/components/schemas/PRReviewSnapshot"
+          }
+        },
+        "required": [
+          "ready",
+          "reason",
+          "snapshot"
+        ],
+        "type": "object"
+      },
+      "PRReviewPublication": {
+        "additionalProperties": false,
+        "properties": {
+          "error": {
+            "type": "string"
+          },
+          "publisher": {
+            "$ref": "#/components/schemas/PublisherIdentity"
+          },
+          "retryable": {
+            "type": "boolean"
+          },
+          "status": {
+            "enum": [
+              "pending",
+              "published",
+              "retrying",
+              "uncertain",
+              "skipped",
+              "failed",
+              "delivered"
+            ],
+            "type": "string"
+          },
+          "url": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "url",
+          "error",
+          "retryable"
+        ],
+        "type": "object"
+      },
+      "PRReviewRead": {
+        "additionalProperties": false,
+        "properties": {
+          "assessment": {
+            "enum": [
+              "pending",
+              "findings",
+              "no_blocking_findings",
+              "incomplete"
+            ],
+            "type": "string"
+          },
+          "attempt": {
+            "type": "integer"
+          },
+          "automatic": {
+            "type": "boolean"
+          },
+          "created_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "freshness": {
+            "$ref": "#/components/schemas/PRReviewFreshness"
+          },
+          "github": {
+            "$ref": "#/components/schemas/PRReviewPublication"
+          },
+          "id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "linear": {
+            "$ref": "#/components/schemas/PRReviewPublication"
+          },
+          "merge_base_sha": {
+            "type": "string"
+          },
+          "previous_review_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "report": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PRReviewReport"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "report_error": {
+            "type": "string"
+          },
+          "run_id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "run_status": {
+            "$ref": "#/components/schemas/RunStatus"
+          },
+          "snapshot": {
+            "$ref": "#/components/schemas/PRReviewSnapshot"
+          }
+        },
+        "required": [
+          "id",
+          "run_id",
+          "previous_review_id",
+          "attempt",
+          "automatic",
+          "snapshot",
+          "merge_base_sha",
+          "run_status",
+          "assessment",
+          "report",
+          "report_error",
+          "freshness",
+          "github",
+          "linear",
+          "created_at"
+        ],
+        "type": "object"
+      },
+      "PRReviewReport": {
+        "additionalProperties": false,
+        "properties": {
+          "checks": {
+            "items": {
+              "$ref": "#/components/schemas/PRReviewCheck"
+            },
+            "maxItems": 50,
+            "type": "array"
+          },
+          "coverage": {
+            "enum": [
+              "complete",
+              "incomplete"
+            ],
+            "type": "string"
+          },
+          "findings": {
+            "items": {
+              "$ref": "#/components/schemas/PRReviewFinding"
+            },
+            "maxItems": 50,
+            "type": "array"
+          },
+          "limitations": {
+            "items": {
+              "maxLength": 2000,
+              "type": "string"
+            },
+            "maxItems": 50,
+            "type": "array"
+          },
+          "summary": {
+            "maxLength": 8000,
+            "type": "string"
+          }
+        },
+        "required": [
+          "summary",
+          "coverage",
+          "findings",
+          "checks",
+          "limitations"
+        ],
+        "type": "object"
+      },
+      "PRReviewSettingsRead": {
+        "additionalProperties": false,
+        "properties": {
+          "automatic": {
+            "type": "boolean"
+          },
+          "available": {
+            "type": "boolean"
+          },
+          "pending_count": {
+            "type": "integer"
+          },
+          "reviewer": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PRReviewerSnapshot"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "reviewer_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "unavailable_reason": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "automatic",
+          "available",
+          "reviewer_id",
+          "reviewer",
+          "unavailable_reason",
+          "pending_count"
+        ],
+        "type": "object"
+      },
+      "PRReviewSettingsUpdate": {
+        "additionalProperties": false,
+        "properties": {
+          "automatic": {
+            "type": "boolean"
+          },
+          "reviewer_id": {
+            "format": "uuid",
+            "type": "string"
+          }
+        },
+        "required": [
+          "automatic"
+        ],
+        "type": "object"
+      },
+      "PRReviewSnapshot": {
+        "additionalProperties": false,
+        "properties": {
+          "clone_url": {
+            "type": "string"
+          },
+          "evidence": {
+            "items": {
+              "$ref": "#/components/schemas/PRReviewEvidence"
+            },
+            "type": "array"
+          },
+          "input_fingerprint": {
+            "type": "string"
+          },
+          "pr": {
+            "$ref": "#/components/schemas/PRReviewIdentity"
+          },
+          "project_id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "repository_id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "reviewer": {
+            "$ref": "#/components/schemas/PRReviewerSnapshot"
+          },
+          "source_run_id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "task_description": {
+            "type": "string"
+          },
+          "task_external_refs": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "task_id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "task_title": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "source_run_id",
+          "task_id",
+          "project_id",
+          "repository_id",
+          "clone_url",
+          "pr",
+          "reviewer",
+          "task_title",
+          "task_description",
+          "task_external_refs",
+          "evidence",
+          "input_fingerprint"
+        ],
+        "type": "object"
+      },
+      "PRReviewerSnapshot": {
+        "additionalProperties": false,
+        "properties": {
+          "agent_id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "backend": {
+            "type": "string"
+          },
+          "backend_config": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "fingerprint": {
+            "type": "string"
+          },
+          "instructions": {
+            "type": "string"
+          },
+          "model": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "prompt_version": {
+            "type": "string"
+          },
+          "reasoning_effort": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "agent_id",
+          "name",
+          "backend",
+          "instructions",
+          "model",
+          "reasoning_effort",
+          "prompt_version",
+          "fingerprint",
+          "backend_config"
+        ],
         "type": "object"
       },
       "ProjectCreate": {
@@ -284,6 +2060,48 @@
           "updated_at"
         ],
         "title": "ProjectRead",
+        "type": "object"
+      },
+      "ProviderAppSaved": {
+        "additionalProperties": false,
+        "properties": {
+          "configured": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "configured"
+        ],
+        "type": "object"
+      },
+      "PublisherIdentity": {
+        "additionalProperties": false,
+        "properties": {
+          "account_id": {
+            "type": "string"
+          },
+          "actor_id": {
+            "type": "string"
+          },
+          "app_client_id": {
+            "type": "string"
+          },
+          "identity_id": {
+            "type": "string"
+          },
+          "mode": {
+            "type": "string"
+          },
+          "provider": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "mode",
+          "provider",
+          "account_id",
+          "actor_id"
+        ],
         "type": "object"
       },
       "RepositoryCreate": {
@@ -388,6 +2206,12 @@
             "title": "External Refs",
             "type": "object"
           },
+          "request_key": {
+            "description": "Optional idempotency key, scoped to this Task. Reuse the same key and payload when retrying a launch. A different payload with the same key returns 409. Omit for a new attempt on every request.",
+            "maxLength": 200,
+            "minLength": 1,
+            "type": "string"
+          },
           "task_id": {
             "format": "uuid",
             "title": "Task Id",
@@ -417,6 +2241,17 @@
             "title": "Last Event Sequence",
             "type": "integer"
           },
+          "pr_review_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "run": {
             "$ref": "#/components/schemas/RunRead"
           },
@@ -444,7 +2279,8 @@
           "workspace",
           "artifacts",
           "usage",
-          "last_event_sequence"
+          "last_event_sequence",
+          "pr_review_id"
         ],
         "title": "RunExecutionRead",
         "type": "object"
@@ -514,6 +2350,13 @@
             "title": "Id",
             "type": "string"
           },
+          "kind": {
+            "enum": [
+              "coding",
+              "pr_review"
+            ],
+            "type": "string"
+          },
           "parent_run_id": {
             "anyOf": [
               {
@@ -525,6 +2368,17 @@
               }
             ],
             "title": "Parent Run Id"
+          },
+          "request_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The launch idempotency key, or null for runs created without one."
           },
           "started_at": {
             "anyOf": [
@@ -578,7 +2432,9 @@
           "error",
           "external_refs",
           "created_at",
-          "updated_at"
+          "updated_at",
+          "request_key",
+          "kind"
         ],
         "title": "RunRead",
         "type": "object"
@@ -817,6 +2673,512 @@
         ],
         "title": "WorkspaceStatus",
         "type": "string"
+      },
+      "WebhookSettings": {
+        "type": "object",
+        "properties": {
+          "provider": {
+            "type": "string",
+            "enum": [
+              "github",
+              "linear"
+            ]
+          },
+          "public_origin": {
+            "type": "string"
+          },
+          "callback_url": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "provider_url": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "secret_configured": {
+            "type": "boolean"
+          },
+          "last_verified_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "affected_projects": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "provider",
+          "public_origin",
+          "callback_url",
+          "status",
+          "provider_url",
+          "reason",
+          "secret_configured",
+          "last_verified_at",
+          "affected_projects"
+        ]
+      },
+      "WebhookSettingsUpdate": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "public_origin"
+        ],
+        "properties": {
+          "public_origin": {
+            "type": "string",
+            "maxLength": 2048,
+            "minLength": 1
+          },
+          "signing_secret": {
+            "type": "string",
+            "maxLength": 512
+          }
+        }
+      },
+      "LinearRequestRoute": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "identity_id",
+          "scope_id",
+          "project_id",
+          "repository_id",
+          "agent_id",
+          "scope_type",
+          "mode",
+          "enabled",
+          "generation",
+          "scope_name",
+          "agent_name",
+          "repository_name"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "identity_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "scope_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "project_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "repository_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "agent_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "scope_type": {
+            "type": "string",
+            "enum": [
+              "project",
+              "team"
+            ]
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "automatic",
+              "approval"
+            ]
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "generation": {
+            "type": "integer"
+          },
+          "scope_name": {
+            "type": "string"
+          },
+          "agent_name": {
+            "type": "string"
+          },
+          "repository_name": {
+            "type": "string"
+          }
+        }
+      },
+      "LinearRequestRouteCreate": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "identity_id",
+          "scope_id",
+          "repository_id",
+          "agent_id",
+          "scope_type",
+          "mode",
+          "enabled"
+        ],
+        "properties": {
+          "identity_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "scope_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "repository_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "agent_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "scope_type": {
+            "type": "string",
+            "enum": [
+              "project",
+              "team"
+            ]
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "automatic",
+              "approval"
+            ]
+          },
+          "enabled": {
+            "type": "boolean"
+          }
+        }
+      },
+      "LinearRequestRouteUpdate": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "repository_id",
+          "agent_id",
+          "mode",
+          "enabled",
+          "expected_generation"
+        ],
+        "properties": {
+          "repository_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "agent_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "automatic",
+              "approval"
+            ]
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "expected_generation": {
+            "type": "integer",
+            "minimum": 1
+          }
+        }
+      },
+      "ExternalRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "identity_id",
+          "session_id",
+          "issue_id",
+          "source_url",
+          "requester_id",
+          "requester_name",
+          "project_id",
+          "repository_id",
+          "agent_id",
+          "run_id",
+          "status",
+          "reason",
+          "input_fingerprint",
+          "title",
+          "created_at",
+          "updated_at"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "identity_id": {
+            "type": "string"
+          },
+          "session_id": {
+            "type": "string"
+          },
+          "issue_id": {
+            "type": "string"
+          },
+          "source_url": {
+            "type": "string"
+          },
+          "requester_id": {
+            "type": "string"
+          },
+          "requester_name": {
+            "type": "string"
+          },
+          "project_id": {
+            "type": "string"
+          },
+          "repository_id": {
+            "type": "string"
+          },
+          "agent_id": {
+            "type": "string"
+          },
+          "run_id": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "input_fingerprint": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "ExternalRequestMessage": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "body",
+          "created_at"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "body": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "ExternalRequestDetail": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "identity_id",
+          "session_id",
+          "issue_id",
+          "source_url",
+          "requester_id",
+          "requester_name",
+          "project_id",
+          "repository_id",
+          "agent_id",
+          "run_id",
+          "status",
+          "reason",
+          "input_fingerprint",
+          "title",
+          "created_at",
+          "updated_at",
+          "prompt",
+          "agent_name",
+          "repository_name",
+          "model",
+          "reasoning_effort",
+          "run_url",
+          "pull_request_url",
+          "delivery_status",
+          "delivery_reason",
+          "messages"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "identity_id": {
+            "type": "string"
+          },
+          "session_id": {
+            "type": "string"
+          },
+          "issue_id": {
+            "type": "string"
+          },
+          "source_url": {
+            "type": "string"
+          },
+          "requester_id": {
+            "type": "string"
+          },
+          "requester_name": {
+            "type": "string"
+          },
+          "project_id": {
+            "type": "string"
+          },
+          "repository_id": {
+            "type": "string"
+          },
+          "agent_id": {
+            "type": "string"
+          },
+          "run_id": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "input_fingerprint": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "prompt": {
+            "type": "string"
+          },
+          "agent_name": {
+            "type": "string"
+          },
+          "repository_name": {
+            "type": "string"
+          },
+          "model": {
+            "type": "string"
+          },
+          "reasoning_effort": {
+            "type": "string"
+          },
+          "run_url": {
+            "type": "string"
+          },
+          "pull_request_url": {
+            "type": "string"
+          },
+          "delivery_status": {
+            "type": "string"
+          },
+          "delivery_reason": {
+            "type": "string"
+          },
+          "messages": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ExternalRequestMessage"
+            }
+          }
+        }
+      },
+      "ExternalRequestPage": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "items",
+          "next_cursor"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ExternalRequest"
+            }
+          },
+          "next_cursor": {
+            "type": "string"
+          }
+        }
+      },
+      "ExternalRequestStart": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "expected_input_fingerprint"
+        ],
+        "properties": {
+          "expected_input_fingerprint": {
+            "type": "string",
+            "minLength": 64,
+            "maxLength": 64
+          }
+        }
+      },
+      "ExternalRequestRoute": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "route_id",
+          "expected_input_fingerprint"
+        ],
+        "properties": {
+          "route_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "expected_input_fingerprint": {
+            "type": "string",
+            "minLength": 64,
+            "maxLength": 64
+          }
+        }
       }
     }
   },
@@ -913,6 +3275,76 @@
         "summary": "Create Agent"
       }
     },
+    "/api/v1/agents/{agent_id}": {
+      "patch": {
+        "operationId": "update_agent",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "agent_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AgentUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "description": "Agent not found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Invalid model settings"
+          }
+        },
+        "summary": "Update Codex agent model settings"
+      }
+    },
+    "/api/v1/backends/codex/models": {
+      "get": {
+        "operationId": "list_codex_models",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CodexModelCatalog"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List Codex model and reasoning choices"
+      }
+    },
     "/api/v1/health": {
       "get": {
         "operationId": "health_api_v1_health_get",
@@ -933,6 +3365,462 @@
           }
         },
         "summary": "Health"
+      }
+    },
+    "/api/v1/integrations/github/registration-callback": {
+      "get": {
+        "operationId": "complete_github_app_registration",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "state",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "code",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "error",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "303": {
+            "description": "Return to the configured console with a safe connection result"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntegrationProblem"
+                }
+              }
+            },
+            "description": "Unknown provider"
+          }
+        },
+        "summary": "Complete browser-bound GitHub App registration and continue to installation",
+        "tags": [
+          "Integrations"
+        ]
+      }
+    },
+    "/api/v1/integrations/{provider}/callback": {
+      "get": {
+        "operationId": "integration_callback",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "provider",
+            "required": true,
+            "schema": {
+              "enum": [
+                "github",
+                "linear"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "state",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "code",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "error",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "303": {
+            "description": "Return to the configured console with a safe connection result"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntegrationProblem"
+                }
+              }
+            },
+            "description": "Unknown provider"
+          }
+        },
+        "summary": "Complete provider authorization",
+        "tags": [
+          "Integrations"
+        ]
+      }
+    },
+    "/api/v1/mcp/connection": {
+      "get": {
+        "operationId": "get_mcp_connection",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MCPConnectionRead"
+                }
+              }
+            },
+            "description": "Connection details; activity is in-memory and resets when the API restarts."
+          }
+        },
+        "summary": "Get bundled MCP connection details and recent activity"
+      }
+    },
+    "/api/v1/pr-reviews/{review_id}": {
+      "get": {
+        "operationId": "get_pr_review",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "review_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PRReviewRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntegrationProblem"
+                }
+              }
+            },
+            "description": "Permission or origin denied"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntegrationProblem"
+                }
+              }
+            },
+            "description": "Resource not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntegrationProblem"
+                }
+              }
+            },
+            "description": "Preparation changed, key conflict, or connection/reviewer unavailable"
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntegrationProblem"
+                }
+              }
+            },
+            "description": "JSON request required"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntegrationProblem"
+                }
+              }
+            },
+            "description": "Provider temporarily unavailable"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntegrationProblem"
+                }
+              }
+            },
+            "description": "Integration configuration unavailable"
+          }
+        },
+        "summary": "Get pr review",
+        "tags": [
+          "PR Reviews"
+        ]
+      }
+    },
+    "/api/v1/pr-reviews/{review_id}/publication/retry": {
+      "post": {
+        "operationId": "retry_pr_review_publication",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "review_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PRReviewEmpty"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PRReviewRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntegrationProblem"
+                }
+              }
+            },
+            "description": "Permission or origin denied"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntegrationProblem"
+                }
+              }
+            },
+            "description": "Resource not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntegrationProblem"
+                }
+              }
+            },
+            "description": "Preparation changed, key conflict, or connection/reviewer unavailable"
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntegrationProblem"
+                }
+              }
+            },
+            "description": "JSON request required"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntegrationProblem"
+                }
+              }
+            },
+            "description": "Provider temporarily unavailable"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntegrationProblem"
+                }
+              }
+            },
+            "description": "Integration configuration unavailable"
+          }
+        },
+        "summary": "Retry pr review publication",
+        "tags": [
+          "PR Reviews"
+        ]
+      }
+    },
+    "/api/v1/pr-reviews/{review_id}/refresh": {
+      "post": {
+        "operationId": "refresh_pr_review",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "review_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PRReviewEmpty"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PRReviewRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntegrationProblem"
+                }
+              }
+            },
+            "description": "Permission or origin denied"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntegrationProblem"
+                }
+              }
+            },
+            "description": "Resource not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntegrationProblem"
+                }
+              }
+            },
+            "description": "Preparation changed, key conflict, or connection/reviewer unavailable"
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntegrationProblem"
+                }
+              }
+            },
+            "description": "JSON request required"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntegrationProblem"
+                }
+              }
+            },
+            "description": "Provider temporarily unavailable"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntegrationProblem"
+                }
+              }
+            },
+            "description": "Integration configuration unavailable"
+          }
+        },
+        "summary": "Refresh pr review",
+        "tags": [
+          "PR Reviews"
+        ]
       }
     },
     "/api/v1/projects": {
@@ -991,6 +3879,2612 @@
           }
         },
         "summary": "Create Project"
+      }
+    },
+    "/api/v1/projects/{project_id}/discovery": {
+      "post": {
+        "description": "Creates a Task without starting a Run. The task reference identifies the discovery Agent to select in the launcher.",
+        "operationId": "prepare_repository_discovery",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DiscoveryCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskRead"
+                }
+              }
+            },
+            "description": "Prepared discovery Task"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntegrationProblem"
+                }
+              }
+            },
+            "description": "Request origin is not allowed"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntegrationProblem"
+                }
+              }
+            },
+            "description": "Project or repository not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntegrationProblem"
+                }
+              }
+            },
+            "description": "Discovery Agent is disabled"
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntegrationProblem"
+                }
+              }
+            },
+            "description": "JSON request required"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Invalid request"
+          }
+        },
+        "summary": "Prepare a repository discovery Task using the built-in Agent",
+        "tags": [
+          "Agents"
+        ]
+      }
+    },
+    "/api/v1/projects/{project_id}/integrations": {
+      "get": {
+        "operationId": "list_integrations",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ConnectionRead"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntegrationProblem"
+                }
+              }
+            },
+            "description": "Access denied"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntegrationProblem"
+                }
+              }
+            },
+            "description": "Not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntegrationProblem"
+                }
+              }
+            },
+            "description": "Connection or resource conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntegrationProblem"
+                }
+              }
+            },
+            "description": "Provider unavailable"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntegrationProblem"
+                }
+              }
+            },
+            "description": "Provider is not configured"
+          }
+        },
+        "summary": "List integrations",
+        "tags": [
+          "Integrations"
+        ]
+      }
+    },
+    "/api/v1/projects/{project_id}/integrations/github/app": {
+      "post": {
+        "operationId": "update_github_app_url",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GitHubAppUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProviderAppSaved"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntegrationProblem"
+                }
+              }
+            },
+            "description": "Access denied"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntegrationProblem"
+                }
+              }
+            },
+            "description": "Not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntegrationProblem"
+                }
+              }
+            },
+            "description": "Connection or resource conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntegrationProblem"
+                }
+              }
+            },
+            "description": "Provider unavailable"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntegrationProblem"
+                }
+              }
+            },
+            "description": "Provider is not configured"
+          }
+        },
+        "summary": "Update the URL of the registered GitHub App after a rename",
+        "tags": [
+          "Integrations"
+        ]
+      }
+    },
+    "/api/v1/projects/{project_id}/integrations/github/identity/key": {
+      "post": {
+        "operationId": "save_github_identity_key",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GitHubIdentityKey"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IdentityStatus"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntegrationProblem"
+                }
+              }
+            },
+            "description": "Access denied"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntegrationProblem"
+                }
+              }
+            },
+            "description": "Not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntegrationProblem"
+                }
+              }
+            },
+            "description": "Connection or resource conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntegrationProblem"
+                }
+              }
+            },
+            "description": "Provider unavailable"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntegrationProblem"
+                }
+              }
+            },
+            "description": "Provider is not configured"
+          }
+        },
+        "summary": "Save github identity key",
+        "tags": [
+          "Integrations"
+        ]
+      }
+    },
+    "/api/v1/projects/{project_id}/integrations/github/import": {
+      "post": {
+        "operationId": "import_github_repository",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GitHubImport"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RepositoryRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RepositoryRead"
+                }
+              }
+            },
+            "description": "Resource imported"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntegrationProblem"
+                }
+              }
+            },
+            "description": "Access denied"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntegrationProblem"
+                }
+              }
+            },
+            "description": "Not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntegrationProblem"
+                }
+              }
+            },
+            "description": "Connection or resource conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntegrationProblem"
+                }
+              }
+            },
+            "description": "Provider unavailable"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntegrationProblem"
+                }
+              }
+            },
+            "description": "Provider is not configured"
+          }
+        },
+        "summary": "Import github repository",
+        "tags": [
+          "Integrations"
+        ]
+      }
+    },
+    "/api/v1/projects/{project_id}/integrations/github/installations": {
+      "get": {
+        "operationId": "list_github_installations",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page",
+            "required": false,
+            "schema": {
+              "default": 1,
+              "maximum": 10000,
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GitHubInstallationPage"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntegrationProblem"
+                }
+              }
+            },
+            "description": "Access denied"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntegrationProblem"
+                }
+              }
+            },
+            "description": "Not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntegrationProblem"
+                }
+              }
+            },
+            "description": "Connection or resource conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntegrationProblem"
+                }
+              }
+            },
+            "description": "Provider unavailable"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntegrationProblem"
+                }
+              }
+            },
+            "description": "Provider is not configured"
+          }
+        },
+        "summary": "List github installations",
+        "tags": [
+          "Integrations"
+        ]
+      }
+    },
+    "/api/v1/projects/{project_id}/integrations/github/pr-reviews": {
+      "get": {
+        "operationId": "get_pr_review_settings",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PRReviewSettingsRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntegrationProblem"
+                }
+              }
+            },
+            "description": "Permission or origin denied"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntegrationProblem"
+                }
+              }
+            },
+            "description": "Resource not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntegrationProblem"
+                }
+              }
+            },
+            "description": "Preparation changed, key conflict, or connection/reviewer unavailable"
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntegrationProblem"
+                }
+              }
+            },
+            "description": "JSON request required"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntegrationProblem"
+                }
+              }
+            },
+            "description": "Provider temporarily unavailable"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntegrationProblem"
+                }
+              }
+            },
+            "description": "Integration configuration unavailable"
+          }
+        },
+        "summary": "Get pr review settings",
+        "tags": [
+          "PR Reviews"
+        ]
+      },
+      "post": {
+        "operationId": "set_pr_review_settings",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PRReviewSettingsUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PRReviewSettingsRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntegrationProblem"
+                }
+              }
+            },
+            "description": "Permission or origin denied"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntegrationProblem"
+                }
+              }
+            },
+            "description": "Resource not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntegrationProblem"
+                }
+              }
+            },
+            "description": "Preparation changed, key conflict, or connection/reviewer unavailable"
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntegrationProblem"
+                }
+              }
+            },
+            "description": "JSON request required"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntegrationProblem"
+                }
+              }
+            },
+            "description": "Provider temporarily unavailable"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntegrationProblem"
+                }
+              }
+            },
+            "description": "Integration configuration unavailable"
+          }
+        },
+        "summary": "Set pr review settings",
+        "tags": [
+          "PR Reviews"
+        ]
+      }
+    },
+    "/api/v1/projects/{project_id}/integrations/github/register": {
+      "post": {
+        "operationId": "register_github_app",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GitHubAppRegistration"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GitHubAppRegistrationRead"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntegrationProblem"
+                }
+              }
+            },
+            "description": "Access denied"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntegrationProblem"
+                }
+              }
+            },
+            "description": "Not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntegrationProblem"
+                }
+              }
+            },
+            "description": "Connection or resource conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntegrationProblem"
+                }
+              }
+            },
+            "description": "Provider unavailable"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntegrationProblem"
+                }
+              }
+            },
+            "description": "Provider is not configured"
+          }
+        },
+        "summary": "Start GitHub App registration in the user browser",
+        "tags": [
+          "Integrations"
+        ]
+      }
+    },
+    "/api/v1/projects/{project_id}/integrations/github/repositories": {
+      "get": {
+        "operationId": "list_github_repositories",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "installation_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page",
+            "required": false,
+            "schema": {
+              "default": 1,
+              "maximum": 10000,
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GitHubRepositoryPage"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntegrationProblem"
+                }
+              }
+            },
+            "description": "Access denied"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntegrationProblem"
+                }
+              }
+            },
+            "description": "Not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntegrationProblem"
+                }
+              }
+            },
+            "description": "Connection or resource conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntegrationProblem"
+                }
+              }
+            },
+            "description": "Provider unavailable"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntegrationProblem"
+                }
+              }
+            },
+            "description": "Provider is not configured"
+          }
+        },
+        "summary": "List github repositories",
+        "tags": [
+          "Integrations"
+        ]
+      },
+      "post": {
+        "description": "Reuse the same request_key and parameters after any interruption. Partial or uncertain remote outcomes return a status and guidance; they must not trigger a fresh creation request.",
+        "operationId": "create_github_repository",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GitHubRepositoryCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GitHubRepositoryCreation"
+                }
+              }
+            },
+            "description": "Creation or recovery result"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntegrationProblem"
+                }
+              }
+            },
+            "description": "Repository creation permission required"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntegrationProblem"
+                }
+              }
+            },
+            "description": "Circular project not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntegrationProblem"
+                }
+              }
+            },
+            "description": "Reconnect required or request key conflict"
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntegrationProblem"
+                }
+              }
+            },
+            "description": "JSON request required"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Invalid repository settings or repository name already exists"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntegrationProblem"
+                }
+              }
+            },
+            "description": "GitHub is unavailable"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntegrationProblem"
+                }
+              }
+            },
+            "description": "GitHub integration is not configured"
+          }
+        },
+        "summary": "Create a GitHub repository with a README and attach it to the project",
+        "tags": [
+          "Integrations"
+        ]
+      }
+    },
+    "/api/v1/projects/{project_id}/integrations/github/run-delivery": {
+      "get": {
+        "description": "Project opt-in applies to future successful runs. Existing completed runs require a separate publish request. Draft pull requests never merge automatically.",
+        "operationId": "get_github_run_delivery_settings",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GitHubRunDeliverySettingsRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntegrationProblem"
+                }
+              }
+            },
+            "description": "Resource not found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Read automatic draft pull request publishing",
+        "tags": [
+          "Integrations"
+        ]
+      },
+      "post": {
+        "description": "Project opt-in applies to future successful runs. Existing completed runs require a separate publish request. Draft pull requests never merge automatically.",
+        "operationId": "set_github_run_delivery_settings",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GitHubRunDeliverySettingsUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GitHubRunDeliverySettingsRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntegrationProblem"
+                }
+              }
+            },
+            "description": "Request origin is not allowed"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntegrationProblem"
+                }
+              }
+            },
+            "description": "Resource not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntegrationProblem"
+                }
+              }
+            },
+            "description": "Reconnect GitHub to authorize publishing"
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntegrationProblem"
+                }
+              }
+            },
+            "description": "JSON request required"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Set automatic draft pull request publishing",
+        "tags": [
+          "Integrations"
+        ]
+      }
+    },
+    "/api/v1/projects/{project_id}/integrations/linear/app": {
+      "post": {
+        "operationId": "save_linear_app",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LinearAppSetup"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProviderAppSaved"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntegrationProblem"
+                }
+              }
+            },
+            "description": "Access denied"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntegrationProblem"
+                }
+              }
+            },
+            "description": "Not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntegrationProblem"
+                }
+              }
+            },
+            "description": "Connection or resource conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntegrationProblem"
+                }
+              }
+            },
+            "description": "Provider unavailable"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntegrationProblem"
+                }
+              }
+            },
+            "description": "Provider is not configured"
+          }
+        },
+        "summary": "Save the public Linear app client ID for PKCE authorization",
+        "tags": [
+          "Integrations"
+        ]
+      }
+    },
+    "/api/v1/projects/{project_id}/integrations/linear/identity/connect": {
+      "post": {
+        "operationId": "connect_linear_identity",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LinearIdentityConnect"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConnectionStart"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntegrationProblem"
+                }
+              }
+            },
+            "description": "Access denied"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntegrationProblem"
+                }
+              }
+            },
+            "description": "Not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntegrationProblem"
+                }
+              }
+            },
+            "description": "Connection or resource conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntegrationProblem"
+                }
+              }
+            },
+            "description": "Provider unavailable"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntegrationProblem"
+                }
+              }
+            },
+            "description": "Provider is not configured"
+          }
+        },
+        "summary": "Connect linear identity",
+        "tags": [
+          "Integrations"
+        ]
+      }
+    },
+    "/api/v1/projects/{project_id}/integrations/linear/import": {
+      "post": {
+        "operationId": "import_linear_issue",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LinearImport"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskRead"
+                }
+              }
+            },
+            "description": "Resource imported"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntegrationProblem"
+                }
+              }
+            },
+            "description": "Access denied"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntegrationProblem"
+                }
+              }
+            },
+            "description": "Not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntegrationProblem"
+                }
+              }
+            },
+            "description": "Connection or resource conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntegrationProblem"
+                }
+              }
+            },
+            "description": "Provider unavailable"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntegrationProblem"
+                }
+              }
+            },
+            "description": "Provider is not configured"
+          }
+        },
+        "summary": "Import linear issue",
+        "tags": [
+          "Integrations"
+        ]
+      }
+    },
+    "/api/v1/projects/{project_id}/integrations/linear/issues": {
+      "get": {
+        "operationId": "list_linear_issues",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "team_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "linear_project_id",
+            "required": false,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "maxLength": 1000,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LinearIssuePage"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntegrationProblem"
+                }
+              }
+            },
+            "description": "Access denied"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntegrationProblem"
+                }
+              }
+            },
+            "description": "Not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntegrationProblem"
+                }
+              }
+            },
+            "description": "Connection or resource conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntegrationProblem"
+                }
+              }
+            },
+            "description": "Provider unavailable"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntegrationProblem"
+                }
+              }
+            },
+            "description": "Provider is not configured"
+          }
+        },
+        "summary": "List linear issues",
+        "tags": [
+          "Integrations"
+        ]
+      }
+    },
+    "/api/v1/projects/{project_id}/integrations/linear/projects": {
+      "get": {
+        "operationId": "list_linear_projects",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "maxLength": 1000,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LinearProjectPage"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntegrationProblem"
+                }
+              }
+            },
+            "description": "Access denied"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntegrationProblem"
+                }
+              }
+            },
+            "description": "Not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntegrationProblem"
+                }
+              }
+            },
+            "description": "Connection or resource conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntegrationProblem"
+                }
+              }
+            },
+            "description": "Provider unavailable"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntegrationProblem"
+                }
+              }
+            },
+            "description": "Provider is not configured"
+          }
+        },
+        "summary": "List linear projects",
+        "tags": [
+          "Integrations"
+        ]
+      }
+    },
+    "/api/v1/projects/{project_id}/integrations/linear/run-updates": {
+      "get": {
+        "operationId": "get_linear_run_updates",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LinearRunUpdatesRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntegrationProblem"
+                }
+              }
+            },
+            "description": "Resource not found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Read Linear run update settings and delivery health",
+        "tags": [
+          "Integrations"
+        ]
+      },
+      "post": {
+        "operationId": "set_linear_run_updates",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LinearRunUpdatesUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LinearRunUpdatesRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntegrationProblem"
+                }
+              }
+            },
+            "description": "Request origin is not allowed"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntegrationProblem"
+                }
+              }
+            },
+            "description": "Resource not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntegrationProblem"
+                }
+              }
+            },
+            "description": "Reconnect Linear to authorize comments"
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntegrationProblem"
+                }
+              }
+            },
+            "description": "JSON request required"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Enable or disable comments for future linked runs",
+        "tags": [
+          "Integrations"
+        ]
+      }
+    },
+    "/api/v1/projects/{project_id}/integrations/linear/teams": {
+      "get": {
+        "operationId": "list_linear_teams",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "maxLength": 1000,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LinearTeamPage"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntegrationProblem"
+                }
+              }
+            },
+            "description": "Access denied"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntegrationProblem"
+                }
+              }
+            },
+            "description": "Not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntegrationProblem"
+                }
+              }
+            },
+            "description": "Connection or resource conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntegrationProblem"
+                }
+              }
+            },
+            "description": "Provider unavailable"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntegrationProblem"
+                }
+              }
+            },
+            "description": "Provider is not configured"
+          }
+        },
+        "summary": "List linear teams",
+        "tags": [
+          "Integrations"
+        ]
+      }
+    },
+    "/api/v1/projects/{project_id}/integrations/{provider}/connect": {
+      "post": {
+        "operationId": "connect_integration",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "provider",
+            "required": true,
+            "schema": {
+              "enum": [
+                "github",
+                "linear"
+              ],
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConnectionStart"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntegrationProblem"
+                }
+              }
+            },
+            "description": "Access denied"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntegrationProblem"
+                }
+              }
+            },
+            "description": "Not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntegrationProblem"
+                }
+              }
+            },
+            "description": "Connection or resource conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntegrationProblem"
+                }
+              }
+            },
+            "description": "Provider unavailable"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntegrationProblem"
+                }
+              }
+            },
+            "description": "Provider is not configured"
+          }
+        },
+        "summary": "Connect integration",
+        "tags": [
+          "Integrations"
+        ]
+      }
+    },
+    "/api/v1/projects/{project_id}/integrations/{provider}/disconnect": {
+      "post": {
+        "operationId": "disconnect_integration",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "provider",
+            "required": true,
+            "schema": {
+              "enum": [
+                "github",
+                "linear"
+              ],
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConnectionDisconnect"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntegrationProblem"
+                }
+              }
+            },
+            "description": "Access denied"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntegrationProblem"
+                }
+              }
+            },
+            "description": "Not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntegrationProblem"
+                }
+              }
+            },
+            "description": "Connection or resource conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntegrationProblem"
+                }
+              }
+            },
+            "description": "Provider unavailable"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntegrationProblem"
+                }
+              }
+            },
+            "description": "Provider is not configured"
+          }
+        },
+        "summary": "Disconnect integration",
+        "tags": [
+          "Integrations"
+        ]
+      }
+    },
+    "/api/v1/projects/{project_id}/integrations/{provider}/identity": {
+      "get": {
+        "operationId": "get_integration_identity",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "provider",
+            "required": true,
+            "schema": {
+              "enum": [
+                "github",
+                "linear"
+              ],
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IdentityStatus"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntegrationProblem"
+                }
+              }
+            },
+            "description": "Access denied"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntegrationProblem"
+                }
+              }
+            },
+            "description": "Not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntegrationProblem"
+                }
+              }
+            },
+            "description": "Connection or resource conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntegrationProblem"
+                }
+              }
+            },
+            "description": "Provider unavailable"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntegrationProblem"
+                }
+              }
+            },
+            "description": "Provider is not configured"
+          }
+        },
+        "summary": "Get integration identity",
+        "tags": [
+          "Integrations"
+        ]
+      }
+    },
+    "/api/v1/projects/{project_id}/integrations/{provider}/identity/bind": {
+      "post": {
+        "operationId": "bind_integration_identity",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "provider",
+            "required": true,
+            "schema": {
+              "enum": [
+                "github",
+                "linear"
+              ],
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IdentityBind"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IdentityStatus"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntegrationProblem"
+                }
+              }
+            },
+            "description": "Access denied"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntegrationProblem"
+                }
+              }
+            },
+            "description": "Not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntegrationProblem"
+                }
+              }
+            },
+            "description": "Connection or resource conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntegrationProblem"
+                }
+              }
+            },
+            "description": "Provider unavailable"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntegrationProblem"
+                }
+              }
+            },
+            "description": "Provider is not configured"
+          }
+        },
+        "summary": "Bind integration identity",
+        "tags": [
+          "Integrations"
+        ]
+      }
+    },
+    "/api/v1/projects/{project_id}/integrations/{provider}/identity/detach": {
+      "post": {
+        "operationId": "detach_integration_identity",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "provider",
+            "required": true,
+            "schema": {
+              "enum": [
+                "github",
+                "linear"
+              ],
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IdentityDetach"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IdentityStatus"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntegrationProblem"
+                }
+              }
+            },
+            "description": "Access denied"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntegrationProblem"
+                }
+              }
+            },
+            "description": "Not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntegrationProblem"
+                }
+              }
+            },
+            "description": "Connection or resource conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntegrationProblem"
+                }
+              }
+            },
+            "description": "Provider unavailable"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntegrationProblem"
+                }
+              }
+            },
+            "description": "Provider is not configured"
+          }
+        },
+        "summary": "Detach integration identity",
+        "tags": [
+          "Integrations"
+        ]
       }
     },
     "/api/v1/repositories": {
@@ -1160,6 +6654,16 @@
           "required": true
         },
         "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunRead"
+                }
+              }
+            },
+            "description": "Existing Run returned for an identical request_key and payload."
+          },
           "201": {
             "content": {
               "application/json": {
@@ -1169,6 +6673,9 @@
               }
             },
             "description": "Successful Response"
+          },
+          "409": {
+            "description": "The request_key has already been used with different launch parameters."
           },
           "422": {
             "content": {
@@ -1222,6 +6729,191 @@
           }
         },
         "summary": "Get Run"
+      }
+    },
+    "/api/v1/runs/{run_id}/agent-proposals": {
+      "get": {
+        "operationId": "list_agent_proposals",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/AgentProposalRead"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "description": "Run not found"
+          }
+        },
+        "summary": "List proposed agents for a Run"
+      },
+      "post": {
+        "operationId": "propose_agent",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AgentProposalCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentProposalRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "description": "Run not found"
+          },
+          "409": {
+            "description": "Proposal limit reached"
+          },
+          "422": {
+            "description": "Invalid proposal"
+          }
+        },
+        "summary": "Save an agent proposal for review; does not create an Agent"
+      }
+    },
+    "/api/v1/runs/{run_id}/agent-proposals/{proposal_id}/create": {
+      "post": {
+        "operationId": "create_proposed_agent",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "proposal_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AgentProposalCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "description": "Proposal not found"
+          },
+          "409": {
+            "description": "Proposal already resolved or Agent name already used"
+          },
+          "422": {
+            "description": "Invalid proposal"
+          }
+        },
+        "summary": "Create an Agent from an edited proposal"
+      }
+    },
+    "/api/v1/runs/{run_id}/agent-proposals/{proposal_id}/dismiss": {
+      "post": {
+        "operationId": "dismiss_proposed_agent",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "proposal_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentProposalRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "description": "Proposal not found"
+          },
+          "409": {
+            "description": "Proposal already resolved or Agent name already used"
+          },
+          "422": {
+            "description": "Invalid proposal"
+          }
+        },
+        "summary": "Dismiss an agent proposal"
       }
     },
     "/api/v1/runs/{run_id}/artifacts/{artifact_id}/content": {
@@ -1487,6 +7179,544 @@
         "summary": "Get Run Execution"
       }
     },
+    "/api/v1/runs/{run_id}/github-delivery": {
+      "get": {
+        "operationId": "get_run_github_delivery",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GitHubRunDeliveryRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntegrationProblem"
+                }
+              }
+            },
+            "description": "Resource not found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Read run pull request delivery",
+        "tags": [
+          "Integrations"
+        ]
+      },
+      "post": {
+        "description": "Idempotent per run. Returns durable delivery status; publishing continues in the background. Repeating the request checks or retries the same branch and PR. Does not execute an agent or merge changes.",
+        "operationId": "publish_run_github",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GitHubRunDeliveryRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GitHubRunDeliveryRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntegrationProblem"
+                }
+              }
+            },
+            "description": "Request origin is not allowed"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntegrationProblem"
+                }
+              }
+            },
+            "description": "Resource not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntegrationProblem"
+                }
+              }
+            },
+            "description": "Run is not ready for GitHub delivery"
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntegrationProblem"
+                }
+              }
+            },
+            "description": "JSON request required"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Queue a draft pull request for a successful run",
+        "tags": [
+          "Integrations"
+        ]
+      }
+    },
+    "/api/v1/runs/{run_id}/linear-delivery": {
+      "get": {
+        "operationId": "get_run_linear_delivery",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LinearRunDeliveryRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntegrationProblem"
+                }
+              }
+            },
+            "description": "Resource not found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Read linked Linear issue and latest run update delivery",
+        "tags": [
+          "Integrations"
+        ]
+      }
+    },
+    "/api/v1/runs/{run_id}/pr-reviews": {
+      "get": {
+        "operationId": "list_pr_reviews",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "maximum": 100,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "maxLength": 1024,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PRReviewPage"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntegrationProblem"
+                }
+              }
+            },
+            "description": "Permission or origin denied"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntegrationProblem"
+                }
+              }
+            },
+            "description": "Resource not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntegrationProblem"
+                }
+              }
+            },
+            "description": "Preparation changed, key conflict, or connection/reviewer unavailable"
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntegrationProblem"
+                }
+              }
+            },
+            "description": "JSON request required"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntegrationProblem"
+                }
+              }
+            },
+            "description": "Provider temporarily unavailable"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntegrationProblem"
+                }
+              }
+            },
+            "description": "Integration configuration unavailable"
+          }
+        },
+        "summary": "List pr reviews",
+        "tags": [
+          "PR Reviews"
+        ]
+      },
+      "post": {
+        "operationId": "launch_pr_review",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PRReviewLaunch"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PRReviewRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntegrationProblem"
+                }
+              }
+            },
+            "description": "Permission or origin denied"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntegrationProblem"
+                }
+              }
+            },
+            "description": "Resource not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntegrationProblem"
+                }
+              }
+            },
+            "description": "Preparation changed, key conflict, or connection/reviewer unavailable"
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntegrationProblem"
+                }
+              }
+            },
+            "description": "JSON request required"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntegrationProblem"
+                }
+              }
+            },
+            "description": "Provider temporarily unavailable"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntegrationProblem"
+                }
+              }
+            },
+            "description": "Integration configuration unavailable"
+          }
+        },
+        "summary": "Launch pr review",
+        "tags": [
+          "PR Reviews"
+        ]
+      }
+    },
+    "/api/v1/runs/{run_id}/pr-reviews/prepare": {
+      "get": {
+        "operationId": "prepare_pr_review",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "reviewer_id",
+            "required": false,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PRReviewPreparation"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntegrationProblem"
+                }
+              }
+            },
+            "description": "Permission or origin denied"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntegrationProblem"
+                }
+              }
+            },
+            "description": "Resource not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntegrationProblem"
+                }
+              }
+            },
+            "description": "Preparation changed, key conflict, or connection/reviewer unavailable"
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntegrationProblem"
+                }
+              }
+            },
+            "description": "JSON request required"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntegrationProblem"
+                }
+              }
+            },
+            "description": "Provider temporarily unavailable"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntegrationProblem"
+                }
+              }
+            },
+            "description": "Integration configuration unavailable"
+          }
+        },
+        "summary": "Prepare pr review",
+        "tags": [
+          "PR Reviews"
+        ]
+      }
+    },
     "/api/v1/tasks": {
       "get": {
         "operationId": "list_tasks_api_v1_tasks_get",
@@ -1572,6 +7802,660 @@
           }
         },
         "summary": "Create Task"
+      }
+    },
+    "/api/v1/tasks/{task_id}": {
+      "get": {
+        "operationId": "get_task",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "task_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntegrationProblem"
+                }
+              }
+            },
+            "description": "Access denied"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntegrationProblem"
+                }
+              }
+            },
+            "description": "Not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntegrationProblem"
+                }
+              }
+            },
+            "description": "Connection or resource conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntegrationProblem"
+                }
+              }
+            },
+            "description": "Provider unavailable"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntegrationProblem"
+                }
+              }
+            },
+            "description": "Provider is not configured"
+          }
+        },
+        "summary": "Get task",
+        "tags": [
+          "Integrations"
+        ]
+      }
+    },
+    "/api/v1/integrations/{provider}/webhooks": {
+      "get": {
+        "operationId": "getWebhookSettings",
+        "parameters": [
+          {
+            "name": "provider",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "github",
+                "linear"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Reception status",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WebhookSettings"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "operationId": "postWebhookSettings",
+        "parameters": [
+          {
+            "name": "provider",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "github",
+                "linear"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Reception status",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WebhookSettings"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WebhookSettingsUpdate"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/integrations/{provider}/webhooks/check": {
+      "post": {
+        "operationId": "postCheckWebhookSettings",
+        "parameters": [
+          {
+            "name": "provider",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "github",
+                "linear"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Reception status",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WebhookSettings"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IdentityDetach"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/projects/{project_id}/integrations/linear/request-routes": {
+      "get": {
+        "operationId": "listLinearRequestRoutes",
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Request workflow result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/LinearRequestRoute"
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Request could not be completed"
+          },
+          "404": {
+            "description": "Request could not be completed"
+          },
+          "409": {
+            "description": "Request could not be completed"
+          },
+          "422": {
+            "description": "Request could not be completed"
+          },
+          "502": {
+            "description": "Request could not be completed"
+          },
+          "503": {
+            "description": "Request could not be completed"
+          }
+        }
+      },
+      "post": {
+        "operationId": "createLinearRequestRoute",
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Request workflow result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LinearRequestRoute"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Request could not be completed"
+          },
+          "404": {
+            "description": "Request could not be completed"
+          },
+          "409": {
+            "description": "Request could not be completed"
+          },
+          "422": {
+            "description": "Request could not be completed"
+          },
+          "502": {
+            "description": "Request could not be completed"
+          },
+          "503": {
+            "description": "Request could not be completed"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LinearRequestRouteCreate"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/projects/{project_id}/integrations/linear/request-routes/{route_id}": {
+      "post": {
+        "operationId": "updateLinearRequestRoute",
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "route_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Request workflow result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LinearRequestRoute"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Request could not be completed"
+          },
+          "404": {
+            "description": "Request could not be completed"
+          },
+          "409": {
+            "description": "Request could not be completed"
+          },
+          "422": {
+            "description": "Request could not be completed"
+          },
+          "502": {
+            "description": "Request could not be completed"
+          },
+          "503": {
+            "description": "Request could not be completed"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LinearRequestRouteUpdate"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/external-requests": {
+      "get": {
+        "operationId": "listExternalRequests",
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "unrouted",
+            "in": "query",
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 20
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Request workflow result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExternalRequestPage"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Request could not be completed"
+          },
+          "404": {
+            "description": "Request could not be completed"
+          },
+          "409": {
+            "description": "Request could not be completed"
+          },
+          "422": {
+            "description": "Request could not be completed"
+          },
+          "502": {
+            "description": "Request could not be completed"
+          },
+          "503": {
+            "description": "Request could not be completed"
+          }
+        }
+      }
+    },
+    "/api/v1/external-requests/{request_id}": {
+      "get": {
+        "operationId": "getExternalRequest",
+        "parameters": [
+          {
+            "name": "request_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Request workflow result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExternalRequestDetail"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Request could not be completed"
+          },
+          "404": {
+            "description": "Request could not be completed"
+          },
+          "409": {
+            "description": "Request could not be completed"
+          },
+          "422": {
+            "description": "Request could not be completed"
+          },
+          "502": {
+            "description": "Request could not be completed"
+          },
+          "503": {
+            "description": "Request could not be completed"
+          }
+        }
+      }
+    },
+    "/api/v1/external-requests/{request_id}/start": {
+      "post": {
+        "operationId": "startExternalRequest",
+        "parameters": [
+          {
+            "name": "request_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Request workflow result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExternalRequest"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Request could not be completed"
+          },
+          "404": {
+            "description": "Request could not be completed"
+          },
+          "409": {
+            "description": "Request could not be completed"
+          },
+          "422": {
+            "description": "Request could not be completed"
+          },
+          "502": {
+            "description": "Request could not be completed"
+          },
+          "503": {
+            "description": "Request could not be completed"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ExternalRequestStart"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/external-requests/{request_id}/route": {
+      "post": {
+        "operationId": "routeExternalRequest",
+        "parameters": [
+          {
+            "name": "request_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Request workflow result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExternalRequest"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Request could not be completed"
+          },
+          "404": {
+            "description": "Request could not be completed"
+          },
+          "409": {
+            "description": "Request could not be completed"
+          },
+          "422": {
+            "description": "Request could not be completed"
+          },
+          "502": {
+            "description": "Request could not be completed"
+          },
+          "503": {
+            "description": "Request could not be completed"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ExternalRequestRoute"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/external-requests/{request_id}/stop": {
+      "post": {
+        "operationId": "stopExternalRequest",
+        "parameters": [
+          {
+            "name": "request_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Request workflow result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExternalRequest"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Request could not be completed"
+          },
+          "404": {
+            "description": "Request could not be completed"
+          },
+          "409": {
+            "description": "Request could not be completed"
+          },
+          "422": {
+            "description": "Request could not be completed"
+          },
+          "502": {
+            "description": "Request could not be completed"
+          },
+          "503": {
+            "description": "Request could not be completed"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IdentityDetach"
+              }
+            }
+          }
+        }
       }
     }
   }

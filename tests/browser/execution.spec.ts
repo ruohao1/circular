@@ -58,8 +58,42 @@ for (const scenario of ["success", "cancel", "failure"] as const) {
       });
       await page.goto("/");
       await page
-        .getByLabel("Project", { exact: true })
-        .selectOption(project.id);
+        .getByRole("combobox", { name: "Project", exact: true })
+        .click();
+      await expect(page.getByRole("listbox")).toBeVisible({ timeout: 1500 });
+      await page
+        .getByRole("option", { name: project.name, exact: true })
+        .click();
+      for (const [label, selected] of [
+        ["Repository", "Example repository"],
+        ["Agent", "Implementation engineer · fake"],
+      ]) {
+        const selector = page.getByRole("combobox", {
+          name: label,
+          exact: true,
+        });
+        await expect(selector).toContainText(selected);
+        await selector.press("Enter");
+        const menu = page.getByRole("listbox");
+        await expect(menu).toBeVisible();
+        // Inspect the actual styled popup, not a browser-native option list.
+        const appearance = await menu.evaluate((el) => ({
+          background: getComputedStyle(el).backgroundColor,
+          radius: getComputedStyle(el).borderRadius,
+        }));
+        expect(appearance.background).not.toBe("rgba(0, 0, 0, 0)");
+        expect(appearance.radius).not.toBe("0px");
+        if (scenario === "success")
+          await page.screenshot({
+            path: testInfo.outputPath(`${label.toLowerCase()}-menu.png`),
+            fullPage: true,
+          });
+        await page
+          .getByRole("option", { name: selected, exact: true })
+          .press("Enter");
+        await expect(menu).not.toBeVisible();
+        await expect(selector).toBeFocused();
+      }
       await page
         .getByLabel("Task title")
         .fill(`Isolated execution · ${scenario}`);
@@ -110,6 +144,21 @@ for (const scenario of ["success", "cancel", "failure"] as const) {
         await expect(page.locator(".diff-output")).toContainText(
           "+Fake container workload completed:",
         );
+        // Tabs keep keyboard navigation and their associated panels after the
+        // component migration, without losing the streamed output.
+        await page.getByRole("tab", { name: "Changes" }).press("ArrowRight");
+        await expect(page.getByRole("tab", { name: "Timeline" })).toBeFocused();
+        await expect(page.getByRole("tabpanel")).toContainText(
+          "workspace.released",
+        );
+        await page.getByRole("tab", { name: "Timeline" }).press("Home");
+        await expect(
+          page.getByRole("tab", { name: "Agent output" }),
+        ).toBeFocused();
+        await expect(page.locator(".agent-output")).toContainText(
+          "Fake container workload completed:",
+        );
+        await page.getByRole("tab", { name: "Changes" }).click();
       }
       if (scenario === "failure")
         await expect(page.getByRole("alert")).toContainText("injected_failure");
@@ -117,6 +166,17 @@ for (const scenario of ["success", "cancel", "failure"] as const) {
         path: testInfo.outputPath(`${scenario}.png`),
         fullPage: true,
       });
+      if (scenario === "success") {
+        await page.setViewportSize({ width: 390, height: 844 });
+        expect(
+          await page.evaluate(() => document.documentElement.scrollWidth),
+        ).toBeLessThanOrEqual(390);
+        await page.screenshot({
+          path: testInfo.outputPath("success-mobile.png"),
+          fullPage: true,
+        });
+        await page.setViewportSize({ width: 1440, height: 1000 });
+      }
       await page.reload();
       await expect(page.locator(".heading-actions .status")).toHaveText(
         expected,

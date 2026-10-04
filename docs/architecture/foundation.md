@@ -1,4 +1,7 @@
-# Architectural foundation
+---
+title: "Architectural foundation"
+description: "How the control plane, worker, execution backends, and isolated workspaces fit together."
+---
 
 Circular is a modular Go backend with a React/TypeScript frontend. The API and worker
 are separate processes sharing PostgreSQL, not an in-process service call. Default
@@ -15,6 +18,10 @@ the HTTP/JSONL/artifact contracts.
 - `internal/worker`: claim-consumer loop and configuration.
 - `internal/runstate`: deterministic Run transition policy.
 - `internal/execution`: Supervisor, backend JSONL ingestion, finalization, retention.
+- `internal/backends`: fake and Codex invocation preparation and event decoding.
+- `internal/codexworkload`, `cmd/circular-codex-workload`: isolated Codex CLI entrypoint.
+- `internal/codexauth`: persistent subscription login validation and cross-process locking.
+- `internal/codexlogin`, `cmd/circular-codex-auth`: dedicated containerized login, status and logout.
 - `internal/postgres`: queue, lease-fenced resources, events, Workspace/Artifact records.
 - `internal/git`: Repository cache, isolated linked worktrees, ownership receipts, diffs.
 - `internal/runtimes`: hardened Docker CLI adapter and recovery.
@@ -54,8 +61,15 @@ the runtime compensation boundary.
 The worker passes the exact live handle returned by provisioning to runtime execution.
 Before consuming output, one database read verifies that the Run is `running`, its
 Workspace is `ready`, and the persisted immutable resource ID matches the handle. The
-ingestor then commits each normalized fake-workload event independently so polling and SSE
+ingestor then commits each normalized backend event independently so polling and SSE
 can expose progress before the process exits.
+
+Backend adapters prepare the trusted invocation and decode output; claims, allocation,
+terminal decisions and cleanup stay with the Supervisor. The optional Codex adapter
+uses bridge networking and a bounded `/tmp` tmpfs, mounts a dedicated ChatGPT login
+directory by default (or passes an explicitly configured API key through stdin),
+and requires a successful turn record plus a zero exit. Fake Runs retain their original
+network and mount policy. See [Codex backend](../development/codex-backend.md).
 
 `execution.Supervisor` keeps a 60-second PostgreSQL lease alive, observes cancellation, and
 owns a cancellation-shielded cleanup path. Finalization captures a binary-capable Git
@@ -87,13 +101,12 @@ local and Compose mappings.
 
 ## Deliberately deferred
 
-Real agent backends, authentication and RBAC, approval UI,
+Additional agent backends, authentication and RBAC, approval UI,
 recursive delegation, Linear/GitHub/Slack adapters, LISTEN/NOTIFY wakeups,
 billing, and distributed runners are not implemented. These have explicit seams
 or storage fields where needed, but no speculative framework.
-The current Supervisor builds only the deterministic fake workload specification;
-real backend execution will need an explicit backend adapter without taking over claims
-or resource ownership.
+The first real backend is Codex with subscription and API-key authentication; a credential proxy,
+outbound destination restrictions and backend-aware queue routing remain deferred.
 Production event-output backpressure or durable spooling and artifact garbage collection
 remain future work. Worktree archives use disk-backed streaming without a fixed size cap;
 disk exhaustion or other retention errors preserve the worktree and record cleanup failure

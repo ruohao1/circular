@@ -9,12 +9,13 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/ruohao1/circular/internal/agents"
 )
 
 //go:embed *.sql
 var scripts embed.FS
 
-const Head = "0002"
+const Head = "0015"
 
 var ErrVersion = errors.New("unsupported database schema version; no migrations applied")
 
@@ -57,10 +58,10 @@ func Up(ctx context.Context, pool *pgxpool.Pool) error {
 	if err != nil {
 		return err
 	}
-	if count > 1 || version != "" && version != "0001" && version != Head || count == 1 && version == "" {
+	if count > 1 || version != "" && version != "0001" && version != "0002" && version != "0003" && version != "0004" && version != "0005" && version != "0006" && version != "0007" && version != "0008" && version != "0009" && version != "0010" && version != "0011" && version != "0012" && version != "0013" && version != "0014" && version != Head || count == 1 && version == "" {
 		return ErrVersion
 	}
-	for _, next := range []string{"0001", Head} {
+	for _, next := range []string{"0001", "0002", "0003", "0004", "0005", "0006", "0007", "0008", "0009", "0010", "0011", "0012", "0013", "0014", Head} {
 		if next <= version {
 			continue
 		}
@@ -70,6 +71,16 @@ func Up(ctx context.Context, pool *pgxpool.Pool) error {
 		}
 		if _, err := tx.Exec(ctx, string(sql)); err != nil {
 			return fmt.Errorf("apply schema revision %s: %w", next, err)
+		}
+		if next == "0005" {
+			if err := agents.BackfillDiscovery(ctx, tx); err != nil {
+				return fmt.Errorf("supply discovery agents: %w", err)
+			}
+		}
+		if next == "0012" {
+			if err := agents.BackfillReviewers(ctx, tx); err != nil {
+				return fmt.Errorf("supply PR reviewers: %w", err)
+			}
 		}
 		if version == "" {
 			_, err = tx.Exec(ctx, `INSERT INTO alembic_version(version_num) VALUES ($1)`, next)

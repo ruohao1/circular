@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	git "github.com/ruohao1/circular/internal/git"
+	"github.com/ruohao1/circular/internal/integrations"
 	"github.com/ruohao1/circular/internal/runtimes"
 )
 
@@ -59,7 +60,23 @@ func LoadConfig(getenv func(string) string) (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	reviewContext, err := root("CIRCULAR_REVIEW_CONTEXT_ROOT", filepath.Join(base, "review-contexts"), false)
+	if err != nil {
+		return Config{}, err
+	}
+	hostReviewContext, err := root("CIRCULAR_DOCKER_REVIEW_CONTEXT_ROOT", reviewContext, true)
+	if err != nil {
+		return Config{}, err
+	}
 	host, err := root("CIRCULAR_DOCKER_WORKTREE_ROOT", worktrees, true)
+	if err != nil {
+		return Config{}, err
+	}
+	auth, err := root("CIRCULAR_CODEX_AUTH_ROOT", filepath.Join(base, "codex-auth"), false)
+	if err != nil {
+		return Config{}, err
+	}
+	hostAuth, err := root("CIRCULAR_DOCKER_CODEX_AUTH_ROOT", auth, true)
 	if err != nil {
 		return Config{}, err
 	}
@@ -75,6 +92,10 @@ func LoadConfig(getenv func(string) string) (Config, error) {
 	if err != nil || math.IsNaN(delay) || math.IsInf(delay, 0) || delay < 0 || delay > 10 {
 		return Config{}, fmt.Errorf("CIRCULAR_FAKE_DELAY_SECONDS must be finite and between zero and ten")
 	}
+	codexEnabled, err := strconv.ParseBool(value("CIRCULAR_CODEX_ENABLED", "false"))
+	if err != nil {
+		return Config{}, fmt.Errorf("CIRCULAR_CODEX_ENABLED must be a boolean")
+	}
 	uid, gid := os.Getuid(), os.Getgid()
 	var owner *git.FileOwner
 	if uid == 0 {
@@ -83,8 +104,12 @@ func LoadConfig(getenv func(string) string) (Config, error) {
 	}
 	return Config{
 		Git:          git.Config{RepositoryCacheRoot: cache, WorktreeRoot: worktrees, Owner: owner},
-		Docker:       runtimes.DockerConfig{WorktreeRoot: host, ContainerUser: fmt.Sprintf("%d:%d", uid, gid)},
-		ArtifactRoot: artifacts, Image: value("CIRCULAR_RUNNER_IMAGE", "circular-runner:dev"),
+		Docker:       runtimes.DockerConfig{ReviewContextRoot: hostReviewContext, WorktreeRoot: host, CredentialRoot: hostAuth, ContainerUser: fmt.Sprintf("%d:%d", uid, gid)},
+		ArtifactRoot: artifacts, ReviewContextRoot: reviewContext, Image: value("CIRCULAR_RUNNER_IMAGE", "circular-runner:dev"),
 		CPULimit: cpu, MemoryLimitMB: memory, FakeDelayMS: int(math.RoundToEven(delay * 1000)),
+		CodexEnabled: codexEnabled, CodexImage: value("CIRCULAR_CODEX_IMAGE", "circular-codex-runner:dev"),
+		CodexAuthMode: value("CIRCULAR_CODEX_AUTH_MODE", "chatgpt"), CodexAuthRoot: auth,
+		CodexAPIKey:  getenv("CIRCULAR_CODEX_API_KEY"),
+		Integrations: integrations.LoadConfig(getenv),
 	}, nil
 }

@@ -82,7 +82,7 @@ func TestBackendEventsPreserveNormalizedDataAndRawFailureForHTTPReplay(t *testin
 	}
 	raw := map[string]any{"protocol_version": 1, "run_id": id.String(), "source": "fake-container-workload", "type": "agent.message.delta", "data": map[string]any{"delta": "hello 🌍"}}
 	if err := store.WithRun(t.Context(), id, func(r *postgres.RunResources) error {
-		return r.AppendBackendEvent("agent.message.delta", map[string]any{"delta": "hello 🌍"}, raw)
+		return r.AppendBackendEvent("fake-container-workload", "agent.message.delta", map[string]any{"delta": "hello 🌍"}, raw)
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -93,7 +93,7 @@ func TestBackendEventsPreserveNormalizedDataAndRawFailureForHTTPReplay(t *testin
 		t.Fatal(err)
 	}
 	if err := store.WithRun(t.Context(), id, func(r *postgres.RunResources) error {
-		return r.AppendBackendEvent("agent.message.delta", map[string]any{"delta": "too late"}, raw)
+		return r.AppendBackendEvent("fake-container-workload", "agent.message.delta", map[string]any{"delta": "too late"}, raw)
 	}); !errors.Is(err, postgres.ErrResourceState) {
 		t.Fatalf("terminal Run accepted more backend output: %v", err)
 	}
@@ -110,6 +110,64 @@ func TestBackendEventsPreserveNormalizedDataAndRawFailureForHTTPReplay(t *testin
 	testsupport.AssertJSON(t, delta.Raw, raw)
 	testsupport.AssertJSON(t, failed.Raw, failure)
 	testsupport.AssertJSON(t, failed.Data, map[string]any{"error": *s.Run.Error})
+}
+
+func TestProposalEventAndDraftAreAtomicAndCannotCreateAgents(t *testing.T) {
+	pool := database(t)
+	id := seed(t, pool, 1)[0]
+	acquire(t, postgres.NewQueue(pool), "proposal-owner")
+	store, err := postgres.NewResources(pool, "proposal-owner")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.WithRun(t.Context(), id, func(r *postgres.RunResources) error {
+		if _, err := r.CreatePending(filepath.Join(t.TempDir(), id.String())); err != nil {
+			return err
+		}
+		if _, err := r.RecordContainer("proposal-container"); err != nil {
+			return err
+		}
+		_, err := r.MarkRunning()
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	data := map[string]any{"id": uuid.NewString(), "name": "Product engineer", "purpose": "UI", "instructions": "Follow conventions", "model": "gpt-5.6-sol", "reasoning_effort": "high", "model_reason": "High reasoning for changes across UI and API boundaries."}
+	failed := errors.New("rollback fixture")
+	if err := store.WithRun(t.Context(), id, func(r *postgres.RunResources) error {
+		if err := r.AppendBackendEvent("circular", "agent.proposed", data, data); err != nil {
+			return err
+		}
+		return failed
+	}); !errors.Is(err, failed) {
+		t.Fatal(err)
+	}
+	var count int
+	if err := pool.QueryRow(t.Context(), "SELECT count(*) FROM agent_proposals").Scan(&count); err != nil || count != 0 {
+		t.Fatal("draft escaped rollback", err)
+	}
+	for range 2 {
+		if err := store.WithRun(t.Context(), id, func(r *postgres.RunResources) error {
+			return r.AppendBackendEvent("circular", "agent.proposed", data, data)
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var proposals, agents, runs int
+	if err := pool.QueryRow(t.Context(), "SELECT (SELECT count(*) FROM agent_proposals),(SELECT count(*) FROM agents),(SELECT count(*) FROM runs)").Scan(&proposals, &agents, &runs); err != nil || proposals != 1 || agents != 1 || runs != 1 {
+		t.Fatal("ingestion duplicated a proposal or created work", err, proposals, agents, runs)
+	}
+	s := testsupport.Observe(t, pool, id)
+	s.AssertReplay(t)
+	last := s.Events[len(s.Events)-1]
+	if last.Type != "agent.proposed" {
+		t.Fatal("proposal missing from timeline")
+	}
+	testsupport.AssertJSON(t, last.Data, map[string]any{"proposal_id": data["id"], "name": data["name"]})
+	var model, effort, reason string
+	if err := pool.QueryRow(t.Context(), "SELECT backend_config->>'model',backend_config->>'reasoning_effort',model_reason FROM agent_proposals WHERE id=$1", data["id"]).Scan(&model, &effort, &reason); err != nil || model != data["model"] || effort != data["reasoning_effort"] || reason != data["model_reason"] {
+		t.Fatal("worker discarded the model recommendation", err)
+	}
 }
 
 func TestExecutionDecisionKeepsItsClaimUntilWorkspaceReleaseAndCannotBeOverwritten(t *testing.T) {
