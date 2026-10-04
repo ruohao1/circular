@@ -3,6 +3,7 @@ package main
 
 import (
 	"context"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -12,6 +13,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -20,8 +22,11 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/ruohao1/circular/internal/execution"
 	"github.com/ruohao1/circular/internal/httpapi"
+	"github.com/ruohao1/circular/internal/integrations"
 	"github.com/ruohao1/circular/internal/migrate"
 	"github.com/ruohao1/circular/internal/postgres"
+	"github.com/ruohao1/circular/internal/testsupport"
+	"github.com/ruohao1/circular/internal/webhooks"
 	"github.com/ruohao1/circular/internal/worker"
 )
 
@@ -88,30 +93,109 @@ func run(parent context.Context) error {
 		return errors.New("test schema migration failed")
 	}
 	values := map[string]string{
-		"CIRCULAR_REPOSITORY_CACHE_ROOT": filepath.Join(root, "repositories"),
-		"CIRCULAR_WORKTREE_ROOT":         filepath.Join(root, "worktrees"),
-		"CIRCULAR_DOCKER_WORKTREE_ROOT":  filepath.Join(root, "worktrees"),
-		"CIRCULAR_ARTIFACT_ROOT":         filepath.Join(root, "artifacts"),
-		"CIRCULAR_RUNNER_IMAGE":          "circular-isq162-runner:test",
-		"CIRCULAR_POLL_INTERVAL_SECONDS": "0.1",
+		"CIRCULAR_REPOSITORY_CACHE_ROOT":      filepath.Join(root, "repositories"),
+		"CIRCULAR_WORKTREE_ROOT":              filepath.Join(root, "worktrees"),
+		"CIRCULAR_DOCKER_WORKTREE_ROOT":       filepath.Join(root, "worktrees"),
+		"CIRCULAR_ARTIFACT_ROOT":              filepath.Join(root, "artifacts"),
+		"CIRCULAR_REVIEW_CONTEXT_ROOT":        filepath.Join(root, "review-contexts"),
+		"CIRCULAR_DOCKER_REVIEW_CONTEXT_ROOT": filepath.Join(root, "review-contexts"),
+		"CIRCULAR_CODEX_ENABLED":              "true",
+		"CIRCULAR_CODEX_AUTH_MODE":            "api_key",
+		"CIRCULAR_CODEX_API_KEY":              "fixture-only-not-a-real-key",
+		"CIRCULAR_CODEX_IMAGE":                "circular-review-fixture:test",
+		"CIRCULAR_RUNNER_IMAGE":               "circular-isq162-runner:test",
+		"CIRCULAR_POLL_INTERVAL_SECONDS":      "0.1",
 	}
 	native, err := execution.LoadConfig(func(key string) string { return values[key] })
 	if err != nil {
 		return err
 	}
+	source, gitBinary, base, head, err := prepareReviewFixture(ctx, root)
+	if err != nil {
+		return err
+	}
+	native.Git.GitExecutable = gitBinary
+	providerListener, err := net.Listen("tcp", "127.0.0.1:18001")
+	if err != nil {
+		return err
+	}
+	provider := testsupport.NewProviderFixture()
+	gitDelivery := &fixtureGitDelivery{source: source, provider: provider}
+	providerServer := &http.Server{Handler: gitDelivery, ReadHeaderTimeout: 5 * time.Second}
+	defer providerServer.Close()
+	go func() { _ = providerServer.Serve(providerListener) }()
+	providerURL := "http://127.0.0.1:18001"
+	connections := integrations.Config{
+		APIURL: "http://127.0.0.1:18000", WebURL: "http://127.0.0.1:15173",
+		EncryptionKey: base64.StdEncoding.EncodeToString([]byte(strings.Repeat("fixture-", 4))),
+		GitHubURL:     providerURL, GitHubAPIURL: providerURL, LinearURL: providerURL, LinearAPIURL: providerURL,
+	}
+	receiverService, err := integrations.New(pool, connections)
+	if err != nil {
+		return err
+	}
+	receiverListener, err := net.Listen("tcp", "127.0.0.1:18002")
+	if err != nil {
+		return err
+	}
+	receiverServer := &http.Server{Handler: webhooks.NewHandler(receiverService, receiverService, time.Now), ReadHeaderTimeout: 2 * time.Second, ReadTimeout: 4 * time.Second, WriteTimeout: 5 * time.Second}
+	defer func() { _ = receiverServer.Close() }()
+	go func(server *http.Server, listener net.Listener) { _ = server.Serve(listener) }(receiverServer, receiverListener)
+	native.Integrations = connections
 	owner := "browser-" + uuid.NewString()
 	executor, err := execution.NewSupervisor(pool, owner, native)
 	if err != nil {
 		return err
 	}
-	handler, err := httpapi.New(pool, httpapi.Config{ArtifactRoot: values["CIRCULAR_ARTIFACT_ROOT"], CORSOrigins: []string{"http://127.0.0.1:15173"}, SSEPollInterval: 50 * time.Millisecond})
+	apiConfig := httpapi.Config{ArtifactRoot: values["CIRCULAR_ARTIFACT_ROOT"], CORSOrigins: []string{"http://127.0.0.1:15173"}, SSEPollInterval: 50 * time.Millisecond, Integrations: connections}
+	apiConfig.RepositoryCacheRoot = values["CIRCULAR_REPOSITORY_CACHE_ROOT"]
+	handler, err := httpapi.New(pool, apiConfig)
 	if err != nil {
 		return err
 	}
-	server := &http.Server{Addr: "127.0.0.1:18000", Handler: handler, BaseContext: func(net.Listener) context.Context { return ctx }, ReadHeaderTimeout: 5 * time.Second, IdleTimeout: 2 * time.Minute}
+	backgroundCtx, cancelBackground := context.WithCancel(ctx)
+	backgroundDone := make(chan error, 1)
+	go func() { backgroundDone <- httpapi.RunBackground(backgroundCtx, pool, apiConfig) }()
+	defer func() {
+		cancelBackground()
+		<-backgroundDone
+	}()
+	queue := &fixtureQueue{Queue: postgres.NewQueue(pool)}
+	apiHandler := &fixtureHandler{handler: handler}
+	restart := func() error {
+		cancelBackground()
+		<-backgroundDone
+		next, e := httpapi.New(pool, apiConfig)
+		if e != nil {
+			return e
+		}
+		apiHandler.mu.Lock()
+		apiHandler.handler = next
+		apiHandler.mu.Unlock()
+		_ = receiverServer.Close()
+		listener, e := net.Listen("tcp", "127.0.0.1:18002")
+		if e != nil {
+			return e
+		}
+		service, e := integrations.New(pool, connections)
+		if e != nil {
+			return e
+		}
+		receiverServer = &http.Server{Handler: webhooks.NewHandler(service, service, time.Now), ReadHeaderTimeout: 2 * time.Second, ReadTimeout: 4 * time.Second, WriteTimeout: 5 * time.Second}
+		go func(server *http.Server) { _ = server.Serve(listener) }(receiverServer)
+		backgroundCtx, cancelBackground = context.WithCancel(ctx)
+		backgroundDone = make(chan error, 1)
+		go func(ctx context.Context, done chan error) { done <- httpapi.RunBackground(ctx, pool, apiConfig) }(backgroundCtx, backgroundDone)
+		return nil
+	}
+	mux := http.NewServeMux()
+	mux.HandleFunc("/fixture/linear-agent", linearAgentFixtureHandler(pool, provider, prefix, queue, gitDelivery, restart))
+	mux.HandleFunc("/fixture/pr-review", reviewFixtureHandler(pool, provider, prefix, source, base, head))
+	mux.Handle("/", apiHandler)
+	server := &http.Server{Addr: "127.0.0.1:18000", Handler: mux, BaseContext: func(net.Listener) context.Context { return ctx }, ReadHeaderTimeout: 5 * time.Second, IdleTimeout: 2 * time.Minute}
 	apiDone, workerDone := make(chan error, 1), make(chan error, 1)
 	go func() { apiDone <- server.ListenAndServe() }()
-	go func() { workerDone <- worker.Run(ctx, postgres.NewQueue(pool), executor, owner, 100*time.Millisecond) }()
+	go func() { workerDone <- worker.Run(ctx, queue, executor, owner, 100*time.Millisecond) }()
 	cleanupSafe = false
 	workerStopped := false
 	select {
@@ -143,4 +227,16 @@ func run(parent context.Context) error {
 	}
 	cleanupSafe = true
 	return err
+}
+
+type fixtureHandler struct {
+	mu      sync.RWMutex
+	handler http.Handler
+}
+
+func (f *fixtureHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	f.mu.RLock()
+	h := f.handler
+	f.mu.RUnlock()
+	h.ServeHTTP(w, r)
 }

@@ -1,4 +1,7 @@
-# Docker runtime adapter
+---
+title: "Docker runtime adapter"
+description: "Container isolation, lifecycle, resource limits, and recovery in the Docker adapter."
+---
 
 `runtimes.Docker` owns the control plane's container execution boundary.
 It controls Docker; it does not implement an agent reasoning loop, normalize backend
@@ -15,19 +18,20 @@ plan contains no environment values and hides stdin from its representation.
 The adapter enforces:
 
 - a deterministic `circular-run-<UUID hex>` name and managed, Run, and policy labels;
-- exactly one read-write bind mount from `<trusted Docker host root>/<Run UUID>` to
-  `/workspace`;
+- one read-write Run bind mount from `<trusted Docker host root>/<Run UUID>` to
+  `/workspace`, plus an optional trusted credential bind at `/codex-auth`;
 - `/workspace` as the working directory and `65532:65532` as the default trusted,
   constructor-owned non-root identity;
 - a read-only root filesystem, `--cap-drop ALL`, `no-new-privileges`, and restart policy
   `no`;
 - explicit CPU and memory limits;
+- optional bounded temporary storage at `/tmp`, no larger than the memory limit;
 - network mode `none` by default, or explicit `bridge` only when the caller enables it;
 - argv-only process creation without a shell.
 
 Immediately after `docker create` returns, the adapter inspects the immutable full
 container ID before invoking `docker start`. The effective configuration must match the
-resolved plan exactly: one read-write bind at `/workspace`, the network and root-filesystem
+resolved plan exactly: the worktree bind and optional credential bind, the network and root-filesystem
 settings, capability and security options, CPU and memory limits, user, working directory,
 restart policy, and the complete reserved `io.circular.*` label set. Missing, changed, or
 additional Circular labels fail closed; benign image metadata outside that namespace,
@@ -35,14 +39,28 @@ including OCI labels, is portable and allowed. Images remain trusted runtime inp
 `VOLUME` declarations must not expand the resolved mount policy; an image-declared volume
 makes creation fail closed before its entrypoint can run.
 
-The spec cannot add mounts, change the container user or working directory, or inject
+`TemporaryStorageMB` defaults to zero, preserving the original policy and digest.
+When nonzero, the adapter adds exactly `/tmp` as a `rw,nosuid,nodev,exec` tmpfs with
+mode `1777` and the requested size. Startup verifies `HostConfig.Tmpfs` separately
+from bind mounts. Recovery accepts only that same bounded temporary
+storage shape; arbitrary extra mounts or tmpfs destinations are rejected.
+
+`UseCredentials` opts into a second read-write bind from the constructor's
+`CredentialRoot` to exactly `/codex-auth`. The source must be a canonical,
+non-symlink directory disjoint from the worktree root. Its path enters the policy
+digest only when used, preserving historical digests for other Runs. Startup
+checks exact mounts independently of their order. Recovery accepts the historical
+worktree-only shape or the configured credential source, and never removes the
+credential directory. Keep that root configured until these Runs are released.
+
+The spec cannot add arbitrary mounts, change the container user or working directory, or inject
 Docker CLI flags through its image, command, path, or environment fields. A Docker-host
 path is accepted only when it is the direct canonical UUID child matching the Run. The
 path need not exist in the worker namespace because a worker container and its host Docker
 daemon can have different filesystem views. Existing local symlinks and paths outside the
 trusted root are rejected.
 
-This one-mount policy intentionally does not expose the Repository cache. A linked Git
+The mount policy intentionally does not expose the Repository cache. A linked Git
 worktree stores a `.git` file that points into that cache, so Git metadata is not usable
 inside the initial Run container even though ordinary worktree files are available. A
 later, dedicated isolation slice must design narrowly scoped Git metadata access; mounting

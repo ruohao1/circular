@@ -82,6 +82,11 @@ func run(ctx context.Context, check bool) error {
 		slog.Info("Go execution configuration is valid; no Runs claimed")
 		return nil
 	}
+	if native.CodexEnabled && (native.CodexAuthMode == "" || native.CodexAuthMode == "chatgpt") {
+		if err := execution.PrepareCodexAuth(native); err != nil {
+			return err
+		}
+	}
 	err = worker.Run(ctx, postgres.NewQueue(pool), executor, config.WorkerID, config.Poll)
 	if err != nil {
 		return fmt.Errorf("worker database operation failed; uncompleted claims retain recovery leases")

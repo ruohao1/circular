@@ -137,6 +137,16 @@ func (s *LocalStore) WriteStream(ctx context.Context, runID uuid.UUID, name stri
 }
 
 func (s *LocalStore) Read(ctx context.Context, runID uuid.UUID, uri string) ([]byte, error) {
+	return s.ReadBounded(ctx, runID, uri, 0)
+}
+
+// ReadBounded rejects oversized content before allocating it; zero keeps the
+// original unrestricted read contract for existing callers.
+func (s *LocalStore) ReadBounded(ctx context.Context, runID uuid.UUID, uri string, limit int64) ([]byte, error) {
+	if limit < 0 {
+		return nil, ErrContent
+	}
+
 	prefix := "artifact://" + runID.String() + "/"
 	if !strings.HasPrefix(uri, prefix) {
 		return nil, ErrContent
@@ -158,7 +168,18 @@ func (s *LocalStore) Read(ctx context.Context, runID uuid.UUID, uri string) ([]b
 		return nil, ErrContent
 	}
 	defer file.Close()
-	data, err := io.ReadAll(contextReader{ctx, file})
+	var input io.Reader = contextReader{ctx, file}
+	if limit > 0 {
+		info, err := file.Stat()
+		if err != nil || info.Size() > limit {
+			return nil, ErrContent
+		}
+		input = io.LimitReader(input, limit+1)
+	}
+	data, err := io.ReadAll(input)
+	if limit > 0 && int64(len(data)) > limit {
+		return nil, ErrContent
+	}
 	if err != nil {
 		return nil, errors.Join(ErrContent, ctx.Err())
 	}

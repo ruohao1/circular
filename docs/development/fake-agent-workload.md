@@ -1,4 +1,7 @@
-# Fake agent workload process
+---
+title: "Fake agent workload process"
+description: "The simulated workload protocol used to verify execution without a model provider."
+---
 
 The fake agent workload is a deterministic process and container image for exercising the
 Run → container → worktree → backend execution path. It is not a control-plane process or

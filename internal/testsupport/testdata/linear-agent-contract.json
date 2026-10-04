@@ -1,0 +1,10 @@
+{
+  "source": "https://raw.githubusercontent.com/linear/linear/refs/heads/master/packages/sdk/src/schema.graphql",
+  "checked_at": "2026-09-19",
+  "AgentSessionEventWebhookPayload": ["type", "action", "oauthClientId", "organizationId", "appUserId", "agentSession", "agentActivity", "promptContext", "guidance", "webhookTimestamp"],
+  "AgentSessionWebhookPayload": ["id", "appUserId", "organizationId", "creator", "creatorId", "issue", "issueId"],
+  "AgentActivityWebhookPayload": ["id", "agentSessionId", "userId", "content", "signal"],
+  "AgentActivityCreateInput": ["id", "agentSessionId", "content", "ephemeral", "signal"],
+  "AgentSessionUpdateInput": ["externalUrls"],
+  "notes": "Only public fields used by Circular. Missing creator means no responsible human. Issue project is fetched through GraphQL; the signed webhook issue object does not include project."
+}

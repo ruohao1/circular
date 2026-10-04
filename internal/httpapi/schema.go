@@ -88,6 +88,10 @@ func body(w http.ResponseWriter, r *http.Request, schema string) (map[string]any
 				return nil, false
 			}
 			value = field.Default
+			if value == nil && field.Type == "string" && len(field.AnyOf) == 0 {
+				// Omitted optional strings allow handlers to apply contextual defaults.
+				continue
+			}
 			if value == nil && field.Type == "object" {
 				value = map[string]any{}
 			}
@@ -100,6 +104,11 @@ func body(w http.ResponseWriter, r *http.Request, schema string) (map[string]any
 			field = field.AnyOf[0]
 		}
 		switch field.Type {
+		case "boolean":
+			if _, ok := value.(bool); !ok {
+				invalid(w, "body", name, "bool_type", "Input should be a valid boolean")
+				return nil, false
+			}
 		case "string":
 			text, ok := value.(string)
 			if !ok {
@@ -154,4 +163,50 @@ func identifier(w http.ResponseWriter, value, where, name string) (uuid.UUID, bo
 		return uuid.Nil, false
 	}
 	return id, true
+}
+
+// Strict schemas are used by the new review workflow only. Ordinary resource
+// creation keeps its established unknown-field compatibility.
+func strictBody(w http.ResponseWriter, r *http.Request, schema string) (map[string]any, bool) {
+	data, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 32<<10))
+	if err != nil {
+		problem(w, 413, "request body is too large")
+		return nil, false
+	}
+	reject := func() (map[string]any, bool) {
+		invalid(w, "body", "", "json_invalid", "One JSON object with only the documented, unique fields is required")
+		return nil, false
+	}
+	if !utf8.Valid(data) {
+		return reject()
+	}
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	token, err := decoder.Token()
+	if err != nil || token != json.Delim('{') {
+		return reject()
+	}
+	seen := map[string]bool{}
+	for decoder.More() {
+		key, err := decoder.Token()
+		name, ok := key.(string)
+		if err != nil || !ok || seen[name] {
+			return reject()
+		}
+		if _, known := contractSchemas[schema].Properties[name]; !known {
+			return reject()
+		}
+		seen[name] = true
+		var raw json.RawMessage
+		if decoder.Decode(&raw) != nil {
+			return reject()
+		}
+	}
+	if token, err = decoder.Token(); err != nil || token != json.Delim('}') {
+		return reject()
+	}
+	if decoder.Decode(new(any)) != io.EOF {
+		return reject()
+	}
+	r.Body = io.NopCloser(bytes.NewReader(data))
+	return body(w, r, schema)
 }

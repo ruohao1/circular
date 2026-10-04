@@ -9,6 +9,8 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/ruohao1/circular/internal/agentproposals"
+	"github.com/ruohao1/circular/internal/prreviews"
 	"github.com/ruohao1/circular/internal/runstate"
 )
 
@@ -35,7 +37,11 @@ func (r *RunResources) RenewLease() error {
 // ProvisioningContext binds the claimed attempt to its Task, Agent and
 // Repository. The Backend is the Run's selection, not the Agent's current one.
 type ProvisioningContext struct {
+	ReviewContextSHA256              string
 	RunID, WorkspaceID, RepositoryID uuid.UUID
+	ReviewID                         uuid.UUID
+	Kind                             runstate.Kind
+	Review                           *prreviews.LaunchSnapshot
 	CloneURL, BaseRef, Backend       string
 	TaskTitle, TaskDescription       string
 	Instructions                     string
@@ -49,7 +55,37 @@ func (r *RunResources) ProvisioningContext() (ProvisioningContext, error) {
 	if r.status != runstate.Provisioning {
 		return ProvisioningContext{}, ErrResourceState
 	}
-	inputs := ProvisioningContext{RunID: r.id, WorkspaceID: WorkspaceID(r.id), Backend: r.backend}
+	inputs := ProvisioningContext{RunID: r.id, WorkspaceID: WorkspaceID(r.id), Backend: r.backend, Kind: r.kind}
+	if r.kind == runstate.PRReview {
+		var raw []byte
+		if err := r.tx.QueryRow(r.ctx, `SELECT id,snapshot,context_sha256 FROM pr_reviews WHERE run_id=$1`, r.id).Scan(&inputs.ReviewID, &raw, &inputs.ReviewContextSHA256); err != nil {
+			return inputs, ErrResourceConflict
+		}
+		var snapshot prreviews.LaunchSnapshot
+		if err := json.Unmarshal(raw, &snapshot); err != nil {
+			return inputs, ErrResourceConflict
+		}
+		sealed, err := prreviews.SealSnapshot(snapshot)
+		if err != nil || sealed.InputFingerprint != snapshot.InputFingerprint || snapshot.Reviewer.Backend != r.backend {
+			return inputs, ErrResourceConflict
+		}
+		var bound bool
+		if err := r.tx.QueryRow(r.ctx, `SELECT project_id=$2 AND clone_url=$3 AND external_refs->'github'->>'repository_id'=$4 AND external_refs->'github'->>'installation_id'=$5 FROM repositories WHERE id=$1`, snapshot.RepositoryID, snapshot.ProjectID, snapshot.CloneURL, snapshot.PR.GitHubRepositoryID, snapshot.PR.InstallationID).Scan(&bound); err != nil || !bound {
+			return inputs, prreviews.ErrSourceInvalid
+		}
+		inputs.Review = &snapshot
+		inputs.RepositoryID = snapshot.RepositoryID
+		inputs.CloneURL = snapshot.CloneURL
+		inputs.BaseRef = snapshot.PR.HeadSHA
+		inputs.TaskTitle = snapshot.TaskTitle
+		inputs.TaskDescription = snapshot.TaskDescription
+		inputs.Instructions = snapshot.Reviewer.Instructions
+		inputs.BackendConfig = snapshot.Reviewer.BackendConfig
+		return inputs, nil
+	}
+	if input, linked, err := r.externalProvisioningContext(); linked || err != nil {
+		return input, err
+	}
 	err := r.tx.QueryRow(r.ctx, `SELECT repositories.id,repositories.clone_url,repositories.default_branch,
 		tasks.title,tasks.description,agents.instructions,agents.backend_config
 		FROM runs JOIN tasks ON tasks.id=runs.task_id JOIN agents ON agents.id=runs.agent_id
@@ -66,19 +102,40 @@ func (r *RunResources) BeginFinalizing() error {
 	return r.executionTransition(runstate.Finalizing, nil)
 }
 
-// AppendBackendEvent commits one already-validated fake protocol record. The
+// AppendBackendEvent commits one already-validated backend record. The
 // decoder owns protocol validation; persistence owns Run state and ordering.
 // A terminal decision closes this output stream without replacing earlier facts.
-func (r *RunResources) AppendBackendEvent(kind string, data, raw map[string]any) error {
+func (r *RunResources) AppendBackendEvent(source, kind string, data, raw map[string]any) error {
 	if err := r.guard(); err != nil {
 		return err
 	}
-	if r.status != runstate.Running || data == nil || raw == nil {
+	if r.status != runstate.Running || source == "" || len(source) > 200 || data == nil || raw == nil {
 		return ErrResourceState
 	}
 	switch kind {
+	case "pr_review.report.submitted":
+		return r.submitReviewCandidate(data)
+	case "pr_review.report.rejected":
+		return r.reviewRejection()
+	case "agent.proposed":
+		if r.kind == runstate.PRReview {
+			return ErrResourceState
+		}
+		encoded, err := json.Marshal(data)
+		if err != nil {
+			return err
+		}
+		draft, err := agentproposals.Decode(encoded)
+		if err != nil {
+			return err
+		}
+		id, err := RecordAgentProposal(r.ctx, r.tx, r.id, draft)
+		if err != nil {
+			return err
+		}
+		return r.eventWithRaw(kind, source, map[string]any{"proposal_id": id.String(), "name": draft.Name}, raw)
 	case "agent.message.delta", "agent.message.completed", "usage.updated":
-		return r.eventWithRaw(kind, "fake-container-workload", data, raw)
+		return r.eventWithRaw(kind, source, data, raw)
 	default:
 		return ErrResourceState
 	}
@@ -87,6 +144,9 @@ func (r *RunResources) AppendBackendEvent(kind string, data, raw map[string]any)
 // Complete and its Event are one transaction. Only the finalizing attempt can
 // succeed; an API cancellation or recovery decision cannot be overwritten.
 func (r *RunResources) Complete() error {
+	if r.kind == runstate.PRReview {
+		return ErrResourceState
+	}
 	if err := r.executionTransition(runstate.Succeeded, nil); err != nil {
 		return err
 	}

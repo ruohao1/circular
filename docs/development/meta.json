@@ -1,0 +1,16 @@
+{
+  "title": "Guides & reference",
+  "pages": [
+    "console-setup",
+    "integrations",
+    "codex-backend",
+    "control-mcp",
+    "local-development",
+    "ui-components",
+    "execution-directories",
+    "docker-runtime",
+    "fake-agent-workload",
+    "ci",
+    "go-migration"
+  ]
+}

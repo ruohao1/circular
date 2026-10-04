@@ -1,0 +1,75 @@
+{
+	admin off
+}
+
+# Public product presentation. This server has no route to the control API,
+# console bundle, or MCP. Provider signatures protect the receiver routes.
+{$CIRCULAR_DOMAIN} {
+	encode zstd gzip
+	header {
+		X-Content-Type-Options nosniff
+		X-Frame-Options DENY
+		Referrer-Policy strict-origin-when-cross-origin
+		Strict-Transport-Security "max-age=31536000"
+		Content-Security-Policy "default-src 'none'; style-src 'self'; img-src 'self'; font-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
+	}
+
+	@webhooks path /webhooks/github /webhooks/linear
+	handle @webhooks {
+		reverse_proxy webhooks:8001 {
+			header_up -Authorization
+		}
+	}
+	handle {
+		root * /srv/vitrine
+		file_server
+	}
+}
+
+# Compose publishes this listener on host loopback only. Reach it through SSH:
+# local localhost:18080 -> VPS 127.0.0.1:8080. Never publish this on 0.0.0.0.
+http://:8080 {
+	encode zstd gzip
+	header {
+		X-Content-Type-Options nosniff
+		X-Frame-Options SAMEORIGIN
+		Referrer-Policy no-referrer
+		Cache-Control no-store
+	}
+
+	route {
+		basic_auth {
+			import /etc/caddy/owner.users
+		}
+
+		# Browsers attach cached Basic credentials automatically. Reject
+		# cross-origin writes even when they supply valid owner credentials.
+		@foreignOrigin {
+			not method GET HEAD OPTIONS
+			header Origin *
+			not header Origin {$CIRCULAR_APP_ORIGIN}
+		}
+		respond @foreignOrigin "Cross-origin writes are not allowed" 403
+		@foreignBrowser {
+			not method GET HEAD OPTIONS
+			header Sec-Fetch-Site cross-site
+			header Sec-Fetch-Site same-site
+		}
+		respond @foreignBrowser "Cross-origin writes are not allowed" 403
+
+		@api path /api/* /mcp /mcp/* /openapi.json
+		handle @api {
+			reverse_proxy api:8000 {
+				header_up -Authorization
+			}
+		}
+		handle /webhooks/* {
+			respond "Not found" 404
+		}
+		handle {
+			root * /srv/app
+			try_files {path} /index.html
+			file_server
+		}
+	}
+}

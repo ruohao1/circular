@@ -30,6 +30,10 @@ func (l *Local) Checkout(ctx context.Context, id uuid.UUID, cloneURL string) (pa
 	if !canonical(target) {
 		return "", failure(ErrInvalidCache, id, target, -1, nil)
 	}
+	environment, err := l.credentials(ctx, id, cloneURL)
+	if err != nil {
+		return "", err
+	}
 	if exists(target) {
 		if err := l.validateCache(ctx, id, target); err != nil {
 			return "", err
@@ -41,11 +45,11 @@ func (l *Local) Checkout(ctx context.Context, id uuid.UUID, cloneURL string) (pa
 		if _, err := l.refresh(ctx, id, target, "remote", "set-url", "--", "origin", cloneURL); err != nil {
 			return "", err
 		}
-		if _, err := l.refresh(ctx, id, target, "fetch", "--prune", "--", "origin"); err != nil {
+		if _, code, err := l.run(ctx, environment, "-C", target, "fetch", "--prune", "--", "origin"); err != nil || code != 0 {
 			cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 			defer cancel()
 			_, _ = l.refresh(cleanup, id, target, "remote", "set-url", "--", "origin", strings.TrimRight(string(previous), "\r\n"))
-			return "", err
+			return "", failure(ErrFetch, id, target, code, err)
 		}
 		ref, err := l.refresh(ctx, id, target, "symbolic-ref", "--quiet", "HEAD")
 		if err != nil {
@@ -61,6 +65,16 @@ func (l *Local) Checkout(ctx context.Context, id uuid.UUID, cloneURL string) (pa
 		}
 		return target, nil
 	}
+	path, err = l.initializeCache(ctx, id, target, cloneURL, environment)
+	if err != nil {
+		return "", err
+	}
+	return path, l.validateCache(ctx, id, path)
+}
+
+// initializeCache publishes a private clone without refreshing a default branch.
+// The caller holds the repository lock and has obtained trusted credentials.
+func (l *Local) initializeCache(ctx context.Context, id uuid.UUID, target, cloneURL string, environment map[string]string) (path string, result error) {
 	staging, err := os.MkdirTemp(l.config.RepositoryCacheRoot, "."+id.String()+".clone-")
 	if err != nil {
 		return "", failure(ErrClone, id, target, -1, nil)
@@ -75,11 +89,11 @@ func (l *Local) Checkout(ctx context.Context, id uuid.UUID, cloneURL string) (pa
 			}
 		}
 	}()
-	_, code, err := l.run(ctx, nil, "clone", "--no-checkout", "--", cloneURL, staging)
+	_, code, err := l.run(ctx, environment, "clone", "--no-checkout", "--", cloneURL, staging)
 	if err != nil || code != 0 {
 		return "", failure(ErrClone, id, target, code, err)
 	}
-	if err := l.validateCache(ctx, id, staging); err != nil {
+	if err := l.validateCacheStructure(ctx, id, staging); err != nil {
 		return "", failure(ErrInvalidCache, id, target, -1, err)
 	}
 	if err := ctx.Err(); err != nil {
@@ -104,6 +118,17 @@ func (l *Local) refresh(ctx context.Context, id uuid.UUID, target string, args .
 }
 
 func (l *Local) validateCache(ctx context.Context, id uuid.UUID, path string) error {
+	if err := l.validateCacheStructure(ctx, id, path); err != nil {
+		return err
+	}
+	head, code, err := l.run(ctx, nil, "-C", path, "rev-parse", "--verify", "HEAD^{commit}")
+	if err != nil || code != 0 || len(bytes.TrimSpace(head)) == 0 {
+		return failure(ErrInvalidCache, id, path, code, err)
+	}
+	return nil
+}
+
+func (l *Local) validateCacheStructure(ctx context.Context, id uuid.UUID, path string) error {
 	if !canonical(path) {
 		return failure(ErrInvalidCache, id, path, -1, nil)
 	}
@@ -113,10 +138,6 @@ func (l *Local) validateCache(ctx context.Context, id uuid.UUID, path string) er
 	}
 	inside, code, err := l.run(ctx, nil, "-C", path, "rev-parse", "--is-inside-work-tree")
 	if err != nil || code != 0 || !bytes.Equal(bytes.TrimSpace(inside), []byte("true")) {
-		return failure(ErrInvalidCache, id, path, code, err)
-	}
-	head, code, err := l.run(ctx, nil, "-C", path, "rev-parse", "--verify", "HEAD^{commit}")
-	if err != nil || code != 0 || len(bytes.TrimSpace(head)) == 0 {
 		return failure(ErrInvalidCache, id, path, code, err)
 	}
 	return nil

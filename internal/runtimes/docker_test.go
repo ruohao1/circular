@@ -104,6 +104,100 @@ func TestPolicyMismatchIsRemovedWithoutEverStarting(t *testing.T) {
 	}
 }
 
+func TestTemporaryStorageIsRequestedWithoutChangingRootIsolation(t *testing.T) {
+	d, spec, state := simulatedDocker(t, nil)
+	spec.TemporaryStorageMB = 64
+	handle, err := d.Start(t.Context(), spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = d.Discard(context.Background(), handle) })
+	found := false
+	for _, call := range dockerCalls(t, state) {
+		if call[0] != "create" {
+			continue
+		}
+		for index, arg := range call {
+			if arg == "--tmpfs" && index+1 < len(call) && call[index+1] == "/tmp:rw,nosuid,nodev,exec,size=64m,mode=1777" {
+				found = true
+			}
+		}
+	}
+	if !found {
+		t.Fatal("bounded temporary storage was not requested")
+	}
+	spec.TemporaryStorageMB = 32
+	if _, err := d.Start(t.Context(), spec); !errors.Is(err, runtimes.ErrNameConflict) {
+		t.Fatalf("changed temporary storage reused a live container: %v", err)
+	}
+}
+
+func TestTemporaryStorageMismatchIsRemovedWithoutStarting(t *testing.T) {
+	for _, mismatch := range []string{"host_missing", "tmpfs_missing", "tmpfs_extra", "tmpfs_destination", "tmpfs_options", "tmpfs_unbounded", "tmpfs_size", "tmpfs_exceeds_memory", "tmpfs_type", "tmpfs_mount"} {
+		t.Run(mismatch, func(t *testing.T) {
+			d, spec, state := simulatedDocker(t, map[string]any{"policy_mismatch": mismatch})
+			spec.TemporaryStorageMB = 64
+			if _, err := d.Start(t.Context(), spec); !errors.Is(err, runtimes.ErrStart) {
+				t.Fatalf("unsafe temporary storage accepted: %v", err)
+			}
+			if exists(filepath.Join(state, "created")) || exists(filepath.Join(state, "start-invoked")) {
+				t.Fatal("unsafe allocation remained or ran")
+			}
+		})
+	}
+	d, spec, state := simulatedDocker(t, map[string]any{"policy_mismatch": "tmpfs_size"})
+	if _, err := d.Start(t.Context(), spec); !errors.Is(err, runtimes.ErrStart) || exists(filepath.Join(state, "start-invoked")) {
+		t.Fatalf("unrequested temporary storage accepted: %v", err)
+	}
+}
+
+func TestReleaseRecognizesOnlyBoundedTemporaryStorage(t *testing.T) {
+	for _, test := range []struct {
+		name, options, mismatch string
+		allowed                 bool
+	}{
+		{name: "legacy", allowed: true},
+		{name: "temporary", options: "rw,nosuid,nodev,exec,size=64m,mode=1777", allowed: true},
+		{name: "missing-size", options: "rw,nosuid,nodev,exec,mode=1777"},
+		{name: "zero-size", options: "rw,nosuid,nodev,exec,size=0m,mode=1777"},
+		{name: "negative-size", options: "rw,nosuid,nodev,exec,size=-1m,mode=1777"},
+		{name: "overflow-size", options: "rw,nosuid,nodev,exec,size=9223372036854775807m,mode=1777"},
+		{name: "exceeds-memory", options: "rw,nosuid,nodev,exec,size=385m,mode=1777"},
+		{name: "unsafe-options", options: "rw,suid,dev,exec,size=64m,mode=1777"},
+		{name: "extra-tmpfs", options: "rw,nosuid,nodev,exec,size=64m,mode=1777", mismatch: "tmpfs_extra"},
+		{name: "extra-mount", options: "rw,nosuid,nodev,exec,size=64m,mode=1777", mismatch: "tmpfs_mount"},
+		{name: "invalid-tmpfs", mismatch: "tmpfs_type"},
+		{name: "missing-host", mismatch: "host_missing"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			d, spec, state := simulatedDocker(t, map[string]any{"policy_mismatch": test.mismatch})
+			plan, err := d.Resolve(spec)
+			if err != nil {
+				t.Fatal(err)
+			}
+			args := []string{"create", "--name", plan.ContainerName,
+				"--label", "io.circular.managed=true", "--label", "io.circular.run_id=" + runID.String(),
+				"--memory", "384m", "--mount", "type=bind,src=" + spec.Worktree + ",dst=/workspace"}
+			if test.options != "" {
+				args = append(args, "--tmpfs", "/tmp:"+test.options)
+			}
+			args = append(args, spec.Image)
+			create := exec.CommandContext(t.Context(), filepath.Join(filepath.Dir(state), "fake-docker"), args...)
+			if output, err := create.CombinedOutput(); err != nil {
+				t.Fatalf("seed abandoned allocation: %v %s", err, output)
+			}
+			err = d.Release(t.Context(), runID, "")
+			if test.allowed {
+				if err != nil || exists(filepath.Join(state, "created")) {
+					t.Fatalf("owned temporary storage was not released: %v", err)
+				}
+			} else if !errors.Is(err, runtimes.ErrDiscard) || exists(filepath.Join(state, "rm-started")) {
+				t.Fatalf("unsafe persisted mount policy was not protected: %v", err)
+			}
+		})
+	}
+}
+
 func TestStopContainsRunAfterAttachmentOrObservationFailure(t *testing.T) {
 	for _, failedInspection := range []bool{false, true} {
 		t.Run(fmt.Sprint(failedInspection), func(t *testing.T) {

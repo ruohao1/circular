@@ -52,7 +52,8 @@ jobs:
           cache-dependency-path: go.sum
       - name: Guard the Go-only backend
         run: |
-          circular_python_files=$(git ls-files -- '*.py' '*.pyc' '*pyproject.toml' '*uv.lock' '*alembic.ini')
+          # This optional operator probe is not part of the Go backend runtime.
+          circular_python_files=$(git ls-files -- '*.py' '*.pyc' '*pyproject.toml' '*uv.lock' '*alembic.ini' ':(exclude)infra/production/verify.py')
           if [[ -n "$circular_python_files" ]]; then
             printf 'Retired Python files must not return:\n%s\n' "$circular_python_files"
             exit 1

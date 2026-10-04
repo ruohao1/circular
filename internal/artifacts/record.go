@@ -17,3 +17,8 @@ func DiffID(runID uuid.UUID) uuid.UUID {
 func ArchiveID(runID uuid.UUID) uuid.UUID {
 	return uuid.NewSHA1(uuid.NameSpaceURL, []byte("io.circular.artifact:"+runID.String()+":worktree"))
 }
+
+// PRReviewID is stable across artifact publication retries.
+func PRReviewID(runID uuid.UUID, name string) uuid.UUID {
+	return uuid.NewSHA1(uuid.NameSpaceURL, []byte("io.circular.artifact:"+runID.String()+":"+name))
+}

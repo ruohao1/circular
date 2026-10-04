@@ -159,6 +159,9 @@ func (l *Local) Provision(ctx context.Context, runID uuid.UUID, repository, base
 	if err := ctx.Err(); err != nil {
 		return Worktree{}, err
 	}
+	if err := l.pinBase(ctx, repository, runBase{RunID: runID, RepositoryID: repositoryID, Commit: commit, Ref: baseRef}); err != nil {
+		return Worktree{}, failure(ErrProvision, runID, target, -1, err)
+	}
 	published = true
 	return worktree, nil
 }

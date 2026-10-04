@@ -242,16 +242,38 @@ func createArguments(plan Plan, nonce string) []string {
 	for _, name := range []string{"io.circular.managed", "io.circular.run_id", "io.circular.policy_digest"} {
 		args = append(args, "--label", name+"="+plan.Labels[name])
 	}
+	if plan.ReviewContextSource != "" {
+		for _, name := range []string{"io.circular.kind", "io.circular.review_context_sha256"} {
+			args = append(args, "--label", name+"="+plan.Labels[name])
+		}
+	}
+	worktreeMount := "type=bind,src=" + plan.WorktreeSource + ",dst=" + plan.WorktreeDestination
+	if plan.WorktreeReadOnly {
+		worktreeMount += ",readonly"
+	}
 	args = append(args, "--label", nonceLabel+"="+nonce, "--network", plan.NetworkMode,
 		"--read-only", "--cap-drop", "ALL", "--security-opt", "no-new-privileges",
 		"--cpus", strconv.FormatFloat(plan.CPULimit, 'g', 15, 64), "--memory", strconv.FormatInt(plan.MemoryLimitMB, 10)+"m",
 		"--user", plan.ContainerUser, "--workdir", plan.WorkingDirectory, "--restart", "no",
-		"--mount", "type=bind,src="+plan.WorktreeSource+",dst="+plan.WorktreeDestination, "--interactive")
+		"--mount", worktreeMount, "--interactive")
+	if plan.ReviewContextSource != "" {
+		args = append(args, "--mount", "type=bind,src="+plan.ReviewContextSource+",dst="+plan.ReviewContextDestination+",readonly")
+	}
+	if plan.CredentialSource != "" {
+		args = append(args, "--mount", "type=bind,src="+plan.CredentialSource+",dst="+plan.CredentialDestination)
+	}
+	if plan.TemporaryStorageMB != 0 {
+		args = append(args, "--tmpfs", "/tmp:"+temporaryStorageOptions(plan.TemporaryStorageMB))
+	}
 	for _, name := range plan.EnvironmentNames {
 		args = append(args, "--env", name)
 	}
 	args = append(args, plan.Image)
 	return append(args, plan.Command...)
+}
+
+func temporaryStorageOptions(megabytes int64) string {
+	return "rw,nosuid,nodev,exec,size=" + strconv.FormatInt(megabytes, 10) + "m,mode=1777"
 }
 
 func (d *Docker) monitor(ctx context.Context, e *execution, stdin io.WriteCloser) {

@@ -147,7 +147,11 @@ func TestResourceCreationPreservesDefaultsScopeAndExecutionProjection(t *testing
 	for _, kind := range []string{"repositories", "agents", "tasks", "runs"} {
 		var rows []any
 		_ = json.Unmarshal(f.request(t, "GET", "/api/v1/"+kind+"?project_id="+project["id"].(string), "", 200), &rows)
-		if len(rows) != 1 {
+		want := 1
+		if kind == "agents" {
+			want = 3 // User Agent plus discovery and PR reviewer presets.
+		}
+		if len(rows) != want {
 			t.Fatal(kind, rows)
 		}
 	}

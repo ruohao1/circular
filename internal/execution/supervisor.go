@@ -1,18 +1,18 @@
 package execution
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"path/filepath"
-	"strconv"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/ruohao1/circular/internal/backends"
 	git "github.com/ruohao1/circular/internal/git"
+	"github.com/ruohao1/circular/internal/integrations"
 	"github.com/ruohao1/circular/internal/postgres"
+	"github.com/ruohao1/circular/internal/prreviews"
 	"github.com/ruohao1/circular/internal/runstate"
 	"github.com/ruohao1/circular/internal/runtimes"
 	"github.com/ruohao1/circular/internal/worker"
@@ -23,14 +23,21 @@ var ErrConfiguration = errors.New("invalid Run execution configuration")
 // Config contains trusted worker settings, never Task-selected commands or roots.
 // Docker.WorktreeRoot is the daemon-visible equivalent of Git.WorktreeRoot.
 type Config struct {
-	Git           git.Config
-	Docker        runtimes.DockerConfig
-	ArtifactRoot  string
-	Image         string
-	CPULimit      float64
-	MemoryLimitMB int64
-	FakeDelayMS   int
-	PollInterval  time.Duration
+	Git               git.Config
+	Docker            runtimes.DockerConfig
+	ArtifactRoot      string
+	ReviewContextRoot string
+	Image             string
+	CPULimit          float64
+	MemoryLimitMB     int64
+	FakeDelayMS       int
+	PollInterval      time.Duration
+	CodexEnabled      bool
+	CodexImage        string
+	CodexAuthMode     string
+	CodexAuthRoot     string
+	CodexAPIKey       string              `json:"-"`
+	Integrations      integrations.Config `json:"-"`
 }
 
 // Supervisor implements the worker's one-claim execution seam. Call Execute
@@ -50,12 +57,25 @@ func NewSupervisor(pool *pgxpool.Pool, owner string, config Config) (*Supervisor
 	if err != nil {
 		return nil, err
 	}
+	connections, err := integrations.New(pool, config.Integrations)
+	if err != nil {
+		return nil, err
+	}
+	config.Git.Credential = connections.GitCredential
 	retention, err := NewRetention(store, config.Git, config.ArtifactRoot)
 	if err != nil {
 		return nil, err
 	}
 	if config.Docker.WorktreeRoot == "" {
 		config.Docker.WorktreeRoot = retention.worktreeRoot
+	}
+	if err := configureReviewRoots(&config, retention); err != nil {
+		return nil, err
+	}
+	if config.CodexAuthRoot != "" {
+		if err := validateCodexAuthRoot(config); err != nil {
+			return nil, err
+		}
 	}
 	docker, err := runtimes.NewDocker(config.Docker)
 	if err != nil {
@@ -74,6 +94,18 @@ func NewSupervisor(pool *pgxpool.Pool, owner string, config Config) (*Supervisor
 	}
 	if _, err := docker.Resolve(runtimes.Spec{RunID: uuid.Nil, Image: config.Image, Worktree: filepath.Join(root, uuid.Nil.String()), Command: []string{"--write-output"}, CPULimit: config.CPULimit, MemoryLimitMB: config.MemoryLimitMB}); err != nil {
 		return nil, err
+	}
+	if config.CodexEnabled {
+		invocation, err := (backends.Codex{AuthMode: config.CodexAuthMode, APIKey: config.CodexAPIKey}).Prepare(backends.Input{Config: []byte("{}")})
+		if err != nil {
+			return nil, err
+		}
+		if invocation.UseCredentials && config.CodexAuthRoot == "" {
+			return nil, errors.New("ChatGPT subscription mode requires a dedicated Codex auth root")
+		}
+		if _, err := docker.Resolve(runtimes.Spec{RunID: uuid.Nil, Image: config.CodexImage, Worktree: filepath.Join(root, uuid.Nil.String()), CPULimit: config.CPULimit, MemoryLimitMB: config.MemoryLimitMB, NetworkEnabled: true, UseCredentials: invocation.UseCredentials, TemporaryStorageMB: 128}); err != nil {
+			return nil, err
+		}
 	}
 	return &Supervisor{store: store, retention: retention, docker: docker, owner: owner, config: config}, nil
 }
@@ -166,26 +198,51 @@ func (s *Supervisor) watch(ctx context.Context, id uuid.UUID, stop context.Cance
 }
 
 func (s *Supervisor) execute(ctx context.Context, id uuid.UUID) error {
-	handle, err := s.provision(ctx, id)
+	var backend preparedBackend
+	handle, err := s.provision(ctx, id, &backend)
 	if err != nil {
 		return err
 	}
-	if err := s.ingest(ctx, id, handle); err != nil {
+	state, err := s.store.Read(ctx, id)
+	if err != nil {
+		return err
+	}
+	execution, stop, err := reviewExecutionContext(ctx, state)
+	if err != nil {
+		return err
+	}
+	defer stop()
+	if err := s.ingest(execution, id, handle, backend); err != nil {
+		if errors.Is(execution.Err(), context.DeadlineExceeded) {
+			// This is the review's execution limit, not worker shutdown. Keep
+			// its public reason instead of projecting generic cancellation.
+			return executionFailure("PR review exceeded its 15-minute execution limit", nil)
+		}
 		return err
 	}
 	if err := s.store.WithRun(ctx, id, func(r *postgres.RunResources) error { return r.BeginFinalizing() }); err != nil {
 		return executionFailure("could not begin Run finalization", err)
 	}
-	if _, err := s.retention.Finalize(ctx, id); err != nil {
-		return executionFailure("could not finalize Run output", err)
+	if state.Kind == runstate.PRReview {
+		if err := s.retention.FinalizePRReview(ctx, id); err != nil {
+			return executionFailure("could not retain PR review output", err)
+		}
+		if err := s.store.WithRun(ctx, id, func(r *postgres.RunResources) error { return r.CompletePRReview() }); err != nil {
+			return executionFailure("could not persist PR review completion", err)
+		}
+	} else {
+		if _, err := s.retention.Finalize(ctx, id); err != nil {
+			return executionFailure("could not finalize Run output", err)
+		}
+		if err := s.store.WithRun(ctx, id, func(r *postgres.RunResources) error { return r.Complete() }); err != nil {
+			return executionFailure("could not persist Run completion", err)
+		}
 	}
-	if err := s.store.WithRun(ctx, id, func(r *postgres.RunResources) error { return r.Complete() }); err != nil {
-		return executionFailure("could not persist Run completion", err)
-	}
+
 	return nil
 }
 
-func (s *Supervisor) provision(ctx context.Context, id uuid.UUID) (handle runtimes.Handle, result error) {
+func (s *Supervisor) provision(ctx context.Context, id uuid.UUID, backend *preparedBackend) (handle runtimes.Handle, result error) {
 	identityRecorded := false
 	defer func() {
 		if result == nil {
@@ -215,8 +272,13 @@ func (s *Supervisor) provision(ctx context.Context, id uuid.UUID) (handle runtim
 		if err != nil {
 			return err
 		}
-		if inputs.Backend != "fake" {
-			return errors.New("unsupported Run backend")
+		if inputs.Kind != runstate.PRReview {
+			*backend, err = s.prepareBackend(inputs)
+			if err != nil {
+				return err
+			}
+		} else if inputs.Backend != "codex" || !s.config.CodexEnabled {
+			return &backends.Failure{Message: "PR reviews require an enabled Codex worker"}
 		}
 		_, err = r.CreatePending(path)
 		return err
@@ -224,28 +286,41 @@ func (s *Supervisor) provision(ctx context.Context, id uuid.UUID) (handle runtim
 	if err != nil {
 		return runtimes.Handle{}, executionFailure("could not prepare Run Workspace", err)
 	}
-	repository, err := s.retention.git.Checkout(ctx, inputs.RepositoryID, inputs.CloneURL)
-	if err != nil {
-		return runtimes.Handle{}, executionFailure("could not prepare Repository checkout", err)
+	var repository string
+	if inputs.Kind == runstate.PRReview {
+		captured, value, err := s.preparePRReviewContext(ctx, inputs)
+		if err != nil {
+			return handle, executionFailure("could not verify captured PR review source", err)
+		}
+		repository = captured.RepositoryPath
+		inputs.ReviewContextSHA256, err = prreviews.Fingerprint(value)
+		if err != nil {
+			return handle, err
+		}
+		*backend, err = s.prepareBackend(inputs)
+		if err != nil {
+			return handle, err
+		}
+	} else {
+		repository, err = s.retention.git.Checkout(ctx, inputs.RepositoryID, inputs.CloneURL)
+		if err != nil {
+			return handle, executionFailure("could not prepare Repository checkout", err)
+		}
 	}
+
 	if err := s.withAllocation(ctx, inputs, func(operation context.Context, _ *postgres.RunResources) error {
 		_, err := s.retention.git.Provision(operation, id, repository, inputs.BaseRef)
 		return err
 	}); err != nil {
 		return runtimes.Handle{}, executionFailure("could not provision Run worktree", err)
 	}
-	behavior, err := s.fakeBehavior(inputs.BackendConfig)
-	if err != nil {
-		return runtimes.Handle{}, err
-	}
-	request := map[string]any{"protocol_version": 1, "run": map[string]any{"id": id.String(), "task_title": inputs.TaskTitle, "task_description": inputs.TaskDescription, "instructions": inputs.Instructions}, "behavior": behavior}
-	stdin, err := json.Marshal(request)
-	if err != nil {
-		return runtimes.Handle{}, executionFailure("could not encode fake workload input", err)
-	}
 	err = s.withAllocation(ctx, inputs, func(operation context.Context, r *postgres.RunResources) error {
 		var err error
-		handle, err = s.docker.Start(operation, runtimes.Spec{RunID: id, Image: s.config.Image, Worktree: filepath.Join(s.config.Docker.WorktreeRoot, id.String()), Command: []string{"--write-output"}, Stdin: append(stdin, '\n'), CPULimit: s.config.CPULimit, MemoryLimitMB: s.config.MemoryLimitMB})
+		var reviewMount *runtimes.ReviewMount
+		if inputs.Kind == runstate.PRReview {
+			reviewMount = &runtimes.ReviewMount{ContextSHA256: inputs.ReviewContextSHA256}
+		}
+		handle, err = s.docker.Start(operation, runtimes.Spec{Kind: inputs.Kind, Review: reviewMount, RunID: id, Image: backend.image, Worktree: filepath.Join(s.config.Docker.WorktreeRoot, id.String()), Command: backend.invocation.Command, Stdin: backend.invocation.Stdin, CPULimit: s.config.CPULimit, MemoryLimitMB: s.config.MemoryLimitMB, NetworkEnabled: backend.invocation.NetworkEnabled, UseCredentials: backend.invocation.UseCredentials, TemporaryStorageMB: backend.invocation.TemporaryStorageMB})
 		if err != nil {
 			return executionFailure("could not start Run container", err)
 		}
@@ -290,32 +365,29 @@ func (s *Supervisor) withAllocation(ctx context.Context, inputs postgres.Provisi
 	})
 }
 
-func (s *Supervisor) fakeBehavior(raw json.RawMessage) (map[string]any, error) {
-	var config map[string]any
-	decoder := json.NewDecoder(bytes.NewReader(raw))
-	decoder.UseNumber()
-	if err := decoder.Decode(&config); err != nil {
-		return nil, executionFailure("invalid fake backend configuration", err)
-	}
-	delay := s.config.FakeDelayMS
-	if value, ok := config["delay_ms"]; ok {
-		if !nonnegativeInteger(value) {
-			return nil, executionFailure("fake delay_ms must be an integer from 0 through 10000", nil)
+type preparedBackend struct {
+	name, image string
+	invocation  backends.Invocation
+}
+
+func (s *Supervisor) prepareBackend(inputs postgres.ProvisioningContext) (preparedBackend, error) {
+	var adapter backends.Backend
+	prepared := preparedBackend{name: inputs.Backend, image: s.config.Image}
+	switch inputs.Backend {
+	case "fake":
+		adapter = backends.Fake{DelayMS: s.config.FakeDelayMS}
+	case "codex":
+		if !s.config.CodexEnabled {
+			return prepared, &backends.Failure{Message: "Codex backend is disabled on this worker"}
 		}
-		var err error
-		delay, err = strconv.Atoi(string(value.(json.Number)))
-		if err != nil || delay < 0 || delay > 10000 {
-			return nil, executionFailure("fake delay_ms must be an integer from 0 through 10000", nil)
-		}
+		prepared.name, prepared.image = "Codex", s.config.CodexImage
+		adapter = backends.Codex{AuthMode: s.config.CodexAuthMode, APIKey: s.config.CodexAPIKey}
+	default:
+		return prepared, &backends.Failure{Message: "unsupported Run backend"}
 	}
-	failure := "none"
-	if value, ok := config["failure"]; ok {
-		failure, _ = value.(string)
-		if failure != "none" && failure != "before_events" && failure != "after_first_event" {
-			return nil, executionFailure("unsupported fake failure mode", nil)
-		}
-	}
-	return map[string]any{"delay_ms": delay, "failure": failure}, nil
+	var err error
+	prepared.invocation, err = adapter.Prepare(backends.Input{Kind: inputs.Kind, ReviewContextSHA256: inputs.ReviewContextSHA256, RunID: inputs.RunID, TaskTitle: inputs.TaskTitle, TaskDescription: inputs.TaskDescription, Instructions: inputs.Instructions, Config: inputs.BackendConfig})
+	return prepared, err
 }
 
 type runFailure struct {
@@ -332,6 +404,10 @@ func executionFailure(message string, cause error) error {
 func failureProjection(err error) (string, map[string]any) {
 	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 		return "worker execution stopped", nil
+	}
+	var backendFailure *backends.Failure
+	if errors.As(err, &backendFailure) {
+		return backendFailure.Message, backendFailure.Raw
 	}
 	var failure *runFailure
 	if errors.As(err, &failure) {

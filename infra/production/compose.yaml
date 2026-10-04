@@ -1,0 +1,135 @@
+name: circular
+
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+x-integrations: &integrations
+  DATABASE_URL: postgresql://circular:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}@postgres:5432/circular
+  CIRCULAR_INTEGRATIONS_ENCRYPTION_KEY: ${CIRCULAR_INTEGRATIONS_ENCRYPTION_KEY:?Preserve the existing encryption key}
+  CIRCULAR_PUBLIC_API_URL: ${CIRCULAR_APP_ORIGIN:-http://localhost:18080}
+  CIRCULAR_WEB_URL: ${CIRCULAR_APP_ORIGIN:-http://localhost:18080}
+  CIRCULAR_GITHUB_CLIENT_ID: ${CIRCULAR_GITHUB_CLIENT_ID:-}
+  CIRCULAR_GITHUB_CLIENT_SECRET: ${CIRCULAR_GITHUB_CLIENT_SECRET:-}
+  CIRCULAR_GITHUB_APP_SLUG: ${CIRCULAR_GITHUB_APP_SLUG:-}
+  CIRCULAR_GITHUB_PRIVATE_KEY_FILE: ${CIRCULAR_GITHUB_PRIVATE_KEY_FILE:-}
+  CIRCULAR_LINEAR_CLIENT_ID: ${CIRCULAR_LINEAR_CLIENT_ID:-}
+  CIRCULAR_LINEAR_CLIENT_SECRET: ${CIRCULAR_LINEAR_CLIENT_SECRET:-}
+
+services:
+  postgres:
+    image: ${POSTGRES_IMAGE:-postgres:17-alpine}
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: circular
+      POSTGRES_USER: circular
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U circular -d circular"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    logging: *logging
+
+  migrate:
+    image: circular-migrate:${CIRCULAR_RELEASE:?Set CIRCULAR_RELEASE}
+    environment:
+      DATABASE_URL: postgresql://circular:${POSTGRES_PASSWORD}@postgres:5432/circular
+    depends_on:
+      postgres:
+        condition: service_healthy
+    logging: *logging
+
+  api:
+    image: circular-api:${CIRCULAR_RELEASE}
+    restart: unless-stopped
+    environment:
+      <<: *integrations
+      CIRCULAR_ARTIFACT_ROOT: /var/lib/circular/artifacts
+      CIRCULAR_REPOSITORY_CACHE_ROOT: /var/lib/circular/repositories
+    volumes:
+      - ./state/secrets:/var/lib/circular/secrets:ro
+      - ./state/artifacts:/var/lib/circular/artifacts:ro
+      - ./state/repositories:/var/lib/circular/repositories:ro
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    logging: *logging
+
+  webhooks:
+    image: circular-webhooks:${CIRCULAR_RELEASE}
+    restart: unless-stopped
+    environment: *integrations
+    read_only: true
+    cap_drop: ["ALL"]
+    security_opt: ["no-new-privileges:true"]
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    logging: *logging
+
+  worker:
+    image: circular-worker:${CIRCULAR_RELEASE}
+    restart: unless-stopped
+    stop_grace_period: 90s
+    environment:
+      <<: *integrations
+      CIRCULAR_POLL_INTERVAL_SECONDS: "1"
+      CIRCULAR_REPOSITORY_CACHE_ROOT: /var/lib/circular/repositories
+      CIRCULAR_WORKTREE_ROOT: /var/lib/circular/worktrees
+      CIRCULAR_REVIEW_CONTEXT_ROOT: /var/lib/circular/review-contexts
+      CIRCULAR_ARTIFACT_ROOT: /var/lib/circular/artifacts
+      CIRCULAR_CODEX_AUTH_ROOT: /var/lib/circular/codex-auth
+      CIRCULAR_DOCKER_WORKTREE_ROOT: ${CIRCULAR_STATE_ROOT:?Set the absolute host state path}/worktrees
+      CIRCULAR_DOCKER_REVIEW_CONTEXT_ROOT: ${CIRCULAR_STATE_ROOT}/review-contexts
+      CIRCULAR_DOCKER_CODEX_AUTH_ROOT: ${CIRCULAR_STATE_ROOT}/codex-auth
+      CIRCULAR_RUNNER_IMAGE: ${CIRCULAR_RUNNER_IMAGE:-circular-runner:dev}
+      CIRCULAR_RUNNER_CPU_LIMIT: "1"
+      CIRCULAR_RUNNER_MEMORY_LIMIT_MB: "2048"
+      CIRCULAR_CODEX_ENABLED: ${CIRCULAR_CODEX_ENABLED:-false}
+      CIRCULAR_CODEX_IMAGE: ${CIRCULAR_CODEX_IMAGE:-circular-codex-runner:dev}
+      CIRCULAR_CODEX_AUTH_MODE: ${CIRCULAR_CODEX_AUTH_MODE:-chatgpt}
+      CIRCULAR_CODEX_API_KEY: ${CIRCULAR_CODEX_API_KEY:-}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./state:/var/lib/circular
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    logging: *logging
+
+  gateway:
+    image: ${CADDY_IMAGE:?Set the tested Caddy image digest}
+    restart: unless-stopped
+    environment:
+      CIRCULAR_DOMAIN: ${CIRCULAR_DOMAIN:?Set CIRCULAR_DOMAIN}
+      CIRCULAR_APP_ORIGIN: ${CIRCULAR_APP_ORIGIN:-http://localhost:18080}
+    ports:
+      - "${CIRCULAR_HTTP_BIND:-80}:80"
+      - "${CIRCULAR_HTTPS_BIND:-443}:443"
+      - "127.0.0.1:8080:8080"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./owner.users:/etc/caddy/owner.users:ro
+      - ./web:/srv/app:ro
+      - ./vitrine:/srv/vitrine:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    read_only: true
+    tmpfs: ["/tmp"]
+    cap_drop: ["ALL"]
+    cap_add: ["NET_BIND_SERVICE"]
+    security_opt: ["no-new-privileges:true"]
+    depends_on:
+      - api
+      - webhooks
+    logging: *logging
+
+volumes:
+  postgres:
+  caddy-data:
+  caddy-config:

@@ -21,6 +21,8 @@ import (
 	"unicode/utf8"
 
 	"github.com/google/uuid"
+	"github.com/ruohao1/circular/internal/prreviews"
+	"github.com/ruohao1/circular/internal/runstate"
 )
 
 var (
@@ -31,46 +33,60 @@ var (
 	containerUser           = regexp.MustCompile(`^[1-9][0-9]*:[1-9][0-9]*$`)
 )
 
+type ReviewMount struct{ ContextSHA256 string }
+
 type Spec struct {
-	RunID          uuid.UUID
-	Image          string
-	Worktree       string
-	Command        []string
-	Stdin          []byte
-	CPULimit       float64
-	MemoryLimitMB  int64
-	Environment    map[string]string
-	NetworkEnabled bool
+	Kind               runstate.Kind
+	Review             *ReviewMount
+	RunID              uuid.UUID
+	Image              string
+	Worktree           string
+	Command            []string
+	Stdin              []byte
+	CPULimit           float64
+	MemoryLimitMB      int64
+	TemporaryStorageMB int64 // Optional /tmp tmpfs; zero adds no temporary mount.
+	Environment        map[string]string
+	NetworkEnabled     bool
+	UseCredentials     bool // Opts into the trusted credential-directory mount.
 }
 
 // Plan is a side-effect-free policy snapshot. It excludes environment values and
 // stdin entirely, so diagnostic formatting cannot expose the request or secrets.
 type Plan struct {
-	RunID               uuid.UUID
-	ContainerName       string
-	Labels              map[string]string
-	PolicyDigest        string
-	Image               string
-	Command             []string
-	EnvironmentNames    []string
-	WorktreeSource      string
-	WorktreeDestination string
-	WorktreeReadOnly    bool
-	WorkingDirectory    string
-	ContainerUser       string
-	NetworkMode         string
-	RootReadOnly        bool
-	CapDrop             []string
-	SecurityOptions     []string
-	CPULimit            float64
-	MemoryLimitMB       int64
+	Kind                                                               runstate.Kind
+	ReviewContextSource, ReviewContextDestination, ReviewContextSHA256 string
+	ReviewContextReadOnly                                              bool
+	RunID                                                              uuid.UUID
+	ContainerName                                                      string
+	Labels                                                             map[string]string
+	PolicyDigest                                                       string
+	Image                                                              string
+	Command                                                            []string
+	EnvironmentNames                                                   []string
+	WorktreeSource                                                     string
+	WorktreeDestination                                                string
+	WorktreeReadOnly                                                   bool
+	CredentialSource                                                   string
+	CredentialDestination                                              string
+	WorkingDirectory                                                   string
+	ContainerUser                                                      string
+	NetworkMode                                                        string
+	RootReadOnly                                                       bool
+	CapDrop                                                            []string
+	SecurityOptions                                                    []string
+	CPULimit                                                           float64
+	MemoryLimitMB                                                      int64
+	TemporaryStorageMB                                                 int64
 }
 
 // Zero-valued optional configuration fields use the existing Python defaults.
 // DockerExecutable must be an absolute path or a name in the fixed system PATH;
 // the caller's PATH, Docker configuration, credentials and proxy env are not used.
 type DockerConfig struct {
+	ReviewContextRoot       string
 	WorktreeRoot            string
+	CredentialRoot          string // Optional daemon-visible auth directory; retain until credential-using Runs are released.
 	AllowedEnvironmentNames []string
 	DockerExecutable        string
 	ContainerUser           string
@@ -102,6 +118,23 @@ func NewDocker(config DockerConfig) (*Docker, error) {
 		return nil, err
 	}
 	config.WorktreeRoot = root
+	if config.CredentialRoot != "" {
+		credentials, err := validatedCredentialRoot(config.CredentialRoot)
+		if err != nil {
+			return nil, err
+		}
+		if overlappingRoots(root, credentials) {
+			return nil, fmt.Errorf("%w: credential and worktree roots must be disjoint", ErrInvalidConfiguration)
+		}
+		config.CredentialRoot = credentials
+	}
+	if config.ReviewContextRoot != "" {
+		review, err := validatedRoot(config.ReviewContextRoot)
+		if err != nil || review != filepath.Clean(config.ReviewContextRoot) || overlappingRoots(root, review) || config.CredentialRoot != "" && overlappingRoots(config.CredentialRoot, review) {
+			return nil, fmt.Errorf("%w: review context must have a separate canonical root", ErrInvalidConfiguration)
+		}
+		config.ReviewContextRoot = review
+	}
 	if config.DockerExecutable == "" {
 		config.DockerExecutable = "docker"
 	}
@@ -152,6 +185,16 @@ func (d *Docker) resolve(spec Spec) (launch, error) {
 	if err != nil || resolved != expected || !safePath(resolved) {
 		return launch{}, fmt.Errorf("%w: worktree must remain inside its managed root", ErrInvalidSpec)
 	}
+	credentials := ""
+	if spec.UseCredentials {
+		if d.config.CredentialRoot == "" {
+			return launch{}, fmt.Errorf("%w: credential root is not configured", ErrInvalidSpec)
+		}
+		credentials, err = validatedCredentialRoot(d.config.CredentialRoot)
+		if err != nil || credentials != d.config.CredentialRoot {
+			return launch{}, fmt.Errorf("%w: credential root must remain at its configured canonical path", ErrInvalidSpec)
+		}
+	}
 	if !imageReference.MatchString(spec.Image) {
 		return launch{}, fmt.Errorf("%w: image reference is invalid", ErrInvalidSpec)
 	}
@@ -170,6 +213,9 @@ func (d *Docker) resolve(spec Spec) (launch, error) {
 	if spec.MemoryLimitMB <= 0 || spec.MemoryLimitMB > math.MaxInt64/(1024*1024) {
 		return launch{}, fmt.Errorf("%w: memory limit must be a positive representable byte count", ErrInvalidSpec)
 	}
+	if spec.TemporaryStorageMB < 0 || spec.TemporaryStorageMB > spec.MemoryLimitMB {
+		return launch{}, fmt.Errorf("%w: temporary storage must not exceed the memory limit", ErrInvalidSpec)
+	}
 	names := make([]string, 0, len(spec.Environment))
 	environment := make(map[string]string, len(spec.Environment))
 	for name, value := range spec.Environment {
@@ -183,17 +229,54 @@ func (d *Docker) resolve(spec Spec) (launch, error) {
 	command := append([]string{}, spec.Command...)
 	// Keep this document identical to Python's persisted policy labels. Values
 	// and stdin are deliberately absent: labels must not be secret-value oracles.
-	digest := policyDigest(map[string]any{
+	document := map[string]any{
 		"command": command, "container_user": d.config.ContainerUser,
 		"cpu_limit":         strconv.FormatFloat(spec.CPULimit, 'g', 15, 64),
 		"environment_names": names, "image": spec.Image, "memory_limit_mb": spec.MemoryLimitMB,
 		"network_enabled": spec.NetworkEnabled, "run_id": spec.RunID.String(), "worktree": resolved,
-	})
+	}
+	// Existing containers retain their historical policy identity when no
+	// temporary storage is requested.
+	if spec.TemporaryStorageMB != 0 {
+		document["temporary_storage_mb"] = spec.TemporaryStorageMB
+	}
+	if credentials != "" {
+		document["credential_root"] = credentials
+	}
+	kind := spec.Kind
+	if kind == "" {
+		kind = runstate.Coding
+	}
+	reviewSource := ""
+	switch kind {
+	case runstate.Coding:
+		if spec.Review != nil {
+			return launch{}, ErrInvalidSpec
+		}
+	case runstate.PRReview:
+		if spec.Review == nil || d.config.ReviewContextRoot == "" || !prreviews.DigestPattern.MatchString(spec.Review.ContextSHA256) {
+			return launch{}, ErrInvalidSpec
+		}
+		expected := filepath.Join(d.config.ReviewContextRoot, spec.RunID.String())
+		resolved, err := resolveMissing(expected)
+		if err != nil || resolved != expected || isSymlink(expected) {
+			return launch{}, ErrInvalidSpec
+		}
+		reviewSource = resolved
+		document["kind"] = "pr_review"
+		document["review_context"] = resolved
+		document["review_context_sha256"] = spec.Review.ContextSHA256
+		document["worktree_read_only"] = true
+	default:
+		return launch{}, ErrInvalidSpec
+	}
+	digest := policyDigest(document)
 	network := "none"
 	if spec.NetworkEnabled {
 		network = "bridge"
 	}
 	plan := Plan{
+		Kind:  kind,
 		RunID: spec.RunID, ContainerName: "circular-run-" + strings.ReplaceAll(spec.RunID.String(), "-", ""),
 		Labels:       map[string]string{"io.circular.managed": "true", "io.circular.run_id": spec.RunID.String(), "io.circular.policy_digest": digest},
 		PolicyDigest: digest, Image: spec.Image, Command: command, EnvironmentNames: names,
@@ -201,12 +284,42 @@ func (d *Docker) resolve(spec Spec) (launch, error) {
 		ContainerUser: d.config.ContainerUser, NetworkMode: network, RootReadOnly: true,
 		CapDrop: []string{"ALL"}, SecurityOptions: []string{"no-new-privileges"},
 		CPULimit: spec.CPULimit, MemoryLimitMB: spec.MemoryLimitMB,
+		TemporaryStorageMB: spec.TemporaryStorageMB,
+	}
+	if kind == runstate.PRReview {
+		plan.WorktreeReadOnly = true
+		plan.ReviewContextSource = reviewSource
+		plan.ReviewContextDestination = "/review-context"
+		plan.ReviewContextReadOnly = true
+		plan.ReviewContextSHA256 = spec.Review.ContextSHA256
+		plan.Labels["io.circular.kind"] = "pr_review"
+		plan.Labels["io.circular.review_context_sha256"] = spec.Review.ContextSHA256
+	}
+	if credentials != "" {
+		plan.CredentialSource, plan.CredentialDestination = credentials, credentialDestination
 	}
 	return launch{plan: plan, stdin: append([]byte{}, spec.Stdin...), environment: environment}, nil
 }
 
 func safeText(value string) bool { return utf8.ValidString(value) && !strings.ContainsRune(value, 0) }
 func safePath(value string) bool { return safeText(value) && !strings.Contains(value, ",") }
+
+const credentialDestination = "/codex-auth"
+
+func overlappingRoots(a, b string) bool {
+	return a == b || strings.HasPrefix(a, b+string(filepath.Separator)) || strings.HasPrefix(b, a+string(filepath.Separator))
+}
+
+func validatedCredentialRoot(root string) (string, error) {
+	resolved, err := validatedRoot(root)
+	if err != nil {
+		return "", fmt.Errorf("%w: credential root must be an absolute non-symlink managed path", ErrInvalidConfiguration)
+	}
+	if info, err := os.Stat(resolved); err != nil && !errors.Is(err, os.ErrNotExist) || err == nil && !info.IsDir() {
+		return "", fmt.Errorf("%w: credential root must identify a directory", ErrInvalidConfiguration)
+	}
+	return resolved, nil
+}
 
 func isSymlink(path string) bool {
 	info, err := os.Lstat(path)

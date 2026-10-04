@@ -1,4 +1,7 @@
-# Go-only backend cutover
+---
+title: "Go-only backend cutover"
+description: "Upgrade existing installations to the Go backend without resetting application data."
+---
 
 The incremental migration is complete for the first isolated execution slice. The API,
 worker, migrations, fake runner, and backend test tooling are Go. React/TypeScript remains
@@ -30,12 +33,27 @@ agent execution. Create a fresh Run to retry execution.
 - Deterministic worktree branches, cross-process locks, device/inode ownership receipts,
   immutable artifact URIs, and the existing PAX archive framing.
 
-The Go migrator embeds revisions `0001` and `0002`. It deliberately retains the
+The Go migrator embeds revisions `0001` through `0008`. It deliberately retains the
 historical `alembic_version` **table name** so old databases are recognized in place.
 That is persisted-format compatibility, not an Alembic/Python dependency. Fresh creation,
-a revision-0001 upgrade, and repeated revision-0002 startup are supported. Unknown or
+upgrades from revisions `0001`/`0002`/`0003`/`0004`/`0005`/`0006`/`0007`, and repeated revision-`0008` startup are supported. Unknown or
 multiple heads fail closed. DDL and ledger writes share one transaction and a per-schema
 advisory lock; there is no automatic downgrade or reset.
+
+Revision `0003` adds [provider authorization](integrations.md) and unique imported
+resource identities while retaining existing Integration metadata and domain records.
+Revision `0004` adds provider app registration from the console and preserves existing
+connection credentials and pending authorizations.
+Revision `0005` adds the supplied Repository discovery Agent to existing Projects
+and a stable preset identity, while preserving custom Agents, Tasks, Runs, and
+provider connections. New Projects receive that Agent atomically when created.
+Revision `0006` adds durable Agent proposals and their review status without
+changing existing Agents or creating Tasks or Runs.
+Revision `0007` adds a model recommendation explanation to proposals. Existing
+proposal identities, review status, Agent settings, and instructions are preserved.
+Revision `0008` adds optional, Task-scoped Run request keys for retry-safe launches
+from [external MCP clients](control-mcp.md). Existing Runs receive a null key;
+their IDs, attempts, state and output remain unchanged.
 
 `DATABASE_URL` should use `postgresql://`. The old `postgresql+psycopg://` prefix is
 accepted for existing configurations and normalized without rewriting URL values.
@@ -43,7 +61,7 @@ API creation requests are limited to 16 MiB; validation errors do not echo input
 
 ## Verification and rollback
 
-See the [README](../../README.md#verification) for the Go, frontend, Docker, and browser
+See [Local development](local-development.md#verification) for the Go, frontend, Docker, and browser
 commands. PostgreSQL tests migrate their own unique schemas; CLI fault tests execute a
 Go helper process. Historical cross-language comparators were replaced with stable wire
 expectations and public-interface behavior checks after the compatibility checks passed.
@@ -57,6 +75,10 @@ test rollback, and never reset data as a migration shortcut.
 
 ## Still outside this slice
 
-Real agent backends and optional Eino orchestration, Linear/GitHub/Slack adapters,
+Additional agent backends and optional Eino orchestration, GitHub publishing, Linear
+result updates, Slack integration,
 authentication/RBAC, approval UI, recursive delegation, distributed runners, durable
 output spooling, and artifact garbage collection remain separate work.
+
+The subsequent [Codex backend](codex-backend.md) adds the first opt-in real agent
+adapter without changing the migration or recovery contracts above.

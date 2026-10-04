@@ -1,4 +1,7 @@
-# Migrate the backend to Go behind the existing contracts
+---
+title: "Migrate the backend to Go behind the existing contracts"
+description: "The completed decision to migrate Circular to Go while preserving its execution and data contracts."
+---
 
 Circular will migrate its control plane to Go incrementally, preserving PostgreSQL
 records, HTTP/OpenAPI/SSE contracts, the React frontend, and the execution-isolation

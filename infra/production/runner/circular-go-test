@@ -1,0 +1,28 @@
+#!/bin/sh
+# Run Go tests against an owned PostgreSQL database, never the control plane.
+set -eu
+export PATH=/usr/local/go/bin:/usr/lib/postgresql/17/bin:/usr/local/bin:/usr/bin:/bin
+export CGO_ENABLED=0
+circular_test_root=$(mktemp -d /workspace/.circular-go-test.XXXXXX)
+cleanup() {
+    pg_ctl -D "$circular_test_root/database" -m immediate -w stop >/dev/null 2>&1 || true
+    chmod -R u+w "$circular_test_root"
+    rm -rf "$circular_test_root"
+}
+trap cleanup 0
+trap 'exit 130' INT
+trap 'exit 143' TERM
+mkdir -p "$circular_test_root/socket" "$circular_test_root/modules" "$circular_test_root/build"
+cp -R /opt/circular-go-mod/. "$circular_test_root/modules/"
+export GOMODCACHE="$circular_test_root/modules"
+export GOCACHE="$circular_test_root/build"
+export GOTMPDIR="$circular_test_root"
+if ! initdb -D "$circular_test_root/database" -U circular_fixture --auth=trust --no-locale --encoding=UTF8 >"$circular_test_root/init.log" 2>&1; then
+    cat "$circular_test_root/init.log" >&2
+    exit 1
+fi
+pg_ctl -D "$circular_test_root/database" -l "$circular_test_root/postgres.log" \
+    -o "-F -k $circular_test_root/socket -c listen_addresses='' -c shared_buffers=32MB" -w start >/dev/null
+createdb -h "$circular_test_root/socket" -U circular_fixture circular_tests
+export TEST_DATABASE_URL="postgresql://circular_fixture@/circular_tests?host=$circular_test_root/socket"
+go test "$@"

@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#0b0d10" />
+    <title>Circular — A workspace for coding agents</title>
+    <meta name="description" content="Give coding agents a task. Follow their progress, inspect the changes, and decide what ships. Circular brings your agents, repositories, and review workflow together." />
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="Circular — Your agents. One clear workflow." />
+    <meta property="og:description" content="A self-hosted workspace for coding agents. From the first request to a change you can review." />
+    <meta property="og:url" content="https://circular.ruohao.dev/" />
+    <link rel="canonical" href="https://circular.ruohao.dev/" />
+    <link rel="icon" href="/icon.svg" type="image/svg+xml" />
+    <link rel="preload" href="/fonts/geist-latin-wght-normal.woff2" as="font" type="font/woff2" crossorigin />
+    <link rel="stylesheet" href="/site.css" />
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Skip to content</a>
+    <div class="page-shell" id="top">
+      <header class="site-header">
+        <a class="wordmark" href="#top" aria-label="Circular home">
+          <svg class="brand-mark" viewBox="0 0 40 40" fill="none" aria-hidden="true"><path d="M30.7 9.3a15.1 15.1 0 1 0 0 21.4" stroke="currentColor" stroke-width="4" stroke-linecap="round"/><circle cx="20" cy="20" r="4" fill="currentColor"/></svg>
+          Circular
+        </a>
+        <nav aria-label="Main navigation">
+          <a href="#workflow">How it works</a>
+          <a href="#workspace">The workspace <span aria-hidden="true">↗</span></a>
+        </nav>
+      </header>
+
+      <main id="main">
+        <section class="hero" aria-labelledby="hero-title">
+          <div class="hero-copy">
+            <p class="eyebrow"><span class="small-ring" aria-hidden="true"></span> A workspace for coding agents</p>
+            <h1 id="hero-title">Your agents.<br />One clear<br /><span>workflow.</span></h1>
+            <p class="hero-description">Give coding agents a task. Follow their progress, inspect the changes, and decide what ships.</p>
+            <a class="primary-link" href="#workflow">See how it works <span aria-hidden="true">↘</span></a>
+            <p class="hero-note">Self-hosted. Connected to your tools. Built around review.</p>
+          </div>
+
+          <figure class="workflow-figure" aria-labelledby="figure-caption">
+            <div class="figure-topline"><span>THE CIRCULAR WORKFLOW</span><span aria-hidden="true">↗</span></div>
+            <ol class="flow-nodes">
+              <li class="flow-node node-task">
+                <span class="node-number">01</span>
+                <div><p class="node-label">THE REQUEST</p><h2>A task with context.</h2><p>An issue, a repository, a clear outcome.</p></div>
+                <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="5" y="3" width="14" height="18" rx="3"/><path d="M9 8h6M9 12h6M9 16h3"/></svg>
+              </li>
+              <li class="flow-node node-run">
+                <span class="node-number">02</span>
+                <div><p class="node-label">THE RUN</p><h2>Room to do the work.</h2><p>A chosen agent. An isolated workspace.</p></div>
+                <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="m8 6-5 6 5 6m8-12 5 6-5 6m-3-14-2 16"/></svg>
+              </li>
+              <li class="flow-node node-review">
+                <span class="node-number">03</span>
+                <div><p class="node-label">THE REVIEW</p><h2>A change you can inspect.</h2><p>The diff, the checks, the full story.</p></div>
+                <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="m8 12 3 3 6-7"/><circle cx="12" cy="12" r="9"/></svg>
+              </li>
+            </ol>
+            <figcaption id="figure-caption"><span class="small-ring" aria-hidden="true"></span> One task. One run. A traceable result.</figcaption>
+          </figure>
+        </section>
+
+        <div class="tools-strip" aria-label="Connected workflow">
+          <p>Fits the way<br /><strong>you already work.</strong></p>
+          <div><span class="tool-name">Linear</span><span class="tool-purpose">The work to do</span></div>
+          <span class="strip-connector" aria-hidden="true">→</span>
+          <div><span class="tool-name">Circular</span><span class="tool-purpose">The work in progress</span></div>
+          <span class="strip-connector" aria-hidden="true">→</span>
+          <div><span class="tool-name">GitHub</span><span class="tool-purpose">The change to review</span></div>
+        </div>
+
+        <section class="workflow-section section" id="workflow" aria-labelledby="workflow-title">
+          <div class="section-intro">
+            <p class="eyebrow">01 / HOW IT WORKS</p>
+            <h2 id="workflow-title">From the first request<br />to the final review.</h2>
+            <p>Circular keeps the task, the agent’s work, and the proposed changes connected. You can follow the whole process in one place.</p>
+          </div>
+          <ol class="workflow-steps">
+            <li>
+              <span class="step-number">01</span>
+              <div><h3>Give the work a starting point.</h3><p>Choose a repository and describe the outcome, or bring in an issue from Linear. Select an agent with the instructions and model that fit the task.</p><span class="step-detail">TASK + CONTEXT + AGENT</span></div>
+            </li>
+            <li>
+              <span class="step-number">02</span>
+              <div><h3>Follow the work as it happens.</h3><p>Each run gets its own workspace. Follow the agent’s output and timeline, inspect saved artifacts, and stop a run when it needs a different direction.</p><span class="step-detail">ISOLATED WORKSPACE + VISIBLE PROGRESS</span></div>
+            </li>
+            <li>
+              <span class="step-number">03</span>
+              <div><h3>Decide what moves forward.</h3><p>Review the captured diff, open a draft pull request, and ask a separate reviewer to examine the changes. The decision to merge stays with you.</p><span class="step-detail">DIFF + DRAFT PR + REVIEW</span></div>
+            </li>
+          </ol>
+        </section>
+
+        <section class="workspace-section section" id="workspace" aria-labelledby="workspace-title">
+          <div class="workspace-heading">
+            <p class="eyebrow">02 / THE WORKSPACE</p>
+            <h2 id="workspace-title">Keep the context.<br /><span>Keep control.</span></h2>
+          </div>
+          <div class="workspace-principles">
+            <article><span class="principle-marker" aria-hidden="true">↗</span><h3>On your infrastructure.</h3><p>Run Circular yourself. Bring your repositories and connect the tools you use to plan, build, and review.</p></article>
+            <article><span class="principle-marker" aria-hidden="true">◎</span><h3>Agents you can shape.</h3><p>Choose the model and instructions for each agent. Give coding and reviewing to different agents when the work calls for it.</p></article>
+            <article><span class="principle-marker" aria-hidden="true">≡</span><h3>A record of the work.</h3><p>Keep the request, output, events, and artifacts together. Come back to the context behind a proposed change.</p></article>
+          </div>
+        </section>
+
+        <section class="closing" aria-label="About Circular">
+          <svg class="closing-mark" viewBox="0 0 40 40" fill="none" aria-hidden="true"><path d="M30.7 9.3a15.1 15.1 0 1 0 0 21.4" stroke="currentColor" stroke-width="3" stroke-linecap="round"/><circle cx="20" cy="20" r="3.5" fill="currentColor"/></svg>
+          <p>More room for your agents.<br /><span>A clearer view for you.</span></p>
+          <a class="text-link" href="#top">Back to the beginning <span aria-hidden="true">↑</span></a>
+        </section>
+      </main>
+
+      <footer class="site-footer"><span class="footer-brand">Circular</span><p>A self-hosted workspace for coding agents.</p><span class="footer-label">PRODUCT OVERVIEW</span></footer>
+    </div>
+  </body>
+</html>

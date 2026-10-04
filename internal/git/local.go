@@ -20,12 +20,13 @@ import (
 )
 
 var (
-	ErrConfiguration = errors.New("invalid managed Git configuration")
-	ErrInvalidCache  = errors.New("not a managed Repository checkout")
-	ErrClone         = errors.New("Repository clone failed")
-	ErrFetch         = errors.New("Repository refresh failed")
-	ErrLock          = errors.New("managed Git lock failed")
-	ErrCleanup       = errors.New("owned Git allocation cleanup failed")
+	ErrConfiguration  = errors.New("invalid managed Git configuration")
+	ErrInvalidCache   = errors.New("not a managed Repository checkout")
+	ErrClone          = errors.New("Repository clone failed")
+	ErrFetch          = errors.New("Repository refresh failed")
+	ErrLock           = errors.New("managed Git lock failed")
+	ErrCleanup        = errors.New("owned Git allocation cleanup failed")
+	ErrAuthentication = errors.New("Repository authentication failed; reconnect GitHub in Setup")
 )
 
 // Error preserves operation identity and compensation failures without retaining
@@ -66,6 +67,7 @@ type Config struct {
 	GitExecutable       string
 	LockTimeout         time.Duration
 	Owner               *FileOwner
+	Credential          func(context.Context, uuid.UUID, string) (string, error) `json:"-"`
 }
 
 type FileOwner struct{ UID, GID int }
@@ -213,6 +215,25 @@ func (l *Local) lock(ctx context.Context, id uuid.UUID, path string) (func() err
 }
 
 func (l *Local) run(ctx context.Context, environment map[string]string, args ...string) ([]byte, int, error) {
+	return l.runBounded(ctx, environment, 0, args...)
+}
+
+var errGitOutputLimit = errors.New("Git output exceeds the review limit")
+
+type boundedGitOutput struct {
+	bytes.Buffer
+	limit    int
+	exceeded bool
+}
+
+func (b *boundedGitOutput) Write(p []byte) (int, error) {
+	if b.limit > 0 && len(p) > b.limit-b.Len() {
+		b.exceeded = true
+		return 0, errGitOutputLimit
+	}
+	return b.Buffer.Write(p)
+}
+func (l *Local) runBounded(ctx context.Context, environment map[string]string, limit int, args ...string) ([]byte, int, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, -1, err
 	}
@@ -241,7 +262,7 @@ func (l *Local) run(ctx context.Context, environment map[string]string, args ...
 	for name, value := range env {
 		cmd.Env = append(cmd.Env, name+"="+value)
 	}
-	var output bytes.Buffer
+	output := boundedGitOutput{limit: limit}
 	cmd.Stdout, cmd.Stderr, cmd.WaitDelay = &output, io.Discard, time.Second
 	if err := cmd.Start(); err != nil {
 		return nil, -1, errors.New("Git executable is unavailable")
@@ -265,6 +286,9 @@ func (l *Local) run(ctx context.Context, environment map[string]string, args ...
 		// orphan continue mutating resources after its metadata lock is freed.
 		_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
 		return nil, -1, ctx.Err()
+	}
+	if output.exceeded {
+		return nil, -1, errGitOutputLimit
 	}
 	var exited *exec.ExitError
 	if err != nil && !errors.As(err, &exited) {

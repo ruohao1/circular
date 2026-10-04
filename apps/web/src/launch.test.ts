@@ -22,6 +22,7 @@ const agent: Agent = {
   enabled: true,
   backend: "fake",
   instructions: "",
+  preset: null,
   ...dates,
 };
 const selection = {

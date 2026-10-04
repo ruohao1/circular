@@ -29,12 +29,15 @@ type Workspace struct {
 }
 
 type ResourceState struct {
-	RunID        uuid.UUID
-	Status       runstate.Status
-	Backend      string
-	RepositoryID *uuid.UUID
-	Workspace    *Workspace
-	Artifacts    []artifacts.Record
+	RunID               uuid.UUID
+	Kind                runstate.Kind
+	StartedAt           *time.Time
+	ReviewContextSHA256 string
+	Status              runstate.Status
+	Backend             string
+	RepositoryID        *uuid.UUID
+	Workspace           *Workspace
+	Artifacts           []artifacts.Record
 }
 
 // Resources requires an explicit execution owner; it cannot bypass lease checks
@@ -71,7 +74,7 @@ func (s *Resources) WithRun(ctx context.Context, id uuid.UUID, action func(*RunR
 	defer func() { run.open = false }()
 	var owner *string
 	var expires *time.Time
-	err = tx.QueryRow(ctx, `SELECT status, backend, worker_id, lease_expires_at FROM runs WHERE id=$1 FOR UPDATE`, id).Scan(&run.status, &run.backend, &owner, &expires)
+	err = tx.QueryRow(ctx, `SELECT status, backend, worker_id, lease_expires_at,kind,started_at FROM runs WHERE id=$1 FOR UPDATE`, id).Scan(&run.status, &run.backend, &owner, &expires, &run.kind, &run.startedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return ErrRunUnavailable
 	}
@@ -96,12 +99,14 @@ func (s *Resources) Read(ctx context.Context, id uuid.UUID) (state ResourceState
 }
 
 type RunResources struct {
-	ctx     context.Context
-	tx      pgx.Tx
-	id      uuid.UUID
-	status  runstate.Status
-	backend string
-	open    bool
+	ctx       context.Context
+	tx        pgx.Tx
+	id        uuid.UUID
+	status    runstate.Status
+	backend   string
+	kind      runstate.Kind
+	startedAt *time.Time
+	open      bool
 }
 
 func (r *RunResources) guard() error {
@@ -115,10 +120,15 @@ func (r *RunResources) State() (ResourceState, error) {
 	if err := r.guard(); err != nil {
 		return ResourceState{}, err
 	}
-	state := ResourceState{RunID: r.id, Status: r.status, Backend: r.backend}
+	state := ResourceState{RunID: r.id, Status: r.status, Backend: r.backend, Kind: r.kind, StartedAt: r.startedAt}
 	err := r.tx.QueryRow(r.ctx, `SELECT tasks.repository_id FROM tasks JOIN runs ON runs.task_id=tasks.id WHERE runs.id=$1`, r.id).Scan(&state.RepositoryID)
 	if err != nil {
 		return ResourceState{}, err
+	}
+	if r.kind == runstate.PRReview {
+		if err := r.tx.QueryRow(r.ctx, `SELECT context_sha256 FROM pr_reviews WHERE run_id=$1`, r.id).Scan(&state.ReviewContextSHA256); err != nil {
+			return ResourceState{}, err
+		}
 	}
 	state.Workspace, err = r.workspace()
 	if err != nil {

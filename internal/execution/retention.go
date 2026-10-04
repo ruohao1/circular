@@ -25,6 +25,7 @@ type Retention struct {
 	git                          *git.Local
 	content                      *artifacts.LocalStore
 	worktreeRoot, repositoryRoot string
+	reviewContextRoot            string
 }
 
 // NewRetention composes the local adapters with one lease-checking persistence
@@ -72,6 +73,9 @@ func (r *Retention) Finalize(ctx context.Context, id uuid.UUID) (result artifact
 	if err != nil {
 		return result, err
 	}
+	if state.Kind == runstate.PRReview {
+		return result, postgres.ErrResourceState
+	}
 	target, err := r.target(state)
 	if err != nil {
 		return result, err
@@ -94,7 +98,7 @@ func (r *Retention) Finalize(ctx context.Context, id uuid.UUID) (result artifact
 	}
 	err = r.store.WithRun(ctx, id, func(run *postgres.RunResources) error {
 		var err error
-		result, err = run.PersistDiff(target, content, diff.ChangedFiles, diff.ContainsBinary)
+		result, err = run.PersistDiff(target, content, diff.ChangedFiles, diff.ContainsBinary, diff.BaseCommit, diff.BaseRef)
 		return err
 	})
 	return result, err
@@ -103,10 +107,17 @@ func (r *Retention) Finalize(ctx context.Context, id uuid.UUID) (result artifact
 // Retain ensures both the final diff and complete worktree archive are durable.
 // It does not release resources, choose a Run outcome, or release a claim.
 func (r *Retention) Retain(ctx context.Context, id uuid.UUID) error {
+	state, err := r.store.Read(ctx, id)
+	if err != nil {
+		return err
+	}
+	if state.Kind == runstate.PRReview {
+		return r.FinalizePRReview(ctx, id)
+	}
 	if _, err := r.Finalize(ctx, id); err != nil {
 		return err
 	}
-	state, err := r.store.Read(ctx, id)
+	state, err = r.store.Read(ctx, id)
 	if err != nil {
 		return err
 	}

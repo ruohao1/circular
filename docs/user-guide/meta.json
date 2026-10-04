@@ -1,0 +1,14 @@
+{
+  "title": "Circular docs",
+  "pages": [
+    "index",
+    "quickstart",
+    "connections",
+    "circular-identity",
+    "linear-agent",
+    "agents-and-runs",
+    "pull-request-reviews",
+    "coding-agent",
+    "troubleshooting"
+  ]
+}

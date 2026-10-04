@@ -5,6 +5,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -141,5 +142,27 @@ func TestAPIConfigurationRejectsUnsafeIntervalsAndMalformedOrigins(t *testing.T)
 	config, err := httpapi.LoadConfig(func(string) string { return "" })
 	if err != nil || !filepath.IsAbs(config.ArtifactRoot) || config.SSEPollInterval != 500*time.Millisecond {
 		t.Fatal(config, err)
+	}
+}
+
+func TestAPIRepositoryCacheExpandsHomeLikeTheWorker(t *testing.T) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, value := range []string{"~", "~/circular/repositories"} {
+		config, err := httpapi.LoadConfig(func(key string) string {
+			if key == "CIRCULAR_REPOSITORY_CACHE_ROOT" {
+				return value
+			}
+			return ""
+		})
+		expected := home
+		if value != "~" {
+			expected = filepath.Join(home, "circular/repositories")
+		}
+		if err != nil || config.RepositoryCacheRoot != expected {
+			t.Fatalf("cache %q: got %q, want %q: %v", value, config.RepositoryCacheRoot, expected, err)
+		}
 	}
 }

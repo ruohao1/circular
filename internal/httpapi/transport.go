@@ -13,6 +13,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/ruohao1/circular/internal/integrations"
 )
 
 func LoadConfig(getenv func(string) string) (Config, error) {
@@ -35,7 +37,27 @@ func LoadConfig(getenv func(string) string) (Config, error) {
 	if err != nil {
 		return Config{}, fmt.Errorf("invalid artifact directory")
 	}
-	config := Config{ArtifactRoot: root, CORSOrigins: []string{"http://localhost:5173"}, SSEPollInterval: 500 * time.Millisecond}
+	config := Config{ArtifactRoot: root, CORSOrigins: []string{"http://localhost:5173"}, SSEPollInterval: 500 * time.Millisecond, Integrations: integrations.LoadConfig(getenv)}
+	cacheRoot := getenv("CIRCULAR_REPOSITORY_CACHE_ROOT")
+	if cacheRoot == "" {
+		cacheRoot = ".circular/repositories"
+	}
+	if cacheRoot == "~" || strings.HasPrefix(cacheRoot, "~/") {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return Config{}, fmt.Errorf("cannot resolve repository cache directory")
+		}
+		if cacheRoot == "~" {
+			cacheRoot = home
+		} else {
+			cacheRoot = filepath.Join(home, cacheRoot[2:])
+		}
+	}
+	config.RepositoryCacheRoot, err = filepath.Abs(cacheRoot)
+	if err != nil {
+		return Config{}, fmt.Errorf("invalid repository cache directory")
+	}
+	config.CORSOrigins = []string{strings.TrimRight(config.Integrations.WebURL, "/")}
 	if origins := getenv("CORS_ORIGINS"); origins != "" {
 		if err := json.Unmarshal([]byte(origins), &config.CORSOrigins); err != nil {
 			return Config{}, fmt.Errorf("CORS_ORIGINS must be a JSON array of strings")
@@ -73,6 +95,7 @@ func (a *api) cors(next http.Handler) http.Handler {
 				w.Header().Set("Access-Control-Allow-Origin", "*")
 			} else {
 				w.Header().Set("Access-Control-Allow-Origin", origin)
+				w.Header().Set("Access-Control-Allow-Credentials", "true")
 				w.Header().Add("Vary", "Origin")
 			}
 		}

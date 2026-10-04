@@ -76,23 +76,26 @@ func TestResolveRejectsUnsafeRequestsBeforeDockerAccess(t *testing.T) {
 		t.Fatal(err)
 	}
 	for name, change := range map[string]func(*runtimes.Spec){
-		"sibling":                 func(s *runtimes.Spec) { s.Worktree = filepath.Join(root, uuid.NewString()) },
-		"traversal":               func(s *runtimes.Spec) { s.Worktree = root + "/other/../" + s.RunID.String() },
-		"nested":                  func(s *runtimes.Spec) { s.Worktree += "/nested" },
-		"image-option":            func(s *runtimes.Spec) { s.Image = "--privileged" },
-		"image-space":             func(s *runtimes.Spec) { s.Image = "unsafe image" },
-		"image-newline":           func(s *runtimes.Spec) { s.Image += "\n" },
-		"command-nul":             func(s *runtimes.Spec) { s.Command = []string{"invalid\x00"} },
-		"command-utf8":            func(s *runtimes.Spec) { s.Command = []string{string([]byte{0xff})} },
-		"environment-unapproved":  func(s *runtimes.Spec) { s.Environment = map[string]string{"NEW_TOKEN": "private token"} },
-		"environment-nul":         func(s *runtimes.Spec) { s.Environment = map[string]string{"TASK_SCOPE_TOKEN": "private token\x00"} },
-		"cpu-zero":                func(s *runtimes.Spec) { s.CPULimit = 0 },
-		"cpu-nan":                 func(s *runtimes.Spec) { s.CPULimit = math.NaN() },
-		"cpu-infinite":            func(s *runtimes.Spec) { s.CPULimit = math.Inf(1) },
-		"cpu-overflow":            func(s *runtimes.Spec) { s.CPULimit = math.MaxFloat64 },
-		"cpu-rounds-to-unlimited": func(s *runtimes.Spec) { s.CPULimit = 1e-12 },
-		"memory-negative":         func(s *runtimes.Spec) { s.MemoryLimitMB = -1 },
-		"memory-overflow":         func(s *runtimes.Spec) { s.MemoryLimitMB = math.MaxInt64 },
+		"sibling":                  func(s *runtimes.Spec) { s.Worktree = filepath.Join(root, uuid.NewString()) },
+		"traversal":                func(s *runtimes.Spec) { s.Worktree = root + "/other/../" + s.RunID.String() },
+		"nested":                   func(s *runtimes.Spec) { s.Worktree += "/nested" },
+		"image-option":             func(s *runtimes.Spec) { s.Image = "--privileged" },
+		"image-space":              func(s *runtimes.Spec) { s.Image = "unsafe image" },
+		"image-newline":            func(s *runtimes.Spec) { s.Image += "\n" },
+		"command-nul":              func(s *runtimes.Spec) { s.Command = []string{"invalid\x00"} },
+		"command-utf8":             func(s *runtimes.Spec) { s.Command = []string{string([]byte{0xff})} },
+		"environment-unapproved":   func(s *runtimes.Spec) { s.Environment = map[string]string{"NEW_TOKEN": "private token"} },
+		"environment-nul":          func(s *runtimes.Spec) { s.Environment = map[string]string{"TASK_SCOPE_TOKEN": "private token\x00"} },
+		"cpu-zero":                 func(s *runtimes.Spec) { s.CPULimit = 0 },
+		"cpu-nan":                  func(s *runtimes.Spec) { s.CPULimit = math.NaN() },
+		"cpu-infinite":             func(s *runtimes.Spec) { s.CPULimit = math.Inf(1) },
+		"cpu-overflow":             func(s *runtimes.Spec) { s.CPULimit = math.MaxFloat64 },
+		"cpu-rounds-to-unlimited":  func(s *runtimes.Spec) { s.CPULimit = 1e-12 },
+		"memory-negative":          func(s *runtimes.Spec) { s.MemoryLimitMB = -1 },
+		"memory-overflow":          func(s *runtimes.Spec) { s.MemoryLimitMB = math.MaxInt64 },
+		"temporary-negative":       func(s *runtimes.Spec) { s.TemporaryStorageMB = -1 },
+		"temporary-exceeds-memory": func(s *runtimes.Spec) { s.TemporaryStorageMB = s.MemoryLimitMB + 1 },
+		"temporary-overflow":       func(s *runtimes.Spec) { s.TemporaryStorageMB = math.MaxInt64 },
 	} {
 		t.Run(name, func(t *testing.T) {
 			spec := runtimes.Spec{RunID: runID, Worktree: filepath.Join(root, runID.String()), Image: "fixture:test", CPULimit: 1, MemoryLimitMB: 256}
@@ -102,6 +105,24 @@ func TestResolveRejectsUnsafeRequestsBeforeDockerAccess(t *testing.T) {
 				t.Fatalf("unsafe request was not safely rejected: %v", err)
 			}
 		})
+	}
+}
+
+func TestTemporaryStorageIsExplicitAndChangesPolicyIdentity(t *testing.T) {
+	root := t.TempDir()
+	d, err := runtimes.NewDocker(runtimes.DockerConfig{WorktreeRoot: root})
+	if err != nil {
+		t.Fatal(err)
+	}
+	spec := runtimes.Spec{RunID: runID, Worktree: filepath.Join(root, runID.String()), Image: "fixture:test", CPULimit: 1, MemoryLimitMB: 256}
+	previous := ""
+	for _, size := range []int64{0, 64, 256} {
+		spec.TemporaryStorageMB = size
+		plan, err := d.Resolve(spec)
+		if err != nil || plan.TemporaryStorageMB != size || !plan.RootReadOnly || plan.PolicyDigest == previous {
+			t.Fatalf("temporary storage policy did not remain bounded and distinct: %+v %v", plan, err)
+		}
+		previous = plan.PolicyDigest
 	}
 }
 

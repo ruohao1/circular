@@ -3,6 +3,7 @@
 node_modules/
 dist/
 *.tsbuildinfo
+.source/
 playwright-report/
 test-results/
 .DS_Store

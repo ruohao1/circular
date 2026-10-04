@@ -34,13 +34,53 @@ services:
     environment:
       DATABASE_URL: postgresql://circular:circular@postgres:5432/circular
       CIRCULAR_ARTIFACT_ROOT: /var/lib/circular/artifacts
+      CIRCULAR_REPOSITORY_CACHE_ROOT: /var/lib/circular/repositories
+      CIRCULAR_PUBLIC_API_URL: ${CIRCULAR_PUBLIC_API_URL:-http://localhost:8000}
+      CIRCULAR_WEB_URL: ${CIRCULAR_WEB_URL:-http://localhost:5173}
+      CIRCULAR_INTEGRATIONS_ENCRYPTION_KEY: ${CIRCULAR_INTEGRATIONS_ENCRYPTION_KEY:-}
+      CIRCULAR_GITHUB_CLIENT_ID: ${CIRCULAR_GITHUB_CLIENT_ID:-}
+      CIRCULAR_GITHUB_CLIENT_SECRET: ${CIRCULAR_GITHUB_CLIENT_SECRET:-}
+      CIRCULAR_GITHUB_APP_SLUG: ${CIRCULAR_GITHUB_APP_SLUG:-}
+      CIRCULAR_GITHUB_PRIVATE_KEY_FILE: ${CIRCULAR_GITHUB_PRIVATE_KEY_FILE:-}
+      CIRCULAR_LINEAR_CLIENT_ID: ${CIRCULAR_LINEAR_CLIENT_ID:-}
+      CIRCULAR_LINEAR_CLIENT_SECRET: ${CIRCULAR_LINEAR_CLIENT_SECRET:-}
     volumes:
+      - type: bind
+        source: ${CIRCULAR_EXECUTION_HOST_ROOT:-${PWD}/.circular}/secrets
+        target: /var/lib/circular/secrets
+        read_only: true
       - type: bind
         source: ${CIRCULAR_EXECUTION_HOST_ROOT:-${PWD}/.circular}/artifacts
         target: /var/lib/circular/artifacts
         read_only: true
+      - type: bind
+        source: ${CIRCULAR_EXECUTION_HOST_ROOT:-${PWD}/.circular}/repositories
+        target: /var/lib/circular/repositories
+        read_only: true
     ports:
-      - "8000:8000"
+      - "${CIRCULAR_API_BIND_HOST:-127.0.0.1}:8000:8000"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
+  # Expose only this receiver through operator-managed public HTTPS ingress.
+  webhooks:
+    build:
+      context: .
+      dockerfile: infra/go.Dockerfile
+      target: webhooks
+    ports:
+      - "127.0.0.1:8001:8001"
+    environment:
+      DATABASE_URL: postgresql://circular:circular@postgres:5432/circular
+      CIRCULAR_INTEGRATIONS_ENCRYPTION_KEY: ${CIRCULAR_INTEGRATIONS_ENCRYPTION_KEY:-}
+      CIRCULAR_GITHUB_CLIENT_ID: ${CIRCULAR_GITHUB_CLIENT_ID:-}
+      CIRCULAR_GITHUB_CLIENT_SECRET: ${CIRCULAR_GITHUB_CLIENT_SECRET:-}
+      CIRCULAR_LINEAR_CLIENT_ID: ${CIRCULAR_LINEAR_CLIENT_ID:-}
+      CIRCULAR_LINEAR_CLIENT_SECRET: ${CIRCULAR_LINEAR_CLIENT_SECRET:-}
+    read_only: true
+    cap_drop: ["ALL"]
+    security_opt: ["no-new-privileges:true"]
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -57,11 +97,24 @@ services:
       CIRCULAR_FAKE_DELAY_SECONDS: ${CIRCULAR_FAKE_DELAY_SECONDS:-0.05}
       CIRCULAR_REPOSITORY_CACHE_ROOT: /var/lib/circular/repositories
       CIRCULAR_WORKTREE_ROOT: /var/lib/circular/worktrees
+      CIRCULAR_REVIEW_CONTEXT_ROOT: /var/lib/circular/review-contexts
+      CIRCULAR_DOCKER_REVIEW_CONTEXT_ROOT: ${CIRCULAR_DOCKER_REVIEW_CONTEXT_ROOT:-${CIRCULAR_EXECUTION_HOST_ROOT:-${PWD}/.circular}/review-contexts}
       CIRCULAR_ARTIFACT_ROOT: /var/lib/circular/artifacts
       CIRCULAR_DOCKER_WORKTREE_ROOT: ${CIRCULAR_DOCKER_WORKTREE_ROOT:-${CIRCULAR_EXECUTION_HOST_ROOT:-${PWD}/.circular}/worktrees}
       CIRCULAR_RUNNER_IMAGE: ${CIRCULAR_RUNNER_IMAGE:-circular-runner:dev}
       CIRCULAR_RUNNER_CPU_LIMIT: ${CIRCULAR_RUNNER_CPU_LIMIT:-1}
       CIRCULAR_RUNNER_MEMORY_LIMIT_MB: ${CIRCULAR_RUNNER_MEMORY_LIMIT_MB:-2048}
+      CIRCULAR_CODEX_ENABLED: ${CIRCULAR_CODEX_ENABLED:-false}
+      CIRCULAR_CODEX_IMAGE: ${CIRCULAR_CODEX_IMAGE:-circular-codex-runner:dev}
+      CIRCULAR_CODEX_AUTH_MODE: ${CIRCULAR_CODEX_AUTH_MODE:-chatgpt}
+      CIRCULAR_CODEX_AUTH_ROOT: /var/lib/circular/codex-auth
+      CIRCULAR_DOCKER_CODEX_AUTH_ROOT: ${CIRCULAR_DOCKER_CODEX_AUTH_ROOT:-${CIRCULAR_EXECUTION_HOST_ROOT:-${PWD}/.circular}/codex-auth}
+      CIRCULAR_CODEX_API_KEY: ${CIRCULAR_CODEX_API_KEY:-}
+      # Integration secrets stay in trusted services; Run containers do not inherit them.
+      CIRCULAR_INTEGRATIONS_ENCRYPTION_KEY: ${CIRCULAR_INTEGRATIONS_ENCRYPTION_KEY:-}
+      CIRCULAR_GITHUB_CLIENT_ID: ${CIRCULAR_GITHUB_CLIENT_ID:-}
+      CIRCULAR_GITHUB_CLIENT_SECRET: ${CIRCULAR_GITHUB_CLIENT_SECRET:-}
+      CIRCULAR_GITHUB_PRIVATE_KEY_FILE: ${CIRCULAR_GITHUB_PRIVATE_KEY_FILE:-}
     volumes:
       # The worker is trusted infrastructure. Run containers never receive this mount.
       - /var/run/docker.sock:/var/run/docker.sock
@@ -73,6 +126,19 @@ services:
         condition: service_completed_successfully
       runner-image:
         condition: service_completed_successfully
+
+  # Launched on demand by an external MCP client, not a background service.
+  mcp:
+    profiles: ["mcp"]
+    build:
+      context: .
+      dockerfile: infra/go.Dockerfile
+      target: mcp
+    command: ["--api-url", "http://api:8000", "--web-url", "${CIRCULAR_WEB_URL:-http://localhost:5173}"]
+    stdin_open: true
+    read_only: true
+    cap_drop: ["ALL"]
+    security_opt: ["no-new-privileges:true"]
 
   runner-image:
     image: ${CIRCULAR_RUNNER_IMAGE:-circular-runner:dev}
@@ -86,7 +152,7 @@ services:
       context: .
       dockerfile: infra/web.Dockerfile
     environment:
-      VITE_API_URL: http://localhost:8000
+      VITE_API_URL: ${CIRCULAR_PUBLIC_API_URL:-http://localhost:8000}
     ports:
       - "5173:5173"
     depends_on:

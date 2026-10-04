@@ -15,20 +15,26 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/ruohao1/circular/contracts"
+	"github.com/ruohao1/circular/internal/agents"
 	"github.com/ruohao1/circular/internal/artifacts"
-	"github.com/ruohao1/circular/internal/runstate"
+	"github.com/ruohao1/circular/internal/backends"
+	"github.com/ruohao1/circular/internal/integrations"
+	"github.com/ruohao1/circular/internal/postgres"
 )
 
 type Config struct {
-	ArtifactRoot    string
-	CORSOrigins     []string
-	SSEPollInterval time.Duration
+	ArtifactRoot        string
+	RepositoryCacheRoot string
+	CORSOrigins         []string
+	SSEPollInterval     time.Duration
+	Integrations        integrations.Config
 }
 
 type api struct {
-	pool    *pgxpool.Pool
-	content *artifacts.LocalStore
-	config  Config
+	pool         *pgxpool.Pool
+	content      *artifacts.LocalStore
+	config       Config
+	integrations *integrations.Service
 }
 
 // New constructs the public HTTP handler without connecting or allocating files.
@@ -47,7 +53,11 @@ func New(pool *pgxpool.Pool, config Config) (http.Handler, error) {
 		return nil, errors.New("SSE poll interval must be positive")
 	}
 	config.CORSOrigins = append([]string(nil), config.CORSOrigins...)
-	a := &api{pool: pool, content: content, config: config}
+	connections, err := integrations.New(pool, integrationConfig(config))
+	if err != nil {
+		return nil, err
+	}
+	a := &api{pool: pool, content: content, config: config, integrations: connections}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /openapi.json", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -61,13 +71,25 @@ func New(pool *pgxpool.Pool, config Config) (http.Handler, error) {
 		mux.HandleFunc("GET /api/v1/"+resource.table, func(w http.ResponseWriter, r *http.Request) { a.list(w, r, resource.table, resource.schema+"Read") })
 	}
 	mux.HandleFunc("POST /api/v1/runs", a.createRun)
+	mux.HandleFunc("GET /api/v1/backends/codex/models", codexModels)
+	mux.HandleFunc("PATCH /api/v1/agents/{agent_id}", a.updateAgent)
+	mux.HandleFunc("POST /api/v1/projects/{project_id}/discovery", a.createDiscoveryTask)
+	mux.HandleFunc("GET /api/v1/tasks/{task_id}", a.task)
+	a.integrationRoutes(mux)
 	mux.HandleFunc("GET /api/v1/runs", func(w http.ResponseWriter, r *http.Request) { a.list(w, r, "runs", "RunRead") })
 	mux.HandleFunc("GET /api/v1/runs/{run_id}", a.run)
 	mux.HandleFunc("POST /api/v1/runs/{run_id}/cancel", a.cancel)
 	mux.HandleFunc("GET /api/v1/runs/{run_id}/execution", a.execution)
+	mux.HandleFunc("GET /api/v1/runs/{run_id}/agent-proposals", a.agentProposals)
+	mux.HandleFunc("POST /api/v1/runs/{run_id}/agent-proposals", a.saveAgentProposal)
+	mux.HandleFunc("POST /api/v1/runs/{run_id}/agent-proposals/{proposal_id}/create", a.createProposedAgent)
+	mux.HandleFunc("POST /api/v1/runs/{run_id}/agent-proposals/{proposal_id}/dismiss", a.dismissAgentProposal)
 	mux.HandleFunc("GET /api/v1/runs/{run_id}/events", a.events)
 	mux.HandleFunc("GET /api/v1/runs/{run_id}/events/stream", a.stream)
 	mux.HandleFunc("GET /api/v1/runs/{run_id}/artifacts/{artifact_id}/content", a.artifact)
+	if err := a.mcpRoutes(mux); err != nil {
+		return nil, fmt.Errorf("initialize MCP: %w", err)
+	}
 	return a.cors(mux), nil
 }
 
@@ -166,9 +188,16 @@ func (a *api) create(w http.ResponseWriter, r *http.Request, table, schema strin
 		}
 	}
 	if table == "agents" {
-		if values["backend"] != "fake" {
-			problem(w, 422, "only the fake backend is available")
+		if values["backend"] != "fake" && values["backend"] != "codex" {
+			problem(w, 422, "supported backends are fake and codex")
 			return
+		}
+		if values["backend"] == "codex" {
+			config, _ := json.Marshal(values["backend_config"])
+			if _, err := backends.ValidateCodexConfig(config); err != nil {
+				problem(w, 422, err.Error())
+				return
+			}
 		}
 		values["enabled"] = true
 	}
@@ -190,6 +219,18 @@ func (a *api) create(w http.ResponseWriter, r *http.Request, table, schema strin
 	if dbError(w, err, schema) {
 		return
 	}
+	if table == "projects" {
+		if _, err := agents.EnsureDiscovery(ctx, tx, values["id"].(string)); dbError(w, err, "discovery agent") {
+			return
+		}
+		reviewer, err := agents.EnsureReviewer(ctx, tx, values["id"].(string))
+		if dbError(w, err, "PR reviewer") {
+			return
+		}
+		if _, err = tx.Exec(ctx, `INSERT INTO pr_review_settings(project_id,reviewer_id) VALUES($1,$2) ON CONFLICT(project_id) DO NOTHING`, values["id"], reviewer); dbError(w, err, "PR review settings") {
+			return
+		}
+	}
 	if dbError(w, tx.Commit(ctx), schema) {
 		return
 	}
@@ -201,47 +242,43 @@ func (a *api) createRun(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	if key, supplied := values["request_key"].(string); supplied {
+		key = strings.TrimSpace(key)
+		if key == "" {
+			problem(w, 422, "request_key must not be blank")
+			return
+		}
+		values["request_key"] = key
+	}
 	ctx := r.Context()
 	tx, err := a.pool.Begin(ctx)
 	if dbError(w, err, "run") {
 		return
 	}
 	defer rollback(ctx, tx)
-	var project, agentProject uuid.UUID
-	var backend string
-	var enabled bool
-	err = tx.QueryRow(ctx, "SELECT project_id FROM tasks WHERE id=$1 FOR UPDATE", values["task_id"]).Scan(&project)
-	if dbError(w, err, "task") {
+	refs, _ := json.Marshal(values["external_refs"])
+	key, _ := values["request_key"].(string)
+	launch, err := postgres.CreateRun(ctx, tx, postgres.RunLaunchInput{TaskID: uuid.MustParse(values["task_id"].(string)), AgentID: uuid.MustParse(values["agent_id"].(string)), RequestKey: key, ExternalRefs: refs})
+	if errors.Is(err, postgres.ErrRunLaunchConflict) {
+		problem(w, 409, err.Error())
 		return
 	}
-	err = tx.QueryRow(ctx, "SELECT project_id,backend,enabled FROM agents WHERE id=$1", values["agent_id"]).Scan(&agentProject, &backend, &enabled)
-	if dbError(w, err, "agent") {
+	if errors.Is(err, postgres.ErrRunLaunchInput) {
+		problem(w, 422, strings.TrimPrefix(err.Error(), postgres.ErrRunLaunchInput.Error()+": "))
 		return
 	}
-	if project != agentProject {
-		problem(w, 422, "task and agent belong to different projects")
-		return
-	}
-	if !enabled {
-		problem(w, 422, "agent is disabled")
-		return
-	}
-	var attempt int
-	err = tx.QueryRow(ctx, "SELECT COALESCE(MAX(attempt),0)+1 FROM runs WHERE task_id=$1", values["task_id"]).Scan(&attempt)
 	if dbError(w, err, "run") {
 		return
 	}
-	values["attempt"] = attempt
-	values["backend"] = backend
-	values["status"] = "queued"
-	result, err := insert(ctx, tx, "runs", "RunRead", values)
-	if dbError(w, err, "run") {
+	result, err := record(ctx, tx, "runs", "RunRead", "WHERE t.id=$1", launch.RunID)
+	if dbError(w, err, "run") || dbError(w, tx.Commit(ctx), "run") {
 		return
 	}
-	if dbError(w, tx.Commit(ctx), "run") {
-		return
+	status := 200
+	if launch.Created {
+		status = 201
 	}
-	respond(w, 201, result)
+	respond(w, status, result)
 }
 
 func (a *api) list(w http.ResponseWriter, r *http.Request, table, schema string) {
@@ -294,25 +331,15 @@ func (a *api) cancel(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer rollback(ctx, tx)
-	var current runstate.Status
-	err = tx.QueryRow(ctx, "SELECT status FROM runs WHERE id=$1 FOR UPDATE", id).Scan(&current)
+	err = postgres.CancelRun(ctx, tx, id, "api")
+	if errors.Is(err, postgres.ErrRunCancelConflict) {
+		problem(w, 409, err.Error())
+		return
+	}
 	if dbError(w, err, "run") {
 		return
 	}
-	if current != runstate.Cancelled {
-		if runstate.Validate(current, runstate.Cancelled) != nil {
-			problem(w, 409, "run cannot transition from "+string(current)+" to cancelled")
-			return
-		}
-		_, err = tx.Exec(ctx, "UPDATE runs SET status='cancelled',finished_at=$2,updated_at=$2 WHERE id=$1", id, time.Now().UTC())
-		if dbError(w, err, "run") {
-			return
-		}
-		_, err = tx.Exec(ctx, `INSERT INTO events(id,run_id,sequence,type,source,data,occurred_at) SELECT $1,$2,COALESCE(MAX(sequence),0)+1,'run.cancelled','api','{}'::json,$3 FROM events WHERE run_id=$2`, uuid.New(), id, time.Now().UTC())
-		if dbError(w, err, "run") {
-			return
-		}
-	}
+
 	data, err := record(ctx, tx, "runs", "RunRead", "WHERE t.id=$1", id)
 	if dbError(w, err, "run") {
 		return
@@ -368,10 +395,14 @@ func (a *api) execution(w http.ResponseWriter, r *http.Request) {
 		dbError(w, err, "usage")
 		return
 	}
+	var reviewID *uuid.UUID
+	if err := tx.QueryRow(ctx, `SELECT (SELECT id FROM pr_reviews WHERE run_id=$1)`, id).Scan(&reviewID); dbError(w, err, "PR review") {
+		return
+	}
 	if dbError(w, tx.Commit(ctx), "run") {
 		return
 	}
-	respond(w, 200, map[string]any{"run": run, "task": task, "agent": agent, "workspace": workspace, "artifacts": retained, "usage": usage, "last_event_sequence": last})
+	respond(w, 200, map[string]any{"pr_review_id": reviewID, "run": run, "task": task, "agent": agent, "workspace": workspace, "artifacts": retained, "usage": usage, "last_event_sequence": last})
 }
 
 func integerQuery(w http.ResponseWriter, r *http.Request, name string, fallback, min, max int64) (int64, bool) {

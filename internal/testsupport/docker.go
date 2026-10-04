@@ -219,12 +219,18 @@ func simulateDocker(state, config string, args []string, options map[string]any)
 				reported = strings.Repeat("b", 64)
 				labels = map[string]string{}
 			}
-			mount := map[string]string{}
-			for _, part := range strings.Split(option(argv, "--mount", "type=bind,src=/missing,dst=/workspace"), ",") {
-				key, value, _ := strings.Cut(part, "=")
-				mount[key] = value
+			mounts := []map[string]any{}
+			for index, arg := range argv {
+				if arg != "--mount" || index+1 >= len(argv) {
+					continue
+				}
+				mount := map[string]string{}
+				for _, part := range strings.Split(argv[index+1], ",") {
+					key, value, _ := strings.Cut(part, "=")
+					mount[key] = value
+				}
+				mounts = append(mounts, map[string]any{"Type": mount["type"], "Source": mount["src"], "Destination": mount["dst"], "RW": func() bool { _, readOnly := mount["readonly"]; return !readOnly }()})
 			}
-			mounts := []map[string]any{{"Type": mount["type"], "Source": mount["src"], "Destination": mount["dst"], "RW": true}}
 			if flag("unexpected_mount") {
 				mounts = append(mounts, map[string]any{"Type": "volume", "Source": "unexpected", "Destination": "/image-volume", "RW": true})
 			}
@@ -232,7 +238,52 @@ func simulateDocker(state, config string, args []string, options map[string]any)
 			memory, _ := strconv.ParseInt(strings.TrimSuffix(option(argv, "--memory", "0m"), "m"), 10, 64)
 			settings := map[string]any{"Labels": labels, "User": option(argv, "--user", ""), "WorkingDir": option(argv, "--workdir", "")}
 			host := map[string]any{"NetworkMode": option(argv, "--network", "default"), "ReadonlyRootfs": slices.Contains(argv, "--read-only"), "CapDrop": []string{option(argv, "--cap-drop", "")}, "SecurityOpt": []string{option(argv, "--security-opt", "")}, "NanoCpus": int64(cpus * 1e9), "Memory": memory * 1024 * 1024, "RestartPolicy": map[string]any{"Name": option(argv, "--restart", ""), "MaximumRetryCount": 0}}
+			tmpfs := map[string]any{}
+			for index, arg := range argv {
+				if arg == "--tmpfs" && index+1 < len(argv) {
+					destination, options, _ := strings.Cut(argv[index+1], ":")
+					tmpfs[destination] = options
+				}
+			}
+			host["Tmpfs"] = tmpfs
 			switch text("policy_mismatch") {
+			case "credential_missing":
+				mounts = mounts[:1]
+			case "credential_type":
+				mounts[1]["Type"] = "volume"
+			case "credential_source":
+				mounts[1]["Source"] = "/different"
+			case "credential_destination":
+				mounts[1]["Destination"] = "/different"
+			case "credential_rw":
+				mounts[1]["RW"] = false
+			case "credential_duplicate":
+				mounts = append(mounts, mounts[1])
+			case "workspace_missing":
+				mounts = mounts[1:]
+			case "credential_unrequested":
+				mounts = append(mounts, map[string]any{"Type": "bind", "Source": "/unexpected", "Destination": "/codex-auth", "RW": true})
+			case "host_missing":
+				host = nil
+			case "tmpfs_missing":
+				delete(host, "Tmpfs")
+			case "tmpfs_extra":
+				tmpfs["/other"] = "rw,nosuid,nodev,exec,size=1m,mode=1777"
+			case "tmpfs_destination":
+				tmpfs["/other"] = tmpfs["/tmp"]
+				delete(tmpfs, "/tmp")
+			case "tmpfs_options":
+				tmpfs["/tmp"] = "rw,suid,dev,exec,size=64m,mode=1777"
+			case "tmpfs_unbounded":
+				tmpfs["/tmp"] = "rw,nosuid,nodev,exec,mode=1777"
+			case "tmpfs_size":
+				tmpfs["/tmp"] = "rw,nosuid,nodev,exec,size=32m,mode=1777"
+			case "tmpfs_exceeds_memory":
+				tmpfs["/tmp"] = "rw,nosuid,nodev,exec,size=999999m,mode=1777"
+			case "tmpfs_type":
+				host["Tmpfs"] = []string{"/tmp"}
+			case "tmpfs_mount":
+				mounts = append(mounts, map[string]any{"Type": "tmpfs", "Source": "", "Destination": "/other", "RW": true})
 			case "mount_type":
 				mounts[0]["Type"] = "volume"
 			case "mount_source":
@@ -240,7 +291,7 @@ func simulateDocker(state, config string, args []string, options map[string]any)
 			case "mount_destination":
 				mounts[0]["Destination"] = "/different"
 			case "mount_rw":
-				mounts[0]["RW"] = false
+				mounts[0]["RW"] = !mounts[0]["RW"].(bool)
 			case "network":
 				host["NetworkMode"] = "bridge"
 			case "read_only":
@@ -265,6 +316,9 @@ func simulateDocker(state, config string, args []string, options map[string]any)
 				labels["org.opencontainers.image.source"] = "image"
 			case "extra_circular_label":
 				labels["io.circular.unexpected"] = "unsafe"
+			}
+			if flag("reverse_mounts") {
+				slices.Reverse(mounts)
 			}
 			fmt.Println(dump([]any{map[string]any{"Id": reported, "Name": "/" + option(argv, "--name", "missing"), "Mounts": mounts, "Config": settings, "HostConfig": host}}))
 		}
