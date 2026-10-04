@@ -116,6 +116,12 @@ func TestPrepareReviewContextRejectsCorruptOriginalEvidence(t *testing.T) {
 			if err != nil || saved.RunID != value.RunID || saved.MergeBaseSHA != base {
 				t.Fatal(saved, err)
 			}
+			metadata := filepath.Join(s.config.ReviewContextRoot, review.RunID.String(), "git")
+			probe := exec.CommandContext(t.Context(), "git", "--git-dir="+metadata, "rev-parse", "HEAD")
+			output, err := probe.CombinedOutput()
+			if err != nil || strings.TrimSpace(string(output)) != head {
+				t.Fatalf("review Git metadata cannot identify captured HEAD: %v %s", err, output)
+			}
 		})
 	}
 }

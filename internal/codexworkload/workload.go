@@ -148,6 +148,18 @@ func executeRun(ctx context.Context, value request, stdout, stderr io.Writer, pr
 		if value.reviewContext == nil {
 			return diagnostic(stderr, "PR review input could not be verified", 2)
 		}
+		// The host worktree's .git pointer is deliberately inaccessible. Use the
+		// self-contained, read-only metadata in this Run's trusted context, both
+		// for Codex itself and for its explicitly scoped shell environment.
+		for _, setting := range [][2]string{
+			{"GIT_DIR", filepath.Join(value.contextDirectory, "git")},
+			{"GIT_WORK_TREE", "/workspace"},
+			{"GIT_OPTIONAL_LOCKS", "0"},
+			{"GIT_NO_REPLACE_OBJECTS", "1"},
+		} {
+			environment = append(environment, setting[0]+"="+setting[1])
+			shellEnvironment = strings.TrimSuffix(shellEnvironment, "}") + "," + setting[0] + "=" + strconv.Quote(setting[1]) + "}"
+		}
 		spool, err := prreviews.NewSpool(proposalDir, *value.reviewContext)
 		if err != nil {
 			return diagnostic(stderr, "cannot prepare Circular review tools", 1)

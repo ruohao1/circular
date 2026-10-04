@@ -81,7 +81,11 @@ func (s *Supervisor) preparePRReviewContext(ctx context.Context, inputs postgres
 		if err := operation.Err(); err != nil {
 			return err
 		}
-		if err := prreviews.WriteContext(filepath.Join(s.config.ReviewContextRoot, inputs.RunID.String()), value, source.Diff); err != nil {
+		directory := filepath.Join(s.config.ReviewContextRoot, inputs.RunID.String())
+		if err := prreviews.WriteContext(directory, value, source.Diff); err != nil {
+			return err
+		}
+		if err := s.retention.git.PreparePRReviewGit(operation, directory); err != nil {
 			return err
 		}
 		return r.PersistReviewContext(value, digest)
