@@ -77,6 +77,38 @@ func reviewContextFixture(t *testing.T) (string, string) {
 	digest, _ := prreviews.Fingerprint(value)
 	return path, digest
 }
+
+func TestReviewShellReceivesOnlyPrivateGitMetadata(t *testing.T) {
+	path, digest := reviewContextFixture(t)
+	t.Setenv("GIT_DIR", "/must-not-inherit")
+	t.Setenv("GIT_WORK_TREE", "/must-not-inherit")
+	input, _ := json.Marshal(map[string]any{"protocol_version": 1, "prompt": "inspect-review-environment", "purpose": "pr_review", "review_context_sha256": digest, "api_key": "fixture-api-key"})
+	var out, diagnostics bytes.Buffer
+	if code := runAtContext(t.Context(), bytes.NewReader(input), &out, &diagnostics, program(t), "", path); code != 0 {
+		t.Fatal(code, diagnostics.String())
+	}
+	var got inspection
+	if err := json.Unmarshal(bytes.TrimSpace(out.Bytes()), &got); err != nil {
+		t.Fatal(err, out.String())
+	}
+	for name, want := range map[string]string{
+		"GIT_DIR": filepath.Join(path, "git"), "GIT_WORK_TREE": "/workspace", "GIT_OPTIONAL_LOCKS": "0", "GIT_NO_REPLACE_OBJECTS": "1",
+	} {
+		if !contains(got.Environment, name+"="+want) {
+			t.Fatalf("review CLI missing %s", name)
+		}
+		found := false
+		for _, arg := range got.Args {
+			if strings.HasPrefix(arg, "shell_environment_policy.set=") && strings.Contains(arg, name+"="+fmt.Sprintf("%q", want)) {
+				found = true
+			}
+		}
+		if !found {
+			t.Fatalf("review shell missing %s", name)
+		}
+	}
+}
+
 func TestReviewWorkloadPrivateToolContextBindingAndFailedExit(t *testing.T) {
 	path, digest := reviewContextFixture(t)
 	auth := privateAuthDirectory(t)

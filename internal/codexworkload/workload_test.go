@@ -33,6 +33,13 @@ type inspection struct {
 // The current Go test binary acts as an external CLI without introducing a
 // configurable production command or passing test controls in the environment.
 func TestMain(m *testing.M) {
+	if len(os.Args) == 2 && os.Args[1] == "review-git-container" {
+		program, err := os.Executable()
+		if err != nil {
+			os.Exit(91)
+		}
+		os.Exit(runAtContext(context.Background(), os.Stdin, os.Stdout, os.Stderr, program, "", "/review-context"))
+	}
 	if len(os.Args) == 4 && os.Args[1] == "mcp-review" {
 		if err := agenttools.RunReview(context.Background(), os.Args[2], os.Args[3]); err != nil {
 			os.Exit(91)
@@ -59,6 +66,8 @@ func helper() int {
 		return 90
 	}
 	switch string(prompt) {
+	case "review-git-probe":
+		return reviewGitProbe()
 	case "review-report", "review-fail", "review-missing", "review-wait":
 		return reviewHelper(string(prompt))
 	case "propose-agent":

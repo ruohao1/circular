@@ -16,6 +16,8 @@ This starts an additional agent run. The reviewer must be a different agent from
 
 Each review names the exact commits it examined. Its report includes a summary, findings with file and line links, checks, and limitations. The source files stay read-only during a review.
 
+The reviewer can use Git to verify the captured commit, check the source status, and compare the PR against its merge base. Each review receives its own read-only Git metadata for the captured commits and their ancestry. The shared repository cache and provider credentials stay outside the review container.
+
 ## Understand the result
 
 | Result                      | Meaning                                                                                                                                |
