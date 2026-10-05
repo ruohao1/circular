@@ -45,6 +45,67 @@ diff colors share the `success`, `warning`, `destructive`, and `primary` tokens.
 The [brand guide](../brand.md) defines the approved Orbit mark, palette, and
 typography, and records the remaining palette alignment with the existing theme.
 
+## Shared console shell and launcher
+
+Keep the console shell shared across Overview, Runs, Requests, and Setup, with a
+desktop sidebar, an accessible mobile navigation dialog, and one visible Project
+picker in the header. Docs retains its independent layout. **New Task** opens the
+shell's single Radix launch dialog. Show the captured Project as fixed text inside
+the dialog, with Repository and enabled Agent choices scoped to that Project.
+
+Project selection locks have independent owners and clean up on unmount. Setup
+saves, request actions, unresolved detail scope, and the open launcher must hold
+their own locks. Programmatic alignment for a loaded Run, assigned request, or
+imported Task can still select its actual Project. A user Project change from an
+assigned detail returns to Overview; an unassigned request stays open and resets
+its routing destination.
+
+Keep launch drafts in the provider above dialog visibility, keyed by Project and
+imported Task identity. Closing the dialog preserves its draft. When Task creation
+succeeds but Run creation fails, retain the saved Task and Agent for **Retry
+starting Run**, with the saved inputs locked. Imported and discovery links open
+automatically and retain read-only Task fields. Opening a dialog never starts a
+Run. Preserve the explicit **Start Run** action and existing `launch.ts` semantics.
+
+Dialogs need titles, descriptions, contained keyboard focus, and focus restoration
+to their opener or an appropriate header control for automatic opening. Prevent
+submission and dismissal while a launch request is pending; otherwise support
+Escape and Close. Long names and fields must fit at 390 px and 1440 px without
+page-level horizontal overflow.
+
+## Run queue and Overview sections
+
+Overview at `/` composes bounded Active Runs, Recent failures, Project request
+attention, and a separately labeled **Unrouted requests · all Projects** section.
+The unrouted section is installation-wide and remains available without a
+selected Project. Attention includes only requests needing routing, approval, or
+access; rows link to the existing request review page. Keep loading, initial error,
+empty, and stale-refresh states independent for each section.
+
+The Run queue at `/runs` shares its rows with Overview. Lead with the Task title,
+then show the Agent, Repository or **No Repository**, textual Run status,
+execution duration, creation time, and secondary Run ID/attempt. Keep the PR review
+kind label. Every attempt has its own row and a real Run link supporting keyboard
+navigation and opening in another tab. Duration starts at `started_at`; show
+**Not started** before execution begins. A table can scroll within its own surface.
+
+Queue queries include Project, group, Task-title search, cursor, and limit in their
+keys. Use the summary response directly without per-row Task or Agent fetches.
+Never use another Project's data as a placeholder. Newest All/Active pages refresh
+every two seconds; Failed/Finished pages and request attention refresh every
+15 seconds, only while the document is visible. Older pages do not poll. Preserve
+the current query's last data after a background error with a stale/retry notice;
+an initial error must not look like an empty result.
+
+Keep `group`, `q`, and `cursor` in the Run queue URL. Search matches literal,
+case-insensitive Task-title substrings; debounce typing by 250 ms and replace
+history during typing. Deliberate filter/page changes create history entries.
+Clear the cursor before querying a changed Project, filter, or search. A Run's
+success status describes execution, not Task acceptance. Task boards, timelines,
+and a redesigned Run review are outside this console foundation.
+
+## Verification
+
 After frontend changes, run the frontend checks and browser scenarios described
 in the README. Browser coverage includes launch, completion, cancellation,
 failure, replay, downloads, keyboard tab navigation, and mobile overflow checks.

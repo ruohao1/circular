@@ -266,7 +266,7 @@ test("connect providers, import resources, launch an existing Task, and reconnec
     await expect(page).toHaveURL(/\/\?taskId=[0-9a-f-]+$/);
     const taskId = new URL(page.url()).searchParams.get("taskId")!;
     await expect(
-      page.getByRole("heading", { name: "Imported task", exact: true }),
+      page.getByRole("heading", { name: "Imported Task", exact: true }),
     ).toBeVisible();
     await expect(page.getByLabel("Task title", { exact: true })).toHaveValue(
       "Imported integration task",

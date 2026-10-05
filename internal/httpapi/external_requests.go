@@ -99,7 +99,11 @@ func (a *api) externalRequests(w http.ResponseWriter, r *http.Request) {
 		invalid(w, "query", "unrouted", "bool_type", "Use unrouted=true")
 		return
 	}
-	out, e := a.integrations.ExternalRequests(r.Context(), integrations.RequestListQuery{ProjectID: q.Get("project_id"), Unrouted: q.Get("unrouted") == "true", Cursor: q.Get("cursor"), Limit: limit})
+	if attention := q.Get("attention"); attention != "" && attention != "true" && attention != "false" {
+		invalid(w, "query", "attention", "bool_type", "Use attention=true or attention=false")
+		return
+	}
+	out, e := a.integrations.ExternalRequests(r.Context(), integrations.RequestListQuery{ProjectID: q.Get("project_id"), Unrouted: q.Get("unrouted") == "true", Attention: q.Get("attention") == "true", Cursor: q.Get("cursor"), Limit: limit})
 	if !integrationError(w, e) {
 		respond(w, 200, out)
 	}

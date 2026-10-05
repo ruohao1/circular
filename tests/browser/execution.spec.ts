@@ -64,6 +64,7 @@ for (const scenario of ["success", "cancel", "failure"] as const) {
       await page
         .getByRole("option", { name: project.name, exact: true })
         .click();
+      await page.getByRole("button", { name: "New Task", exact: true }).click();
       for (const [label, selected] of [
         ["Repository", "Example repository"],
         ["Agent", "Implementation engineer · fake"],

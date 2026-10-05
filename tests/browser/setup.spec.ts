@@ -275,7 +275,7 @@ test("empty launcher leads to setup with accessible mobile navigation", async ({
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto("/");
   await expect(
-    page.getByText("No projects yet", { exact: true }),
+    page.getByRole("heading", { name: "No Projects yet", exact: true }),
   ).toBeVisible();
   await page.getByRole("link", { name: "Open setup" }).click();
   await expect(
@@ -301,6 +301,9 @@ test("empty launcher leads to setup with accessible mobile navigation", async ({
   expect(
     await page.evaluate(() => document.documentElement.scrollWidth),
   ).toBeLessThanOrEqual(390);
+  await page
+    .getByRole("button", { name: "Open navigation", exact: true })
+    .click();
   await page
     .getByRole("navigation", { name: "Workspace" })
     .getByRole("link", { name: "Runs", exact: true })
@@ -506,6 +509,7 @@ test("configure resources in setup, recover from errors, and launch the first Ru
     await expect(
       page.getByRole("combobox", { name: "Project", exact: true }),
     ).toContainText(projectName);
+    await page.getByRole("button", { name: "New Task", exact: true }).click();
     await expect(
       page.getByRole("combobox", { name: "Repository", exact: true }),
     ).toContainText("Setup repository");
@@ -552,14 +556,15 @@ test("configure resources in setup, recover from errors, and launch the first Ru
       .getByRole("navigation", { name: "Workspace" })
       .getByRole("link", { name: "Runs", exact: true })
       .click();
+    await page.getByRole("button", { name: "New Task", exact: true }).click();
     await expect(
-      page.getByRole("link", { name: "Add repository", exact: true }),
+      page.getByRole("button", { name: "Add repository", exact: true }),
     ).toBeVisible();
     await expect(
       page.getByRole("button", { name: "Start Run", exact: true }),
     ).toBeDisabled();
     await page
-      .getByRole("link", { name: "Add repository", exact: true })
+      .getByRole("button", { name: "Add repository", exact: true })
       .click();
     await expect(
       page.getByRole("tab", { name: "Repositories", exact: true }),

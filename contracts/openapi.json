@@ -3179,6 +3179,79 @@
             "maxLength": 64
           }
         }
+      },
+      "RunQueueGroup": {
+        "type": "string",
+        "enum": [
+          "all",
+          "active",
+          "failed",
+          "finished"
+        ]
+      },
+      "RunQueueRepository": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name"
+        ]
+      },
+      "RunQueueItem": {
+        "type": "object",
+        "properties": {
+          "run": {
+            "$ref": "#/components/schemas/RunRead"
+          },
+          "task_title": {
+            "type": "string"
+          },
+          "agent_name": {
+            "type": "string"
+          },
+          "repository": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RunQueueRepository"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "run",
+          "task_title",
+          "agent_name",
+          "repository"
+        ]
+      },
+      "RunQueuePage": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RunQueueItem"
+            }
+          },
+          "next_cursor": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "items",
+          "next_cursor"
+        ]
       }
     }
   },
@@ -8210,6 +8283,15 @@
               "maximum": 100,
               "default": 20
             }
+          },
+          {
+            "name": "attention",
+            "in": "query",
+            "schema": {
+              "type": "boolean",
+              "default": false
+            },
+            "description": "Only requests needing routing, approval, or access; applied before pagination."
           }
         ],
         "responses": {
@@ -8454,6 +8536,82 @@
                 "$ref": "#/components/schemas/IdentityDetach"
               }
             }
+          }
+        }
+      }
+    },
+    "/api/v1/projects/{project_id}/run-queue": {
+      "get": {
+        "operationId": "listProjectRunQueue",
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "group",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "all",
+                "active",
+                "failed",
+                "finished"
+              ],
+              "default": "all"
+            }
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "maxLength": 200,
+              "default": ""
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 50
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "maxLength": 2048,
+              "default": ""
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Named Run attempts in newest-first order",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunQueuePage"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Project not found"
+          },
+          "422": {
+            "description": "Invalid query or cursor"
           }
         }
       }
