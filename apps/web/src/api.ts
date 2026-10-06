@@ -18,6 +18,17 @@ export type AgentProposal = components["schemas"]["AgentProposalRead"];
 export type AgentProposalCreate = components["schemas"]["AgentProposalCreate"];
 export type CodexModelCatalog = components["schemas"]["CodexModelCatalog"];
 export type Run = components["schemas"]["RunRead"];
+export type RunQueueGroup = components["schemas"]["RunQueueGroup"];
+export type RunQueueItem = components["schemas"]["RunQueueItem"];
+export type RunQueuePage = components["schemas"]["RunQueuePage"];
+export type ExternalRequestPage = components["schemas"]["ExternalRequestPage"];
+export interface RunQueueQuery {
+  group?: RunQueueGroup;
+  q?: string;
+  cursor?: string;
+  limit?: number;
+}
+
 export type Execution = components["schemas"]["RunExecutionRead"];
 export type RunEvent = components["schemas"]["EventRead"];
 export type Artifact = components["schemas"]["ArtifactRead"];
@@ -119,9 +130,14 @@ export const api = {
       `${connectionsPath(project)}/linear/request-routes/${encodeURIComponent(id)}`,
       value,
     ),
-  externalRequests: (project: string, unrouted = false, cursor = "") =>
+  externalRequests: (
+    project: string,
+    unrouted = false,
+    cursor = "",
+    options: { attention?: boolean; limit?: number } = {},
+  ) =>
     request<Schema["ExternalRequestPage"]>(
-      `/external-requests?${new URLSearchParams({ ...(unrouted ? { unrouted: "true" } : { project_id: project }), cursor, limit: "20" })}`,
+      `/external-requests?${new URLSearchParams({ ...(unrouted ? { unrouted: "true" } : { project_id: project }), cursor, limit: String(options.limit ?? 20), ...(options.attention ? { attention: "true" } : {}) })}`,
     ),
   externalRequest: (id: string) =>
     request<ExternalRequestDetail>(
@@ -242,6 +258,10 @@ export const api = {
     request<Task>(`/projects/${encodeURIComponent(project)}/discovery`, {
       repository_id,
     }),
+  runQueue: (project: string, values: RunQueueQuery = {}) =>
+    request<RunQueuePage>(
+      `/projects/${encodeURIComponent(project)}/run-queue?${new URLSearchParams({ group: values.group ?? "all", q: values.q ?? "", cursor: values.cursor ?? "", limit: String(values.limit ?? 50) })}`,
+    ),
   runs: (project?: string) =>
     request<Run[]>(
       `/runs${project ? `?project_id=${encodeURIComponent(project)}` : ""}`,

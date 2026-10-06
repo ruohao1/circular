@@ -84,10 +84,12 @@ export function LinearRequestRouting({
     retry: false,
   });
   const upgrade = useMutation({
+    mutationKey: ["setup", project],
     mutationFn: () => api.connectLinearIdentity(project, "agent"),
     onSuccess: (auth) => window.location.assign(auth.authorization_url),
   });
   const save = useMutation({
+    mutationKey: ["setup", project],
     mutationFn: (value: {
       enabled: boolean;
       existing?: LinearRequestRoute;

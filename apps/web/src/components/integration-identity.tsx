@@ -44,6 +44,7 @@ export function IntegrationIdentity({
     await client.invalidateQueries({ queryKey: ["integration", project] });
   };
   const setup = useMutation({
+    mutationKey: ["setup", project],
     mutationFn: async () => {
       if (provider === "linear") {
         const auth = await api.connectLinearIdentity(project);
@@ -53,6 +54,7 @@ export function IntegrationIdentity({
     onSuccess: refresh,
   });
   const toggle = useMutation({
+    mutationKey: ["setup", project],
     mutationFn: () =>
       active
         ? api.detachIntegrationIdentity(project, provider)

@@ -51,7 +51,11 @@ import { IntegrationsPage, type ConnectionNotice } from "./integrations";
 import { MCPSetup } from "./mcp";
 
 export type SetupSection =
-  "projects" | "repositories" | "agents" | "integrations" | "mcp";
+  | "projects"
+  | "repositories"
+  | "agents"
+  | "integrations"
+  | "mcp";
 
 function DiscoverySetup({
   project,
@@ -496,7 +500,7 @@ function AgentForm({ project }: { project?: Project }) {
       submitLabel="Create agent"
       next={
         <Button variant="outline" asChild>
-          <Link to="/">
+          <Link to="/runs">
             Go to Runs <ArrowRight aria-hidden="true" />
           </Link>
         </Button>
@@ -585,7 +589,8 @@ export function SetupPage({
   onSectionChange: (section: SetupSection) => void;
   notice?: ConnectionNotice;
 }) {
-  const { projects, project, selectedProject, selectProject } = useProject();
+  const { projects, project, selectedProject, selectProject, selectionLocked } =
+    useProject();
   const saving = useIsMutating({ mutationKey: ["setup"] }) > 0;
   const repositories = useQuery({
     queryKey: ["repositories", selectedProject],
@@ -644,21 +649,6 @@ export function SetupPage({
               Connect your source code and choose who does the work.
             </p>
           </div>
-          <ResourceSelect
-            id="setup-project"
-            label="Project"
-            className="w-full md:w-64"
-            value={selectedProject}
-            onValueChange={selectProject}
-            options={(projects.data ?? []).map((item) => ({
-              value: item.id,
-              label: item.name,
-            }))}
-            disabled={saving}
-            placeholder={
-              projects.isPending ? "Loading projects…" : "No projects yet"
-            }
-          />
         </div>
         {projects.error && (
           <ErrorAlert>
@@ -711,7 +701,7 @@ export function SetupPage({
             </div>
             {ready ? (
               <Button asChild className="w-fit">
-                <Link to="/">
+                <Link to="/runs">
                   Go to Runs <ArrowRight aria-hidden="true" />
                 </Link>
               </Button>
@@ -822,7 +812,7 @@ export function SetupPage({
                     <Button
                       size="sm"
                       variant="outline"
-                      disabled={saving}
+                      disabled={saving || selectionLocked}
                       onClick={() => selectProject(item.id)}
                       aria-label={`Select ${item.name}`}
                     >

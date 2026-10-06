@@ -727,6 +727,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/projects/{project_id}/run-queue": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["listProjectRunQueue"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/repositories": {
         parameters: {
             query?: never;
@@ -1870,6 +1886,23 @@ export interface components {
             usage: components["schemas"]["UsageRead"];
             workspace: components["schemas"]["WorkspaceRead"] | null;
         };
+        /** @enum {string} */
+        RunQueueGroup: "all" | "active" | "failed" | "finished";
+        RunQueueItem: {
+            agent_name: string;
+            repository: components["schemas"]["RunQueueRepository"] | null;
+            run: components["schemas"]["RunRead"];
+            task_title: string;
+        };
+        RunQueuePage: {
+            items: components["schemas"]["RunQueueItem"][];
+            next_cursor: string;
+        };
+        RunQueueRepository: {
+            /** Format: uuid */
+            id: string;
+            name: string;
+        };
         /** RunRead */
         RunRead: {
             /**
@@ -2192,6 +2225,8 @@ export interface operations {
     listExternalRequests: {
         parameters: {
             query?: {
+                /** @description Only requests needing routing, approval, or access; applied before pagination. */
+                attention?: boolean;
                 cursor?: string;
                 limit?: number;
                 project_id?: string;
@@ -5214,6 +5249,47 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["IntegrationProblem"];
                 };
+            };
+        };
+    };
+    listProjectRunQueue: {
+        parameters: {
+            query?: {
+                cursor?: string;
+                group?: "all" | "active" | "failed" | "finished";
+                limit?: number;
+                q?: string;
+            };
+            header?: never;
+            path: {
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Named Run attempts in newest-first order */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RunQueuePage"];
+                };
+            };
+            /** @description Project not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Invalid query or cursor */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };

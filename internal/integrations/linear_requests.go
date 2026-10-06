@@ -54,6 +54,7 @@ type ExternalRequestDetail struct {
 type RequestListQuery struct {
 	ProjectID string
 	Unrouted  bool
+	Attention bool
 	Cursor    string
 	Limit     int
 }
@@ -325,7 +326,25 @@ func (s *Service) ExternalRequests(ctx context.Context, q RequestListQuery) (Req
 	if (q.ProjectID == "") == !q.Unrouted || q.ProjectID != "" && !validUUID(q.ProjectID) || (q.Cursor != "" && !validUUID(q.Cursor)) {
 		return out, ErrRequestInput
 	}
-	rows, e := s.pool.Query(ctx, `SELECT to_jsonb(r) FROM external_requests r WHERE (($1::text='' AND project_id IS NULL) OR project_id=NULLIF($1,'')::uuid) AND ($2::text='' OR (created_at,id)<(SELECT created_at,id FROM external_requests WHERE id=NULLIF($2,'')::uuid)) ORDER BY created_at DESC,id DESC LIMIT $3`, q.ProjectID, q.Cursor, q.Limit+1)
+	var afterTime *time.Time
+	var afterID *uuid.UUID
+	if q.Cursor != "" {
+		var created time.Time
+		var id uuid.UUID
+		err := s.pool.QueryRow(ctx, `SELECT created_at,id FROM external_requests WHERE id=$2 AND (($1::text='' AND project_id IS NULL) OR project_id=NULLIF($1,'')::uuid)`, q.ProjectID, q.Cursor).Scan(&created, &id)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return out, ErrRequestInput
+		}
+		if err != nil {
+			return out, err
+		}
+		afterTime, afterID = &created, &id
+	}
+	rows, e := s.pool.Query(ctx, `SELECT to_jsonb(r) FROM external_requests r
+      WHERE (($1::text='' AND project_id IS NULL) OR project_id=NULLIF($1,'')::uuid)
+      AND ($2::timestamptz IS NULL OR (created_at,id)<($2,$3::uuid))
+      AND (NOT $4::boolean OR status IN ('needs_routing','awaiting_approval','needs_access'))
+      ORDER BY created_at DESC,id DESC LIMIT $5`, q.ProjectID, afterTime, afterID, q.Attention, q.Limit+1)
 	if e != nil {
 		return out, e
 	}

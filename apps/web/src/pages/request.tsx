@@ -1,8 +1,8 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useParams } from "@tanstack/react-router";
 import { api } from "@/api";
-import { useProject } from "@/use-project";
+import { useProject, useProjectSelectionLock } from "@/use-project";
 import { requestStatus } from "@/components/external-request-list";
 import { Markdown } from "@/components/markdown";
 import { ResourceSelect } from "@/components/resource-select";
@@ -37,6 +37,12 @@ export function RequestPage() {
   });
   const q = query.data;
   const project = q?.project_id || selectedProject;
+  useEffect(() => {
+    if (q?.project_id) selectProject(q.project_id);
+  }, [q?.project_id, selectProject]);
+  useEffect(() => {
+    setRoute("");
+  }, [project, requestID]);
   const routes = useQuery({
     queryKey: ["linear-request-routes", project],
     queryFn: () => api.requestRoutes(project),
@@ -55,6 +61,7 @@ export function RequestPage() {
       await client.invalidateQueries({ queryKey: ["external-requests"] });
     },
   });
+  useProjectSelectionLock(query.isPending || act.isPending);
   if (!q)
     return (
       <div className="space-y-4">
@@ -83,6 +90,11 @@ export function RequestPage() {
         ← Incoming requests
       </Link>
       <div className="space-y-3">
+        {!q.project_id && (
+          <p className="text-xs text-muted-foreground">
+            Unassigned request · all Projects
+          </p>
+        )}
         <div className="flex flex-wrap items-center gap-3">
           <h1 className="min-w-0 break-words text-2xl font-semibold">
             {q.title || "Linear request"}
