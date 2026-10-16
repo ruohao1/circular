@@ -2,7 +2,7 @@ import { defineConfig } from "@playwright/test";
 
 export default defineConfig({
   testDir: "./tests/browser",
-  testMatch: "console.spec.ts",
+  testMatch: ["console.spec.ts", "delegation.spec.ts"],
   outputDir: "test-results/console",
   workers: 1,
   timeout: 30_000,

@@ -442,7 +442,8 @@
           "data": {
             "additionalProperties": true,
             "title": "Data",
-            "type": "object"
+            "type": "object",
+            "description": "Server-generated execution events include invocation (1 or 2). Historical events without invocation belong to invocation 1."
           },
           "id": {
             "format": "uuid",
@@ -490,7 +491,8 @@
           },
           "type": {
             "title": "Type",
-            "type": "string"
+            "type": "string",
+            "description": "Execution events include nonterminal delegation.requested, delegation.created, delegation.rejected, run.suspended, run.continued, and workspace.suspended. Only run.completed, run.failed, and run.cancelled terminate the event stream."
           }
         },
         "required": [
@@ -2270,6 +2272,23 @@
                 "type": "null"
               }
             ]
+          },
+          "delegation": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DelegationLinkRead"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "invocation": {
+            "enum": [
+              1,
+              2
+            ],
+            "type": "integer"
           }
         },
         "required": [
@@ -2415,6 +2434,14 @@
               }
             ],
             "title": "Worker Id"
+          },
+          "invocation": {
+            "default": 1,
+            "enum": [
+              1,
+              2
+            ],
+            "type": "integer"
           }
         },
         "required": [
@@ -3252,6 +3279,85 @@
           "items",
           "next_cursor"
         ]
+      },
+      "DelegationTargets": {
+        "additionalProperties": false,
+        "properties": {
+          "target_ids": {
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "maxItems": 100,
+            "type": "array",
+            "uniqueItems": true
+          }
+        },
+        "required": [
+          "target_ids"
+        ],
+        "type": "object"
+      },
+      "DelegationLinkRead": {
+        "properties": {
+          "child_run_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "child_task_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "parent_run_id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "request_key": {
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "waiting",
+              "continuing",
+              "completed",
+              "cancelled",
+              "rejected"
+            ],
+            "type": "string"
+          },
+          "target_agent_id": {
+            "format": "uuid",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "parent_run_id",
+          "target_agent_id",
+          "child_task_id",
+          "child_run_id",
+          "request_key",
+          "status"
+        ],
+        "type": "object"
       }
     }
   },
@@ -8614,6 +8720,84 @@
             "description": "Invalid query or cursor"
           }
         }
+      }
+    },
+    "/api/v1/agents/{agent_id}/delegation-targets": {
+      "get": {
+        "operationId": "get_delegation_targets",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "agent_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DelegationTargets"
+                }
+              }
+            },
+            "description": "Delegation targets"
+          },
+          "404": {
+            "description": "Agent not found"
+          },
+          "422": {
+            "description": "Invalid or out-of-scope targets"
+          }
+        },
+        "summary": "Read allowed delegation targets"
+      },
+      "put": {
+        "operationId": "put_delegation_targets",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "agent_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DelegationTargets"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DelegationTargets"
+                }
+              }
+            },
+            "description": "Delegation targets"
+          },
+          "404": {
+            "description": "Agent not found"
+          },
+          "422": {
+            "description": "Invalid or out-of-scope targets"
+          }
+        },
+        "summary": "Replace allowed delegation targets"
       }
     }
   }

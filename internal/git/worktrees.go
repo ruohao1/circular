@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -11,6 +12,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/ruohao1/circular/internal/artifacts"
 )
 
 var (
@@ -52,6 +54,18 @@ func (l *Local) validateRepository(ctx context.Context, worktree Worktree) error
 // a live path or existing branch. Run locks precede Repository locks; both use
 // Python-compatible flock files and remain held until rollback has settled.
 func (l *Local) Provision(ctx context.Context, runID uuid.UUID, repository, baseRef string) (worktree Worktree, result error) {
+	return l.provision(ctx, runID, repository, baseRef, nil)
+}
+
+// ProvisionDelegation hydrates verified raw bytes without checkout filters.
+func (l *Local) ProvisionDelegation(ctx context.Context, runID uuid.UUID, repository, commit string, archive io.Reader) (Worktree, error) {
+	if archive == nil || !commitPattern.MatchString(commit) {
+		return Worktree{}, ErrBase
+	}
+	return l.provision(ctx, runID, repository, commit, archive)
+}
+
+func (l *Local) provision(ctx context.Context, runID uuid.UUID, repository, baseRef string, archive io.Reader) (worktree Worktree, result error) {
 	target := filepath.Join(l.config.WorktreeRoot, runID.String())
 	worktree = Worktree{RunID: runID, RepositoryPath: repository, Path: target, Branch: "circular/run/" + runID.String()}
 	if !canonical(target) {
@@ -128,10 +142,45 @@ func (l *Local) Provision(ctx context.Context, runID uuid.UUID, repository, base
 		return Worktree{}, failure(ErrProvision, runID, target, -1, nil)
 	}
 	branchMayBeOwned = true
-	for _, args := range [][]string{
-		{"-C", repository, "worktree", "add", "-b", worktree.Branch, staging, commit},
-		{"-C", repository, "worktree", "move", staging, target},
-	} {
+	add := []string{"-C", repository, "worktree", "add", "-b", worktree.Branch}
+	if archive != nil {
+		add = append(add, "--no-checkout")
+	}
+	add = append(add, staging, commit)
+	if _, code, err = l.run(ctx, nil, add...); err != nil || code != 0 {
+		return Worktree{}, failure(ErrProvision, runID, target, code, err)
+	}
+	if archive != nil {
+		fresh := filepath.Join(staging, ".circular-restore-"+uuid.NewString())
+		if err = artifacts.RestoreArchive(ctx, archive, fresh); err != nil {
+			return Worktree{}, err
+		}
+		defer os.RemoveAll(fresh)
+		tree, err := l.delegationTree(ctx, runID, repository, fresh)
+		if err != nil {
+			return Worktree{}, err
+		}
+		expected, code, err := l.run(ctx, nil, "-C", repository, "rev-parse", commit+"^{tree}")
+		if err != nil || code != 0 || strings.TrimSpace(string(expected)) != tree {
+			return Worktree{}, ErrBase
+		}
+		entries, err := os.ReadDir(fresh)
+		if err != nil {
+			return Worktree{}, err
+		}
+		for _, entry := range entries {
+			if err = os.Rename(filepath.Join(fresh, entry.Name()), filepath.Join(staging, entry.Name())); err != nil {
+				return Worktree{}, err
+			}
+		}
+		if err = os.Remove(fresh); err != nil {
+			return Worktree{}, err
+		}
+		if _, code, err = l.run(ctx, nil, "-C", staging, "read-tree", commit); err != nil || code != 0 {
+			return Worktree{}, ErrBase
+		}
+	}
+	for _, args := range [][]string{{"-C", repository, "worktree", "move", staging, target}} {
 		_, code, err := l.run(ctx, nil, args...)
 		if err != nil || code != 0 {
 			return Worktree{}, failure(ErrProvision, runID, target, code, err)
@@ -159,7 +208,7 @@ func (l *Local) Provision(ctx context.Context, runID uuid.UUID, repository, base
 	if err := ctx.Err(); err != nil {
 		return Worktree{}, err
 	}
-	if err := l.pinBase(ctx, repository, runBase{RunID: runID, RepositoryID: repositoryID, Commit: commit, Ref: baseRef}); err != nil {
+	if err := l.pinBase(ctx, repository, runBase{RunID: runID, RepositoryID: repositoryID, Commit: commit, Ref: baseRef, Delegated: archive != nil}); err != nil {
 		return Worktree{}, failure(ErrProvision, runID, target, -1, err)
 	}
 	published = true

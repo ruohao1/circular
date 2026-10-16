@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"io"
+	"maps"
 	"os"
 	"path/filepath"
 	"strings"
@@ -129,13 +130,15 @@ func TestSupervisorCompletesAnIsolatedRunAndRetainsReplayAfterCleanup(t *testing
 		t.Fatalf("success: %+v", s)
 	}
 	s.AssertTypes(t, "workspace.provisioning", "workspace.provisioning", "workspace.ready", "run.started", "agent.message.delta", "agent.message.delta", "agent.message.completed", "usage.updated", "artifact.created", "git.diff.updated", "run.completed", "artifact.created", "workspace.released")
-	testsupport.AssertJSON(t, s.Events[6].Data, map[string]any{"content": "Fake container workload completed: Execute fixture"})
-	testsupport.AssertJSON(t, s.Events[7].Data, map[string]any{"input_tokens": 2, "output_tokens": 6})
+	testsupport.AssertJSON(t, s.Events[6].Data, map[string]any{"invocation": 1, "content": "Fake container workload completed: Execute fixture"})
+	testsupport.AssertJSON(t, s.Events[7].Data, map[string]any{"invocation": 1, "input_tokens": 2, "output_tokens": 6})
 	for _, event := range s.Events[4:8] {
 		if event.Raw["run_id"] != f.id.String() {
 			t.Fatal(event)
 		}
-		testsupport.AssertJSON(t, event.Raw["data"], event.Data)
+		expected := maps.Clone(event.Raw["data"].(map[string]any))
+		expected["invocation"] = 1
+		testsupport.AssertJSON(t, event.Data, expected)
 	}
 	content, err := artifacts.NewLocalStore(f.config.ArtifactRoot)
 	if err != nil {

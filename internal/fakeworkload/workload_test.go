@@ -9,8 +9,35 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
+	"github.com/ruohao1/circular/internal/delegations"
 	"github.com/ruohao1/circular/internal/fakeworkload"
 )
+
+func TestDelegationWorkloadEmitsBoundedRequestAfterCompletion(t *testing.T) {
+	doc := input()
+	doc["delegation_request"] = delegations.Request{AgentID: uuid.New(), RequestKey: "inspect", Objective: delegations.DelegationObjective{Title: "Inspect", Description: "Check the source"}}
+	code, out, diagnostic := execute(t, doc, false)
+	if code != 0 || diagnostic != "" || !strings.HasPrefix(out, complete) {
+		t.Fatal(code, out, diagnostic)
+	}
+	var record struct {
+		Type    string
+		Request delegations.Request
+	}
+	if err := json.Unmarshal([]byte(strings.TrimPrefix(out, complete)), &record); err != nil || record.Type != "circular.delegation.requested" || record.Request != doc["delegation_request"] {
+		t.Fatal(record, err)
+	}
+	doc["behavior"].(map[string]any)["failure"] = "after_first_event"
+	code, out, _ = execute(t, doc, false)
+	if code == 0 || strings.Contains(out, "circular.delegation.requested") {
+		t.Fatal("failed workload handed off", code, out)
+	}
+	doc["delegation_request"] = map[string]any{"path": "/untrusted"}
+	if code, _, _ = execute(t, doc, false); code != 2 {
+		t.Fatal("unbounded request accepted")
+	}
+}
 
 const id = "00000000-0000-4000-8000-000000000170"
 

@@ -18,8 +18,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/ruohao1/circular/internal/agentproposals"
 	"github.com/ruohao1/circular/internal/agenttools"
+	"github.com/ruohao1/circular/internal/delegations"
 )
 
 type inspection struct {
@@ -68,6 +70,33 @@ func helper() int {
 	switch string(prompt) {
 	case "review-git-probe":
 		return reviewGitProbe()
+	case "delegation-lock-proof":
+		fmt.Fprintln(os.Stdout, `{"type":"turn.completed","usage":{"input_tokens":1,"output_tokens":2}}`)
+		return 0
+	case "delegate-success", "delegate-failure":
+		for _, argument := range os.Args {
+			match := regexp.MustCompile(`args=\["mcp","([^"]+)"\]`).FindStringSubmatch(argument)
+			if len(match) != 2 {
+				continue
+			}
+			if !strings.Contains(argument, `"delegate_task"`) {
+				return 94
+			}
+			spool, err := delegations.NewSpool(filepath.Join(match[1], "delegation"))
+			if err != nil {
+				return 95
+			}
+			_, err = spool.Request(delegations.Request{AgentID: uuid.MustParse("00000000-0000-4000-8000-000000000001"), RequestKey: "review", Objective: delegations.DelegationObjective{Title: "Review", Description: "Check synthetic-access-token"}})
+			if err != nil {
+				return 96
+			}
+			fmt.Fprintln(os.Stdout, `{"type":"turn.completed","usage":{"input_tokens":1,"output_tokens":2}}`)
+			if string(prompt) == "delegate-failure" {
+				return 23
+			}
+			return 0
+		}
+		return 97
 	case "review-report", "review-fail", "review-missing", "review-wait":
 		return reviewHelper(string(prompt))
 	case "propose-agent":

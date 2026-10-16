@@ -209,6 +209,13 @@ func (s *Service) ProcessLinearUpdate(ctx context.Context) (bool, error) {
 		}
 		return command.RowsAffected() == 1, nil
 	}
+	child, err := s.delegatedChild(ctx, u.Run)
+	if err != nil {
+		return false, err
+	}
+	if child {
+		return finish("skipped", errDelegationPublication.Error(), 0)
+	}
 	if len(raw) > 0 && (json.Unmarshal(raw, &u.Publisher) != nil || u.Publisher == nil || !u.Publisher.valid("linear")) {
 		return finish("failed", "The saved publication identity is invalid", 0)
 	}

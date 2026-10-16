@@ -80,8 +80,8 @@ the [model catalog](https://learn.chatgpt.com/docs/app-server#models) and
 
 Use **Edit model → Save model** on an existing Agent, including Repository discovery.
 `PATCH /api/v1/agents/{agent_id}` accepts `backend_config` and preserves its other
-fields. Settings are read when the worker prepares a Run; changing them does not
-start a Run. Select this
+fields. Settings are frozen when the worker prepares invocation 1; continuation
+uses that snapshot. Changing settings does not start a Run. Select this
 Agent and a Repository in the web launcher, then start a Task. A worker with
 Codex disabled fails the Run before allocating its Workspace or container.
 Workers sharing a queue should use the same backend configuration; there is no
@@ -245,3 +245,70 @@ inside a **Recommended agents** section and offers the same review flow.
 Explanations are metadata on the original proposal; they are not added to the
 Agent's instructions or backend configuration. Rephrasing an explanation does not
 create another proposal with the same role and settings.
+
+## Bounded specialist delegation
+
+Delegation is disabled by default: every Agent starts with an empty target set.
+On the private control plane, an owner can replace an Agent's allowed specialists
+with `PUT /api/v1/agents/{agent_id}/delegation-targets`, using
+`{"target_ids":["<specialist Agent UUID>"]}`. Targets must be enabled, distinct
+Agents in the same Project. Read the set with GET; send `{"target_ids":[]}` to
+disable future admissions. This does not cancel work already admitted.
+
+An eligible coding parent receives the private `delegate_task` tool:
+
+```json
+{
+  "agent_id": "<allowed specialist Agent UUID>",
+  "request_key": "inspect-parser",
+  "objective": {
+    "title": "Inspect parser behavior",
+    "description": "Check boundary cases and return a report with any proposed patch."
+  }
+}
+```
+
+The response is `pending_handoff`: the request is saved, but no child exists yet.
+The parent must summarize progress and finish its invocation normally. Only after
+a clean exit does the worker recheck current policy, checkpoint the parent's exact
+files, remove its container, and atomically create one child Task and Run. An
+identical request replay reuses that child; conflicting requests are rejected.
+The parent becomes `waiting_for_input` with a `suspended` Workspace and no claim.
+It retains its worktree but releases its CLI process and subscription lock.
+
+The child has a separate writable worktree initialized from the checkpoint,
+including uncommitted and ignored files. Its patch is relative to that checkpoint.
+It cannot delegate, and it does not publish automatically to GitHub or Linear.
+Its report and patch remain available as verified Run artifacts.
+
+After child termination **and cleanup**, the same parent Run automatically claims
+invocation 2. This is a fresh CLI invocation, not native session resume. Its frozen
+Agent settings, original Task, retained worktree, earlier progress, and the child's
+outcome reconstruct the context; hidden model reasoning and native session state
+are not restored. `/delegation-context` is a read-only, integrity-checked mount.
+The report and patch are untrusted task data. The parent explicitly decides
+whether to apply the patch; Circular never applies it automatically. The parent's
+final patch remains relative to its original Repository base.
+
+Child failure or independent cancellation still resumes the parent with that exact
+outcome and any retained output. Cancelling the parent also cancels unfinished
+child work and prevents continuation. There is one child and one delegation level;
+invocation 2 has no delegation tool. Parent usage sums the latest cumulative sample
+from each invocation and excludes child usage.
+
+For diagnostics, inspect the existing Run execution read, its `invocation` and
+`delegation` fields, and `delegation.requested`, `delegation.created`,
+`delegation.rejected`, `run.suspended`, `run.continued`, and Workspace events.
+A safely suspended parent survives worker replacement. An expired active claim
+fails and enters bounded cleanup recovery; it never repeats ambiguous model work.
+After three unsuccessful cleanup recoveries, use the existing Workspace error and
+ownership diagnostics before intervening. Do not delete retained worktrees while
+their parent is suspended.
+
+Migration `0018` adds this feature. Keep target sets empty during rollout; enable
+only chosen parent/specialist pairs after validation. Automated acceptance uses
+the optional fake Agent `backend_config.delegation_request` with the same tool
+arguments and production admission path. The fake parent verifies the result and
+explicitly leaves its child patch unapplied. These tests use real worker processes,
+PostgreSQL and Docker, but no model or provider credentials. Live enablement and
+live-model validation are separate operational actions.

@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/ruohao1/circular/internal/agentproposals"
+	"github.com/ruohao1/circular/internal/delegations"
 	"github.com/ruohao1/circular/internal/prreviews"
 	"github.com/ruohao1/circular/internal/runstate"
 )
@@ -37,6 +38,11 @@ func (r *RunResources) RenewLease() error {
 // ProvisioningContext binds the claimed attempt to its Task, Agent and
 // Repository. The Backend is the Run's selection, not the Agent's current one.
 type ProvisioningContext struct {
+	SourceRunID                      uuid.UUID
+	SourceCheckpoint                 *delegations.Checkpoint
+	Invocation                       int
+	DelegationTargets                []delegations.Target
+	DelegationContextSHA256          string
 	ReviewContextSHA256              string
 	RunID, WorkspaceID, RepositoryID uuid.UUID
 	ReviewID                         uuid.UUID
@@ -113,6 +119,26 @@ func (r *RunResources) AppendBackendEvent(source, kind string, data, raw map[str
 		return ErrResourceState
 	}
 	switch kind {
+	case "delegation.requested":
+		if r.kind != runstate.Coding || r.invocation != 1 {
+			return ErrResourceState
+		}
+		encoded, err := json.Marshal(data)
+		if err != nil {
+			return err
+		}
+		request, err := delegations.Decode(encoded)
+		if err != nil {
+			return err
+		}
+		input, err := r.InvocationInput()
+		if err != nil {
+			return err
+		}
+		if !delegations.Allows(input.DelegationTargets, request.AgentID) {
+			return ErrDelegationPolicy
+		}
+		return r.eventWithRaw(kind, source, data, raw)
 	case "pr_review.report.submitted":
 		return r.submitReviewCandidate(data)
 	case "pr_review.report.rejected":
@@ -179,7 +205,7 @@ func (r *RunResources) FailProvisioning(message, containerID string) error {
 	if err := r.guard(); err != nil {
 		return err
 	}
-	if r.status != runstate.Provisioning {
+	if r.status != runstate.Provisioning && !(r.invocation == 2 && r.status == runstate.WaitingForInput) {
 		return ErrResourceState
 	}
 	if containerID != "" {
@@ -211,6 +237,7 @@ func (r *RunResources) executionTransition(target runstate.Status, message *stri
 		updated_at=CURRENT_TIMESTAMP WHERE id=$1`, r.id, target, message, target.Terminal())
 	if err == nil {
 		r.status = target
+		err = settleDelegation(r.ctx, r.tx, r.id, target)
 	}
 	return err
 }

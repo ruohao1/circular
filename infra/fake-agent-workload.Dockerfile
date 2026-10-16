@@ -3,6 +3,11 @@ WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
 COPY internal/fakeworkload ./internal/fakeworkload
+COPY internal/delegations ./internal/delegations
+COPY internal/artifacts ./internal/artifacts
+COPY internal/prreviews ./internal/prreviews
+COPY internal/codexconfig ./internal/codexconfig
+COPY internal/runstate ./internal/runstate
 COPY cmd/circular-fake-workload ./cmd/circular-fake-workload
 RUN CGO_ENABLED=0 go build -trimpath -o /circular-fake-workload ./cmd/circular-fake-workload
 

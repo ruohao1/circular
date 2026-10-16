@@ -70,6 +70,14 @@ func (s *Service) ProcessLinearActivity(ctx context.Context) (bool, error) {
 	if err != nil {
 		return false, err
 	}
+	child, err := s.delegatedActivity(ctx, a)
+	if err != nil {
+		return false, err
+	}
+	if child {
+		_, err = s.pool.Exec(ctx, `UPDATE linear_agent_activities SET status='cancelled',last_error=$3,lease_owner=NULL,lease_until=NULL,updated_at=now() WHERE id=$1 AND lease_owner=$2 AND lease_until>now()`, a.ID, a.Owner, errDelegationPublication.Error())
+		return true, err
+	}
 	detail, err := s.ExternalRequest(ctx, a.Request)
 	if err != nil {
 		return true, err

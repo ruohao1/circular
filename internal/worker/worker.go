@@ -12,8 +12,10 @@ import (
 
 // Claim is committed before an Executor can allocate any Run resources.
 type Claim struct {
-	RunID    uuid.UUID
-	Recovery bool
+	RunID        uuid.UUID
+	Recovery     bool
+	Invocation   int
+	Continuation bool
 }
 
 type Queue interface {

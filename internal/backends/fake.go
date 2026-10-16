@@ -6,6 +6,9 @@ import (
 	"strconv"
 
 	"github.com/google/uuid"
+	"github.com/ruohao1/circular/internal/delegations"
+	"github.com/ruohao1/circular/internal/prreviews"
+	"github.com/ruohao1/circular/internal/runstate"
 	"github.com/ruohao1/circular/internal/runtimes"
 )
 
@@ -28,6 +31,29 @@ func (f Fake) Prepare(input Input) (Invocation, error) {
 		},
 		"behavior": behavior,
 	}
+	if len(input.DelegationTargets) > 0 && (input.Kind == runstate.PRReview || delegations.ValidateTargets(input.DelegationTargets) != nil) {
+		return Invocation{}, fakeFailure("invalid delegation targets", nil)
+	}
+	var config map[string]json.RawMessage
+	_ = json.Unmarshal(input.Config, &config)
+	if raw, exists := config["delegation_request"]; exists {
+		candidate, err := delegations.Decode(raw)
+		if err != nil || prreviews.DecodeStrict(input.Config, &config) != nil {
+			return Invocation{}, fakeFailure("invalid fake delegation_request", err)
+		}
+		if len(input.DelegationTargets) > 0 {
+			if !delegations.Allows(input.DelegationTargets, candidate.AgentID) {
+				return Invocation{}, fakeFailure("fake delegation target is not permitted", nil)
+			}
+			request["delegation_request"] = candidate
+		}
+	}
+	if input.DelegationContextSHA256 != "" {
+		if input.Kind == runstate.PRReview || len(input.DelegationTargets) > 0 || !prreviews.DigestPattern.MatchString(input.DelegationContextSHA256) {
+			return Invocation{}, fakeFailure("invalid delegation continuation context", nil)
+		}
+		request["delegation_context_sha256"] = input.DelegationContextSHA256
+	}
 	stdin, err := json.Marshal(request)
 	if err != nil {
 		return Invocation{}, fakeFailure("could not encode fake workload input", err)
@@ -35,21 +61,37 @@ func (f Fake) Prepare(input Input) (Invocation, error) {
 	return Invocation{
 		Command: []string{"--write-output"},
 		Stdin:   append(stdin, '\n'),
-		Decoder: &fakeDecoder{runID: input.RunID},
+		Decoder: &fakeDecoder{runID: input.RunID, handoff: codexDecoder{targets: input.DelegationTargets}},
 	}, nil
 }
 
-type fakeDecoder struct{ runID uuid.UUID }
+type fakeDecoder struct {
+	runID     uuid.UUID
+	handoff   codexDecoder
+	completed bool
+}
 
 func (d *fakeDecoder) Decode(line []byte, stream runtimes.Stream, number int) ([]Event, error) {
+	var header struct{ Type string }
+	if json.Unmarshal(line, &header) == nil && header.Type == "circular.delegation.requested" {
+		return d.handoff.Decode(line, stream, number)
+	}
 	kind, data, raw, err := decodeFakeRecord(line, d.runID, stream, number)
 	if err != nil {
 		return nil, err
 	}
+	if kind == "agent.message.completed" {
+		d.completed = true
+	}
 	return []Event{{Type: kind, Source: "fake-container-workload", Data: data, Raw: raw}}, nil
 }
 
-func (d *fakeDecoder) Finish() error { return nil }
+func (d *fakeDecoder) Finish() error {
+	if d.handoff.delegation != nil && !d.completed {
+		return fakeFailure("fake delegation ended without a completed message", nil)
+	}
+	return nil
+}
 
 func fakeFailure(message string, cause error) error {
 	return &Failure{Message: message, Cause: cause}

@@ -39,6 +39,24 @@ export interface paths {
         patch: operations["update_agent"];
         trace?: never;
     };
+    "/api/v1/agents/{agent_id}/delegation-targets": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Read allowed delegation targets */
+        get: operations["get_delegation_targets"];
+        /** Replace allowed delegation targets */
+        put: operations["put_delegation_targets"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/backends/codex/models": {
         parameters: {
             query?: never;
@@ -1218,6 +1236,22 @@ export interface components {
             /** Format: uri */
             authorization_url: string;
         };
+        DelegationLinkRead: {
+            child_run_id: string | null;
+            child_task_id: string | null;
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            parent_run_id: string;
+            request_key: string;
+            /** @enum {string} */
+            status: "waiting" | "continuing" | "completed" | "cancelled" | "rejected";
+            /** Format: uuid */
+            target_agent_id: string;
+        };
+        DelegationTargets: {
+            target_ids: string[];
+        };
         /** DiscoveryCreate */
         DiscoveryCreate: {
             /** Format: uuid */
@@ -1225,7 +1259,10 @@ export interface components {
         };
         /** EventRead */
         EventRead: {
-            /** Data */
+            /**
+             * Data
+             * @description Server-generated execution events include invocation (1 or 2). Historical events without invocation belong to invocation 1.
+             */
             data: {
                 [key: string]: unknown;
             };
@@ -1259,7 +1296,10 @@ export interface components {
             sequence: number;
             /** Source */
             source: string;
-            /** Type */
+            /**
+             * Type
+             * @description Execution events include nonterminal delegation.requested, delegation.created, delegation.rejected, run.suspended, run.continued, and workspace.suspended. Only run.completed, run.failed, and run.cancelled terminate the event stream.
+             */
             type: string;
         };
         ExternalRequest: {
@@ -1878,6 +1918,9 @@ export interface components {
             agent: components["schemas"]["AgentRead"];
             /** Artifacts */
             artifacts: components["schemas"]["ArtifactRead"][];
+            delegation?: components["schemas"]["DelegationLinkRead"] | null;
+            /** @enum {integer} */
+            invocation?: 1 | 2;
             /** Last Event Sequence */
             last_event_sequence: number;
             pr_review_id: string | null;
@@ -1934,6 +1977,11 @@ export interface components {
              * Format: uuid
              */
             id: string;
+            /**
+             * @default 1
+             * @enum {integer}
+             */
+            invocation: 1 | 2;
             /** @enum {string} */
             kind: "coding" | "pr_review";
             /** Parent Run Id */
@@ -2199,6 +2247,82 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
                 };
+            };
+        };
+    };
+    get_delegation_targets: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                agent_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Delegation targets */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DelegationTargets"];
+                };
+            };
+            /** @description Agent not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Invalid or out-of-scope targets */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    put_delegation_targets: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                agent_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DelegationTargets"];
+            };
+        };
+        responses: {
+            /** @description Delegation targets */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DelegationTargets"];
+                };
+            };
+            /** @description Agent not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Invalid or out-of-scope targets */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };

@@ -73,6 +73,8 @@ func New(pool *pgxpool.Pool, config Config) (http.Handler, error) {
 	mux.HandleFunc("POST /api/v1/runs", a.createRun)
 	mux.HandleFunc("GET /api/v1/backends/codex/models", codexModels)
 	mux.HandleFunc("PATCH /api/v1/agents/{agent_id}", a.updateAgent)
+	mux.HandleFunc("GET /api/v1/agents/{agent_id}/delegation-targets", a.delegationTargets)
+	mux.HandleFunc("PUT /api/v1/agents/{agent_id}/delegation-targets", a.delegationTargets)
 	mux.HandleFunc("POST /api/v1/projects/{project_id}/discovery", a.createDiscoveryTask)
 	mux.HandleFunc("GET /api/v1/tasks/{task_id}", a.task)
 	mux.HandleFunc("GET /api/v1/projects/{project_id}/run-queue", a.runQueue)
@@ -387,13 +389,19 @@ func (a *api) execution(w http.ResponseWriter, r *http.Request) {
 	if dbError(w, err, "event") {
 		return
 	}
-	usage := json.RawMessage(`{"input_tokens":0,"output_tokens":0}`)
-	var latest json.RawMessage
-	err = tx.QueryRow(ctx, "SELECT data FROM events WHERE run_id=$1 AND type='usage.updated' ORDER BY sequence DESC LIMIT 1", id).Scan(&latest)
-	if err == nil {
-		usage = latest
-	} else if !errors.Is(err, pgx.ErrNoRows) {
-		dbError(w, err, "usage")
+	var usage json.RawMessage
+	err = tx.QueryRow(ctx, `SELECT json_build_object('input_tokens',COALESCE(sum((data->>'input_tokens')::numeric),0),'output_tokens',COALESCE(sum((data->>'output_tokens')::numeric),0)) FROM (
+	 SELECT DISTINCT ON (CASE WHEN data->>'invocation'='2' THEN 2 ELSE 1 END) data FROM events WHERE run_id=$1 AND type='usage.updated'
+	 ORDER BY CASE WHEN data->>'invocation'='2' THEN 2 ELSE 1 END,sequence DESC) latest`, id).Scan(&usage)
+	if dbError(w, err, "usage") {
+		return
+	}
+	link, err := delegationLink(ctx, tx, id)
+	if dbError(w, err, "delegation") {
+		return
+	}
+	var invocation int
+	if err = tx.QueryRow(ctx, `SELECT invocation FROM runs WHERE id=$1`, id).Scan(&invocation); dbError(w, err, "invocation") {
 		return
 	}
 	var reviewID *uuid.UUID
@@ -403,7 +411,7 @@ func (a *api) execution(w http.ResponseWriter, r *http.Request) {
 	if dbError(w, tx.Commit(ctx), "run") {
 		return
 	}
-	respond(w, 200, map[string]any{"pr_review_id": reviewID, "run": run, "task": task, "agent": agent, "workspace": workspace, "artifacts": retained, "usage": usage, "last_event_sequence": last})
+	respond(w, 200, map[string]any{"delegation": link, "invocation": invocation, "pr_review_id": reviewID, "run": run, "task": task, "agent": agent, "workspace": workspace, "artifacts": retained, "usage": usage, "last_event_sequence": last})
 }
 
 func integerQuery(w http.ResponseWriter, r *http.Request, name string, fallback, min, max int64) (int64, bool) {

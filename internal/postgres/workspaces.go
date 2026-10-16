@@ -95,7 +95,7 @@ func (r *RunResources) MarkRunning() (Workspace, error) {
 }
 
 func (r *RunResources) workspaceStatus(w *Workspace, target, source string) error {
-	allowed := (w.Status == "pending" && (target == "ready" || target == "failed")) || (w.Status == "ready" && (target == "failed" || target == "released")) || (w.Status == "failed" && target == "released")
+	allowed := (w.Status == "pending" && (target == "ready" || target == "failed")) || (w.Status == "ready" && (target == "failed" || target == "released" || target == "suspended")) || (w.Status == "suspended" && (target == "pending" || target == "released")) || (w.Status == "failed" && target == "released")
 	if !allowed {
 		return ErrResourceState
 	}

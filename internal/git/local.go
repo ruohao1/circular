@@ -234,6 +234,10 @@ func (b *boundedGitOutput) Write(p []byte) (int, error) {
 	return b.Buffer.Write(p)
 }
 func (l *Local) runBounded(ctx context.Context, environment map[string]string, limit int, args ...string) ([]byte, int, error) {
+	return l.runWithInput(ctx, environment, limit, nil, args...)
+}
+
+func (l *Local) runWithInput(ctx context.Context, environment map[string]string, limit int, input io.Reader, args ...string) ([]byte, int, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, -1, err
 	}
@@ -245,6 +249,7 @@ func (l *Local) runBounded(ctx context.Context, environment map[string]string, l
 		}
 	}
 	cmd := exec.Command(l.config.GitExecutable, append(flags, args...)...)
+	cmd.Stdin = input
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	env := map[string]string{}
 	for _, entry := range os.Environ() {

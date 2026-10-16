@@ -40,7 +40,7 @@ func TestExecutorFailureAndShutdownStillSettleTheClaim(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	id := uuid.New()
-	queue := &testQueue{claim: &worker.Claim{RunID: id, Recovery: true}}
+	queue := &testQueue{claim: &worker.Claim{RunID: id, Recovery: true, Invocation: 1}}
 	executor := executorFunc(func(_ context.Context, claim worker.Claim, owner string) error {
 		if claim.RunID != id || !claim.Recovery || owner != "worker-one" {
 			t.Fatal("committed claim was not passed intact to executor")

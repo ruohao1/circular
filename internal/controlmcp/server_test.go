@@ -18,6 +18,24 @@ import (
 
 type object = map[string]any
 
+func TestDelegationExecutionMCP(t *testing.T) {
+	const run = "11111111-1111-4111-8111-111111111111"
+	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if strings.HasSuffix(r.URL.Path, "/agent-proposals") {
+			_, _ = w.Write([]byte("[]"))
+			return
+		}
+		_ = json.NewEncoder(w).Encode(object{"invocation": 2, "delegation": object{"parent_run_id": run, "child_run_id": "child", "status": "continuing"}, "usage": object{"input_tokens": 17, "output_tokens": 28}})
+	}))
+	defer api.Close()
+	client := connect(t, controlmcp.Config{APIURL: api.URL})
+	result := call(t, client, "get_run", object{"run_id": run})["execution"].(object)
+	if result["invocation"] != float64(2) || result["delegation"].(object)["status"] != "continuing" || result["usage"].(object)["input_tokens"] != float64(17) {
+		t.Fatal(result)
+	}
+}
+
 func connect(t *testing.T, config controlmcp.Config) *mcp.ClientSession {
 	t.Helper()
 	server, err := controlmcp.New(config)
@@ -89,7 +107,7 @@ func TestControlMCPWorkflowUsesPublicAPIAndPreservesRunIntent(t *testing.T) {
 	}
 	client := connect(t, config)
 	listed, err := client.ListTools(t.Context(), nil)
-	if err != nil || len(listed.Tools) != 39 {
+	if err != nil || len(listed.Tools) != 41 {
 		t.Fatal("missing tool surface", err, listed)
 	}
 	project := call(t, client, "create_project", object{"name": "MCP project"})["project"].(object)
@@ -240,7 +258,7 @@ func TestReadOnlyAndInvalidInputsNeverReachMutationEndpoints(t *testing.T) {
 	defer api.Close()
 	client := connect(t, controlmcp.Config{APIURL: api.URL, ReadOnly: true})
 	list, err := client.ListTools(t.Context(), nil)
-	if err != nil || len(list.Tools) != 20 {
+	if err != nil || len(list.Tools) != 21 {
 		t.Fatal(err, list)
 	}
 	for _, tool := range list.Tools {

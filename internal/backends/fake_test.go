@@ -8,8 +8,72 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
+	"github.com/ruohao1/circular/internal/delegations"
 	"github.com/ruohao1/circular/internal/runtimes"
 )
+
+func TestFakeDelegationRequest(t *testing.T) {
+	target := uuid.New()
+	request := delegations.Request{AgentID: target, RequestKey: "inspect", Objective: delegations.DelegationObjective{Title: "Inspect", Description: "Check the source"}}
+	raw, _ := json.Marshal(map[string]any{"delegation_request": request})
+	input := Input{RunID: uuid.New(), Config: raw, DelegationTargets: []delegations.Target{{AgentID: target, Name: "Inspector"}}}
+	invocation, err := (Fake{}).Prepare(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(invocation.Stdin), `"delegation_request"`) {
+		t.Fatal("permitted request omitted")
+	}
+	_, err = invocation.Decoder.Decode([]byte(fakeEvent(input.RunID, "agent.message.completed", `{"content":"handoff"}`)), runtimes.Stdout, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	record, _ := json.Marshal(map[string]any{"type": "circular.delegation.requested", "request": request})
+	incomplete, err := (Fake{}).Prepare(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = incomplete.Decoder.Decode(record, runtimes.Stdout, 1); err != nil || incomplete.Decoder.Finish() == nil {
+		t.Fatal("unfinished handoff accepted", err)
+	}
+	events, err := invocation.Decoder.Decode(record, runtimes.Stdout, 2)
+	if err != nil || len(events) != 1 || events[0].Type != "delegation.requested" || invocation.Decoder.Finish() != nil {
+		t.Fatal(events, err)
+	}
+	if replay, err := invocation.Decoder.Decode(record, runtimes.Stdout, 3); err != nil || len(replay) != 0 {
+		t.Fatal("request replay", replay, err)
+	}
+	input.DelegationContextSHA256 = strings.Repeat("a", 64)
+	if _, err = (Fake{}).Prepare(input); err == nil {
+		t.Fatal("continuation accepted delegation targets")
+	}
+	input.DelegationContextSHA256 = ""
+	input.DelegationTargets[0].AgentID = uuid.New()
+	if _, err = (Fake{}).Prepare(input); err == nil {
+		t.Fatal("unlisted target accepted")
+	}
+	input.DelegationTargets = nil
+	for _, digest := range []string{"", strings.Repeat("a", 64)} {
+		input.DelegationContextSHA256 = digest
+		invocation, err = (Fake{}).Prepare(input)
+		if err != nil || strings.Contains(string(invocation.Stdin), `"delegation_request"`) {
+			t.Fatal("child or continuation can delegate", err)
+		}
+		if _, err = invocation.Decoder.Decode(record, runtimes.Stdout, 1); err == nil {
+			t.Fatal("unpermitted request decoded")
+		}
+	}
+	for _, invalid := range []string{
+		`{"delegation_request":null}`,
+		strings.Replace(string(raw), `"request_key":"inspect"`, `"request_key":"inspect","request_key":"again"`, 1),
+		strings.Replace(string(raw), `"title":"Inspect"`, `"title":""`, 1),
+	} {
+		input.Config = json.RawMessage(invalid)
+		if _, err = (Fake{}).Prepare(input); err == nil {
+			t.Fatal("invalid request accepted", invalid)
+		}
+	}
+}
 
 func TestFakePrepare(t *testing.T) {
 	id := uuid.New()

@@ -34,8 +34,10 @@ var (
 )
 
 type ReviewMount struct{ ContextSHA256 string }
+type DelegationMount struct{ ContextSHA256 string }
 
 type Spec struct {
+	Delegation         *DelegationMount
 	Kind               runstate.Kind
 	Review             *ReviewMount
 	RunID              uuid.UUID
@@ -54,30 +56,32 @@ type Spec struct {
 // Plan is a side-effect-free policy snapshot. It excludes environment values and
 // stdin entirely, so diagnostic formatting cannot expose the request or secrets.
 type Plan struct {
-	Kind                                                               runstate.Kind
-	ReviewContextSource, ReviewContextDestination, ReviewContextSHA256 string
-	ReviewContextReadOnly                                              bool
-	RunID                                                              uuid.UUID
-	ContainerName                                                      string
-	Labels                                                             map[string]string
-	PolicyDigest                                                       string
-	Image                                                              string
-	Command                                                            []string
-	EnvironmentNames                                                   []string
-	WorktreeSource                                                     string
-	WorktreeDestination                                                string
-	WorktreeReadOnly                                                   bool
-	CredentialSource                                                   string
-	CredentialDestination                                              string
-	WorkingDirectory                                                   string
-	ContainerUser                                                      string
-	NetworkMode                                                        string
-	RootReadOnly                                                       bool
-	CapDrop                                                            []string
-	SecurityOptions                                                    []string
-	CPULimit                                                           float64
-	MemoryLimitMB                                                      int64
-	TemporaryStorageMB                                                 int64
+	DelegationContextSource, DelegationContextDestination, DelegationContextSHA256 string
+	DelegationContextReadOnly                                                      bool
+	Kind                                                                           runstate.Kind
+	ReviewContextSource, ReviewContextDestination, ReviewContextSHA256             string
+	ReviewContextReadOnly                                                          bool
+	RunID                                                                          uuid.UUID
+	ContainerName                                                                  string
+	Labels                                                                         map[string]string
+	PolicyDigest                                                                   string
+	Image                                                                          string
+	Command                                                                        []string
+	EnvironmentNames                                                               []string
+	WorktreeSource                                                                 string
+	WorktreeDestination                                                            string
+	WorktreeReadOnly                                                               bool
+	CredentialSource                                                               string
+	CredentialDestination                                                          string
+	WorkingDirectory                                                               string
+	ContainerUser                                                                  string
+	NetworkMode                                                                    string
+	RootReadOnly                                                                   bool
+	CapDrop                                                                        []string
+	SecurityOptions                                                                []string
+	CPULimit                                                                       float64
+	MemoryLimitMB                                                                  int64
+	TemporaryStorageMB                                                             int64
 }
 
 // Zero-valued optional configuration fields use the existing Python defaults.
@@ -254,7 +258,7 @@ func (d *Docker) resolve(spec Spec) (launch, error) {
 			return launch{}, ErrInvalidSpec
 		}
 	case runstate.PRReview:
-		if spec.Review == nil || d.config.ReviewContextRoot == "" || !prreviews.DigestPattern.MatchString(spec.Review.ContextSHA256) {
+		if spec.Delegation != nil || spec.Review == nil || d.config.ReviewContextRoot == "" || !prreviews.DigestPattern.MatchString(spec.Review.ContextSHA256) {
 			return launch{}, ErrInvalidSpec
 		}
 		expected := filepath.Join(d.config.ReviewContextRoot, spec.RunID.String())
@@ -269,6 +273,19 @@ func (d *Docker) resolve(spec Spec) (launch, error) {
 		document["worktree_read_only"] = true
 	default:
 		return launch{}, ErrInvalidSpec
+	}
+	delegationSource := ""
+	if spec.Delegation != nil {
+		if kind != runstate.Coding || !prreviews.DigestPattern.MatchString(spec.Delegation.ContextSHA256) {
+			return launch{}, ErrInvalidSpec
+		}
+		delegationSource = filepath.Join(d.config.WorktreeRoot, ".delegations", spec.RunID.String())
+		canonical, err := resolveMissing(delegationSource)
+		if err != nil || canonical != delegationSource || isSymlink(delegationSource) {
+			return launch{}, ErrInvalidSpec
+		}
+		document["delegation_context"] = delegationSource
+		document["delegation_context_sha256"] = spec.Delegation.ContextSHA256
 	}
 	digest := policyDigest(document)
 	network := "none"
@@ -294,6 +311,13 @@ func (d *Docker) resolve(spec Spec) (launch, error) {
 		plan.ReviewContextSHA256 = spec.Review.ContextSHA256
 		plan.Labels["io.circular.kind"] = "pr_review"
 		plan.Labels["io.circular.review_context_sha256"] = spec.Review.ContextSHA256
+	}
+	if spec.Delegation != nil {
+		plan.DelegationContextSource = delegationSource
+		plan.DelegationContextDestination = "/delegation-context"
+		plan.DelegationContextSHA256 = spec.Delegation.ContextSHA256
+		plan.DelegationContextReadOnly = true
+		plan.Labels["io.circular.delegation_context_sha256"] = spec.Delegation.ContextSHA256
 	}
 	if credentials != "" {
 		plan.CredentialSource, plan.CredentialDestination = credentials, credentialDestination

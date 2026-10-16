@@ -3,45 +3,65 @@ package execution
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"iter"
 
 	"github.com/google/uuid"
 	"github.com/ruohao1/circular/internal/backends"
+	"github.com/ruohao1/circular/internal/delegations"
 	"github.com/ruohao1/circular/internal/postgres"
 	"github.com/ruohao1/circular/internal/runtimes"
 )
 
 const maxLineBytes = backends.MaxLineBytes
 
-func (s *Supervisor) ingest(ctx context.Context, id uuid.UUID, handle runtimes.Handle, backend preparedBackend) error {
+func (s *Supervisor) ingest(ctx context.Context, id uuid.UUID, handle runtimes.Handle, backend preparedBackend) (*delegations.Request, error) {
+	var candidate *delegations.Request
 	output, err := s.docker.Output(ctx, handle)
 	if err != nil {
-		return executionFailure("could not read "+backend.name+" backend output", err)
+		return nil, executionFailure("could not read "+backend.name+" backend output", err)
 	}
 	failure, drained := ingestOutput(id, backend, output, func(event backends.Event) error {
+		if event.Type == "delegation.requested" {
+			raw, err := json.Marshal(event.Data)
+			if err != nil {
+				return err
+			}
+			request, err := delegations.Decode(raw)
+			if err != nil {
+				return err
+			}
+			if candidate != nil && *candidate != request {
+				return delegations.ErrInvalid
+			}
+			candidate = &request
+		}
 		return s.store.WithRun(ctx, id, func(r *postgres.RunResources) error {
 			return r.AppendBackendEvent(event.Source, event.Type, event.Data, event.Raw)
 		})
 	})
 	if !drained {
-		return failure
+		return nil, failure
 	}
 	result, err := s.docker.Wait(ctx, handle)
 	if failure != nil {
-		return failure
+		return nil, failure
 	}
 	if err != nil {
-		return executionFailure("could not determine "+backend.name+" backend completion", err)
+		return nil, executionFailure("could not determine "+backend.name+" backend completion", err)
 	}
-	if result.ExitCode == nil {
-		return executionFailure(backend.name+" backend stopped before completing", nil)
+	if result.ExitCode == nil || result.Reason != runtimes.Exited {
+		return nil, executionFailure(backend.name+" backend stopped before completing", nil)
 	}
 	if *result.ExitCode != 0 {
-		return executionFailure(fmt.Sprintf("%s backend exited with code %d", backend.name, *result.ExitCode), nil)
+		return nil, executionFailure(fmt.Sprintf("%s backend exited with code %d", backend.name, *result.ExitCode), nil)
 	}
-	return backend.invocation.Decoder.Finish()
+	if err = backend.invocation.Decoder.Finish(); err != nil {
+		return nil, err
+	}
+	return candidate, nil
 }
 
 // ingestOutput frames and decodes output, stopping immediately on transport or

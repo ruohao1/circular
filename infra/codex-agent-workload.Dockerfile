@@ -7,6 +7,8 @@ COPY internal/codexauth ./internal/codexauth
 COPY internal/codexconfig ./internal/codexconfig
 COPY internal/agentproposals ./internal/agentproposals
 COPY internal/agenttools ./internal/agenttools
+COPY internal/delegations ./internal/delegations
+COPY internal/artifacts ./internal/artifacts
 COPY internal/prreviews ./internal/prreviews
 COPY internal/runstate ./internal/runstate
 COPY cmd/circular-codex-workload ./cmd/circular-codex-workload
