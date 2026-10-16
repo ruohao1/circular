@@ -554,6 +554,30 @@ test("detail scope follows the record and unassigned routing stays in place", as
   await expect(page).toHaveURL(/\/$/);
 });
 
+test("Setup tabs fit their mobile grid and support keyboard selection", async ({
+  page,
+}) => {
+  await fixture(page);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/setup?section=projects");
+  const tabs = page.getByRole("tablist");
+  await expect(tabs.getByRole("tab")).toHaveCount(5);
+  expect(
+    await tabs.evaluate((el) => {
+      const bounds = el.getBoundingClientRect();
+      return Array.from(el.querySelectorAll('[role="tab"]')).every((tab) => {
+        const rect = tab.getBoundingClientRect();
+        return rect.top >= bounds.top && rect.bottom <= bounds.bottom;
+      });
+    }),
+  ).toBe(true);
+  await page.getByRole("tab", { name: "Projects", exact: true }).focus();
+  await page.keyboard.press("ArrowRight");
+  await expect(
+    page.getByRole("tab", { name: "Repositories", exact: true }),
+  ).toHaveAttribute("aria-selected", "true");
+});
+
 test("Setup and request saves hold their Project", async ({ page }) => {
   const state = await fixture(page);
   let releaseSetup!: () => void;

@@ -1,0 +1,79 @@
+{
+  "evaluated_at": "2026-10-04",
+  "status": "source-inspected; runtime integration not yet verified",
+  "repository": "https://github.com/keenthemes/reui",
+  "commit": "ef0fe1252d9b24d69bdedee48a69ec9b29d1f217",
+  "variant": "radix-nova",
+  "license": {
+    "path": "LICENSE.md",
+    "sha256": "09592ffefa6512b68dd7aa9031bc50d5d39cfcc9da08288f5eb1f9d236baca66"
+  },
+  "hash_convention": "SHA-256 of original registry JSON bytes and exact UTF-8 files[].content bytes before any local adaptation. No added newline.",
+  "files": [
+    {
+      "registry_path": "public/r/styles/radix-nova/gantt.json",
+      "registry_sha256": "f83bd97511561abb348a7e831e11214892007e9bb40aa9a996f09af2795cf05c",
+      "file_path": "gantt.tsx",
+      "content_sha256": "1bacadaae3ea4826057201cbd30b77cbe855314b64f7ce08729b52f62527af4d",
+      "destination": "apps/web/src/components/reui/gantt/gantt.tsx"
+    },
+    {
+      "registry_path": "public/r/styles/radix-nova/gantt-types.json",
+      "registry_sha256": "5e6b13c59e7f6484be522cd53fbaf517c9530453148a1bfac2298106078e5d99",
+      "file_path": "gantt-types.tsx",
+      "content_sha256": "e908beead3836a8d8cdca7e8d2ab2b165daef7bfe99108751734482ad53808b8",
+      "destination": "apps/web/src/components/reui/gantt/gantt-types.tsx"
+    },
+    {
+      "registry_path": "public/r/styles/radix-nova/gantt-lib.json",
+      "registry_sha256": "93bf068e3ff52e08954629db765a442f36065e14465cc227f055c4fe8334839e",
+      "file_path": "gantt-lib.tsx",
+      "content_sha256": "8de20d9cddc80acb3e011a206733e3339fe6503957d4012f053d503285cfbb07",
+      "destination": "apps/web/src/components/reui/gantt/gantt-lib.tsx"
+    },
+    {
+      "registry_path": "public/r/styles/radix-nova/gantt-i18n.json",
+      "registry_sha256": "f727e29250fecaf702871f658096502de535cd89faa930138835482b71466122",
+      "file_path": "gantt-i18n.tsx",
+      "content_sha256": "818deeddf567de9a6ceac9b64c7293bb0dd3b87c6da5e6c4541965135c60a497",
+      "destination": "apps/web/src/components/reui/gantt/gantt-i18n.tsx"
+    },
+    {
+      "registry_path": "public/r/styles/radix-nova/gantt-recurrence.json",
+      "registry_sha256": "671e3b88429897c7af1d74f9c7498d78b4e7d8b95ef62bea0d32d528a35b2499",
+      "file_path": "gantt-recurrence.tsx",
+      "content_sha256": "0f93b6492d5e978398ed6788068fee897a3f8a459ecd665655b59895d3c8d3d4",
+      "destination": "apps/web/src/components/reui/gantt/gantt-recurrence.tsx"
+    },
+    {
+      "registry_path": "public/r/styles/radix-nova/gantt-dnd.json",
+      "registry_sha256": "7e528e7a529c432c0264c1c8495e159c9cb1c5b9a770584e55c14f445991ad72",
+      "file_path": "gantt-dnd.tsx",
+      "content_sha256": "18ade05ad62d19d1da089395286ed020443b5df803db1fac0208444d1e3e06f2",
+      "destination": "apps/web/src/components/reui/gantt/gantt-dnd.tsx"
+    },
+    {
+      "registry_path": "public/r/styles/radix-nova/gantt-bar.json",
+      "registry_sha256": "669093858fc29058ec5579fe8dd8d83b0bb64a16aef893a9755f4b2614269c38",
+      "file_path": "gantt-bar.tsx",
+      "content_sha256": "175b7a36be1c6fa3c6ecf4b0bac088bb1036e57e2fb558c42c0d8ad5bd27352e",
+      "destination": "apps/web/src/components/reui/gantt/gantt-bar.tsx"
+    },
+    {
+      "registry_path": "public/r/styles/radix-nova/gantt-view.json",
+      "registry_sha256": "2b3f565821b0e874259d56875f823da139198a0048bb7fb84408243dc748eabe",
+      "file_path": "gantt-view.tsx",
+      "content_sha256": "ca123a5a2a13d724957d85905fbe156472b3e86f4e6b8d64b8cd4da62936fb30",
+      "destination": "apps/web/src/components/reui/gantt/gantt-view.tsx"
+    }
+  ],
+  "new_runtime_packages": {
+    "date-fns": "4.1.0",
+    "@date-fns/tz": "1.5.0"
+  },
+  "evaluated_alternative": {
+    "repository": "https://github.com/shadcnblocks/kibo",
+    "commit": "3d63cdb15b79d972e3dc38a10997987672f9b263",
+    "source_path": "packages/gantt/index.tsx"
+  }
+}

@@ -191,6 +191,8 @@ func New(config Config) (*mcp.Server, error) {
 	c.addPRReviewReadTools(server)
 	c.addExternalRequestReads(server)
 	c.addDelegationRead(server)
+	c.addTaskPlanningTools(server)
+	c.addTaskTimelineTool(server)
 	if !config.ReadOnly {
 		c.addDelegationWrite(server)
 		c.addMutations(server)

@@ -77,6 +77,11 @@ func New(pool *pgxpool.Pool, config Config) (http.Handler, error) {
 	mux.HandleFunc("PUT /api/v1/agents/{agent_id}/delegation-targets", a.delegationTargets)
 	mux.HandleFunc("POST /api/v1/projects/{project_id}/discovery", a.createDiscoveryTask)
 	mux.HandleFunc("GET /api/v1/tasks/{task_id}", a.task)
+	mux.HandleFunc("GET /api/v1/projects/{project_id}/task-planning", a.taskPlanning)
+	mux.HandleFunc("GET /api/v1/projects/{project_id}/task-timeline", a.taskTimeline)
+	mux.HandleFunc("GET /api/v1/tasks/{task_id}/planning", a.taskPlanningDetail)
+	mux.HandleFunc("PATCH /api/v1/tasks/{task_id}", a.updateTaskPlanning)
+	mux.HandleFunc("POST /api/v1/tasks/{task_id}/move", a.moveTask)
 	mux.HandleFunc("GET /api/v1/projects/{project_id}/run-queue", a.runQueue)
 	a.integrationRoutes(mux)
 	mux.HandleFunc("GET /api/v1/runs", func(w http.ResponseWriter, r *http.Request) { a.list(w, r, "runs", "RunRead") })
@@ -177,6 +182,29 @@ func (a *api) create(w http.ResponseWriter, r *http.Request, table, schema strin
 	if !ok {
 		return
 	}
+	if table == "tasks" {
+		priority, _ := values["priority"].(string)
+		if !postgres.ValidTaskPriority(priority) {
+			invalid(w, "body", "priority", "enum", "Choose none, low, normal, high, or urgent")
+			return
+		}
+		status, _ := values["status"].(string)
+		if !postgres.ValidTaskStatus(status) {
+			invalid(w, "body", "status", "enum", "Choose open, ready, in_progress, in_review, completed, or cancelled")
+			return
+		}
+		var start, finish *string
+		if date, ok := values["planned_start_date"].(string); ok {
+			start = &date
+		}
+		if date, ok := values["planned_finish_date"].(string); ok {
+			finish = &date
+		}
+		if err := postgres.ValidateTaskSchedule(start, finish); err != nil {
+			invalid(w, "body", "planned_start_date", "value_error", err.Error())
+			return
+		}
+	}
 	ctx := r.Context()
 	tx, err := a.pool.Begin(ctx)
 	if dbError(w, err, schema) {
@@ -205,6 +233,22 @@ func (a *api) create(w http.ResponseWriter, r *http.Request, table, schema strin
 		values["enabled"] = true
 	}
 	if table == "tasks" {
+		if values["preferred_agent_id"] != nil {
+			var project uuid.UUID
+			var enabled bool
+			err = tx.QueryRow(ctx, "SELECT project_id,enabled FROM agents WHERE id=$1", values["preferred_agent_id"]).Scan(&project, &enabled)
+			if dbError(w, err, "preferred Agent") {
+				return
+			}
+			if project.String() != values["project_id"] {
+				problem(w, 404, "preferred Agent not found in this Project")
+				return
+			}
+			if !enabled {
+				problem(w, 422, "preferred Agent is disabled")
+				return
+			}
+		}
 		if values["repository_id"] != nil {
 			var project uuid.UUID
 			err = tx.QueryRow(ctx, "SELECT project_id FROM repositories WHERE id=$1", values["repository_id"]).Scan(&project)
@@ -216,7 +260,6 @@ func (a *api) create(w http.ResponseWriter, r *http.Request, table, schema strin
 				return
 			}
 		}
-		values["status"] = "open"
 	}
 	result, err := insert(ctx, tx, table, schema+"Read", values)
 	if dbError(w, err, schema) {

@@ -28,6 +28,8 @@ import { cn } from "@/lib/utils";
 import { ConsoleOverview } from "@/pages/overview";
 import { RequestPage } from "@/pages/request";
 import { RunsPage } from "@/pages/runs";
+import { TasksPage } from "@/pages/tasks";
+import { parseTaskPlanningSearch } from "@/lib/task-planning";
 import {
   QueryClient,
   QueryClientProvider,
@@ -474,7 +476,7 @@ function RunDetail() {
               <Card>
                 <CardHeader className="border-b">
                   <CardTitle>
-                    <h2>Task context</h2>
+                    <h2>Current Task context</h2>
                   </CardTitle>
                 </CardHeader>
                 <CardContent>
@@ -514,6 +516,13 @@ const runsRoute = createRoute({
     middlewares: [stripSearchParams({ group: "all", q: "", cursor: "" })],
   },
   component: RunsPage,
+});
+const tasksRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/tasks",
+  validateSearch: (search: SearchSchemaInput & Record<string, unknown>) => parseTaskPlanningSearch(search),
+  search: { middlewares: [stripSearchParams({view:"list",scale:"week",q:"",status:"",priority:"",repository_id:"",preferred_agent_id:"",taskId:""})] },
+  component: TasksPage,
 });
 const runRoute = createRoute({
   getParentRoute: () => rootRoute,
@@ -635,6 +644,7 @@ const router = createRouter({
     requestsRoute,
     requestRoute,
     runsRoute,
+    tasksRoute,
     runRoute,
     setupRoute,
     docsIndexRoute,

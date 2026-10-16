@@ -2515,6 +2515,66 @@
             "minLength": 1,
             "title": "Title",
             "type": "string"
+          },
+          "priority": {
+            "type": "string",
+            "enum": [
+              "none",
+              "low",
+              "normal",
+              "high",
+              "urgent"
+            ],
+            "default": "none"
+          },
+          "preferred_agent_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "open",
+              "ready",
+              "in_progress",
+              "in_review",
+              "completed",
+              "cancelled"
+            ],
+            "default": "open"
+          },
+          "planned_start_date": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date",
+                "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Optional planned calendar date in years 0001\u20139999. Finish is inclusive."
+          },
+          "planned_finish_date": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date",
+                "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Optional planned calendar date in years 0001\u20139999. Finish is inclusive."
           }
         },
         "required": [
@@ -2576,6 +2636,51 @@
             "format": "date-time",
             "title": "Updated At",
             "type": "string"
+          },
+          "priority": {
+            "$ref": "#/components/schemas/TaskPriority"
+          },
+          "preferred_agent_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "revision": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          },
+          "planned_start_date": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date",
+                "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Optional planned calendar date in years 0001\u20139999. Finish is inclusive."
+          },
+          "planned_finish_date": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date",
+                "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Optional planned calendar date in years 0001\u20139999. Finish is inclusive."
           }
         },
         "required": [
@@ -2584,7 +2689,12 @@
           "id",
           "status",
           "created_at",
-          "updated_at"
+          "updated_at",
+          "priority",
+          "preferred_agent_id",
+          "revision",
+          "planned_start_date",
+          "planned_finish_date"
         ],
         "title": "TaskRead",
         "type": "object"
@@ -2592,7 +2702,9 @@
       "TaskStatus": {
         "enum": [
           "open",
+          "ready",
           "in_progress",
+          "in_review",
           "completed",
           "cancelled"
         ],
@@ -3278,6 +3390,625 @@
         "required": [
           "items",
           "next_cursor"
+        ]
+      },
+      "TaskPriority": {
+        "type": "string",
+        "enum": [
+          "none",
+          "low",
+          "normal",
+          "high",
+          "urgent"
+        ]
+      },
+      "TaskPlanningSummary": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "project_id": {
+            "format": "uuid",
+            "title": "Project Id",
+            "type": "string"
+          },
+          "repository_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Repository Id"
+          },
+          "title": {
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Title",
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/TaskStatus"
+          },
+          "priority": {
+            "$ref": "#/components/schemas/TaskPriority"
+          },
+          "preferred_agent_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "revision": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          },
+          "planned_start_date": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date",
+                "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Optional planned calendar date in years 0001\u20139999. Finish is inclusive."
+          },
+          "planned_finish_date": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date",
+                "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Optional planned calendar date in years 0001\u20139999. Finish is inclusive."
+          }
+        },
+        "required": [
+          "id",
+          "project_id",
+          "repository_id",
+          "title",
+          "status",
+          "priority",
+          "preferred_agent_id",
+          "revision",
+          "created_at",
+          "updated_at",
+          "planned_start_date",
+          "planned_finish_date"
+        ]
+      },
+      "TaskPlanningRepository": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name"
+        ]
+      },
+      "TaskPlanningAgent": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string"
+          },
+          "backend": {
+            "type": "string"
+          },
+          "enabled": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "backend",
+          "enabled"
+        ]
+      },
+      "TaskPlanningRun": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/RunStatus"
+          },
+          "attempt": {
+            "title": "Attempt",
+            "type": "integer"
+          },
+          "agent_id": {
+            "format": "uuid",
+            "title": "Agent Id",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "coding",
+              "pr_review"
+            ],
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Started At"
+          },
+          "finished_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Finished At"
+          },
+          "agent_name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "status",
+          "attempt",
+          "agent_id",
+          "kind",
+          "created_at",
+          "started_at",
+          "finished_at",
+          "agent_name"
+        ]
+      },
+      "TaskPlanningItem": {
+        "type": "object",
+        "properties": {
+          "task": {
+            "$ref": "#/components/schemas/TaskPlanningSummary"
+          },
+          "repository": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TaskPlanningRepository"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "preferred_agent": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TaskPlanningAgent"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "latest_run": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TaskPlanningRun"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "run_count": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "active_run_count": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "task",
+          "repository",
+          "preferred_agent",
+          "latest_run",
+          "run_count",
+          "active_run_count"
+        ]
+      },
+      "TaskPlanningGroup": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "$ref": "#/components/schemas/TaskStatus"
+          },
+          "total": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TaskPlanningItem"
+            }
+          },
+          "next_cursor": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "total",
+          "items",
+          "next_cursor"
+        ]
+      },
+      "TaskPlanningPage": {
+        "type": "object",
+        "properties": {
+          "board_revision": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          },
+          "groups": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TaskPlanningGroup"
+            }
+          }
+        },
+        "required": [
+          "board_revision",
+          "groups"
+        ]
+      },
+      "TaskPlanningDetail": {
+        "type": "object",
+        "properties": {
+          "task": {
+            "$ref": "#/components/schemas/TaskRead"
+          },
+          "repository": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TaskPlanningRepository"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "preferred_agent": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TaskPlanningAgent"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "board_revision": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          },
+          "content_editable": {
+            "type": "boolean"
+          },
+          "repository_editable": {
+            "type": "boolean"
+          },
+          "content_lock_reason": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "source_managed",
+                  "active_run"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "repository_lock_reason": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "source_managed",
+                  "has_runs"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "task",
+          "repository",
+          "preferred_agent",
+          "board_revision",
+          "content_editable",
+          "repository_editable",
+          "content_lock_reason",
+          "repository_lock_reason"
+        ]
+      },
+      "TaskPlanningUpdate": {
+        "type": "object",
+        "properties": {
+          "expected_revision": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          },
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          },
+          "description": {
+            "type": "string",
+            "maxLength": 20000
+          },
+          "repository_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "preferred_agent_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "priority": {
+            "$ref": "#/components/schemas/TaskPriority"
+          },
+          "planned_start_date": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date",
+                "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Optional planned calendar date in years 0001\u20139999. Finish is inclusive."
+          },
+          "planned_finish_date": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date",
+                "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Optional planned calendar date in years 0001\u20139999. Finish is inclusive."
+          },
+          "expected_board_revision": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991,
+            "description": "Required whenever a planned date field is present; checked whenever supplied."
+          }
+        },
+        "required": [
+          "expected_revision"
+        ],
+        "additionalProperties": false,
+        "dependentRequired": {
+          "planned_start_date": [
+            "expected_board_revision"
+          ],
+          "planned_finish_date": [
+            "expected_board_revision"
+          ]
+        }
+      },
+      "TaskMove": {
+        "type": "object",
+        "properties": {
+          "expected_revision": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          },
+          "expected_board_revision": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          },
+          "status": {
+            "$ref": "#/components/schemas/TaskStatus"
+          },
+          "placement": {
+            "type": "string",
+            "enum": [
+              "start",
+              "end",
+              "before",
+              "after",
+              "up",
+              "down"
+            ]
+          },
+          "anchor_task_id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "expected_revision",
+          "expected_board_revision",
+          "status",
+          "placement"
+        ],
+        "additionalProperties": false,
+        "description": "anchor_task_id is required for before/after and forbidden otherwise; up/down require the current stage. Planning never starts or cancels Runs."
+      },
+      "TaskPlanningMutation": {
+        "type": "object",
+        "properties": {
+          "task": {
+            "$ref": "#/components/schemas/TaskRead"
+          },
+          "board_revision": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          }
+        },
+        "required": [
+          "task",
+          "board_revision"
+        ]
+      },
+      "TaskTimelineGroup": {
+        "type": "object",
+        "properties": {
+          "total": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TaskPlanningItem"
+            }
+          },
+          "next_cursor": {
+            "type": "string"
+          },
+          "section": {
+            "type": "string",
+            "enum": [
+              "scheduled",
+              "unscheduled"
+            ]
+          }
+        },
+        "required": [
+          "section",
+          "total",
+          "items",
+          "next_cursor"
+        ]
+      },
+      "TaskTimelinePage": {
+        "type": "object",
+        "properties": {
+          "board_revision": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          },
+          "groups": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TaskTimelineGroup"
+            }
+          },
+          "from": {
+            "type": "string",
+            "format": "date",
+            "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+          },
+          "to": {
+            "type": "string",
+            "format": "date",
+            "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+          },
+          "outside_window_total": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "board_revision",
+          "groups",
+          "from",
+          "to",
+          "outside_window_total"
         ]
       },
       "DelegationTargets": {
@@ -8073,6 +8804,54 @@
         "tags": [
           "Integrations"
         ]
+      },
+      "patch": {
+        "operationId": "updateTaskPlanning",
+        "parameters": [
+          {
+            "name": "task_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Task planning result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskPlanningMutation"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Scoped resource not found"
+          },
+          "409": {
+            "description": "Task locked or revision changed"
+          },
+          "422": {
+            "description": "Invalid input"
+          },
+          "413": {
+            "description": "Body exceeds 128 KiB"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TaskPlanningUpdate"
+              }
+            }
+          }
+        }
       }
     },
     "/api/v1/integrations/{provider}/webhooks": {
@@ -8700,6 +9479,15 @@
               "maxLength": 2048,
               "default": ""
             }
+          },
+          {
+            "name": "task_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
           }
         ],
         "responses": {
@@ -8720,6 +9508,326 @@
             "description": "Invalid query or cursor"
           }
         }
+      }
+    },
+    "/api/v1/projects/{project_id}/task-planning": {
+      "get": {
+        "operationId": "listTaskPlanning",
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 200
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/TaskStatus"
+            }
+          },
+          {
+            "name": "priority",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/TaskPriority"
+            }
+          },
+          {
+            "name": "repository_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "preferred_agent_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 50
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 2048
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Task planning result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskPlanningPage"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Scoped resource not found"
+          },
+          "409": {
+            "description": "Task locked or revision changed"
+          },
+          "422": {
+            "description": "Invalid input"
+          }
+        }
+      }
+    },
+    "/api/v1/tasks/{task_id}/planning": {
+      "get": {
+        "operationId": "getTaskPlanning",
+        "parameters": [
+          {
+            "name": "task_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Task planning result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskPlanningDetail"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Scoped resource not found"
+          },
+          "409": {
+            "description": "Task locked or revision changed"
+          },
+          "422": {
+            "description": "Invalid input"
+          }
+        }
+      }
+    },
+    "/api/v1/tasks/{task_id}/move": {
+      "post": {
+        "operationId": "moveTask",
+        "parameters": [
+          {
+            "name": "task_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Task planning result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskPlanningMutation"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Scoped resource not found"
+          },
+          "409": {
+            "description": "Task locked or revision changed"
+          },
+          "422": {
+            "description": "Invalid input"
+          },
+          "413": {
+            "description": "Body exceeds 128 KiB"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TaskMove"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/projects/{project_id}/task-timeline": {
+      "get": {
+        "operationId": "listTaskTimeline",
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 200
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/TaskStatus"
+            }
+          },
+          {
+            "name": "priority",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/TaskPriority"
+            }
+          },
+          {
+            "name": "repository_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "preferred_agent_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 50
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 4096
+            }
+          },
+          {
+            "name": "from",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "date",
+              "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+            }
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "date",
+              "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+            }
+          },
+          {
+            "name": "section",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "scheduled",
+                "unscheduled"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Scheduled and Unscheduled Task pages with exact filtered totals",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskTimelinePage"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Scoped resource not found"
+          },
+          "409": {
+            "description": "Task locked or revision changed"
+          },
+          "422": {
+            "description": "Invalid input"
+          }
+        },
+        "description": "Bounded read-only Timeline. Inclusive from/to, at most 366 days. Default excludes cancelled Tasks. Unscheduled Tasks match filters regardless of window. Each section has independent keyset pagination. Cursor requires section and binds all filters, dates, limit and board revision; changed revision returns 409. Responses use one repeatable-read snapshot and Cache-Control: no-store."
       }
     },
     "/api/v1/agents/{agent_id}/delegation-targets": {

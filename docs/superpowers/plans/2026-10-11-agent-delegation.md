@@ -264,9 +264,9 @@ remain intact. HTTP/MCP tool counts and generated contracts reflect this base.
 Task planning migrations `0016` and `0017` and their upgrade tests are included
 byte-for-byte from the frozen `7443e137` baseline. This preserves the migration
 identities used by the existing Task/Gantt release; delegation remains `0018`.
-Task planning handlers, components and later changes stay in their separate
-branch. Production rollout must first reconcile that application's release with
-GitHub main; deploying this branch alone would omit its Task/Gantt features.
+The initial draft kept Task planning handlers, components and later changes in
+their separate branch. The stacked release integration below supersedes that
+limitation; the historical main-only draft must not be deployed by itself.
 
 The reconciled branch passed formatting, module verification/tidy, vet and build.
 Its full Go race suite passed with disposable PostgreSQL and real Docker: 488
@@ -286,3 +286,34 @@ production rollout remain untested in this integration step.
 A focused independent review found no issues in the validation fix, contract/MCP
 reconciliation, preserved reviewer isolation, or migration ordering. It approved
 publication as a draft PR with the production integration prerequisite above.
+
+### Stacked release integration on 2026-10-16
+
+The delegation branch now incorporates prerequisite Task/Gantt release commit
+`04d3349`, which reconciles the released source `e27a62d` with GitHub main while
+preserving the merged reviewer, provider, and deployment fixes. The prerequisite
+owns migrations `0016`/`0017`; delegation owns `0018`. Shared contracts expose both
+features, and MCP exposes 46 full-control tools and 24 read-only tools. The draft
+PR will target the prerequisite branch so its diff remains focused on delegation.
+
+The combined branch passed formatting, module verification/tidy, vet and build.
+The full Go race suite passed with disposable PostgreSQL and real Docker: 518
+top-level tests, 1,248 passing test/subtest records across 24 packages. Only the
+standalone worktree subprocess helper skipped in its parent harness. Contracts,
+TypeScript, all 47 frontend tests and the production frontend build passed.
+
+All 21 console/delegation browser tests passed. The three real-API Task planning
+scenarios and combined MCP discovery passed against both the local Go stack and a
+freshly built default Compose stack. The prerequisite had already passed all 31
+Task/Kanban and 26 Gantt browser scenarios; their implementation is unchanged by
+the merge.
+
+The focused independent review found one Compose test fixture integration issue:
+the imported planning test used the local API port and a host-only repository.
+Both branches now use the existing mode-specific URL and mounted Git bundle
+pattern. The reviewer cleared the correction, and the checks above verify both
+modes. Contracts, migration ordering, Task content locks and main's reviewer Git
+isolation were preserved. The disposable test services were removed afterward.
+
+Both PRs remain drafts. No production deployment/migration, live-model execution
+or live provider writes were performed.

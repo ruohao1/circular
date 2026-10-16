@@ -279,3 +279,60 @@ outcome. Automatic GitHub/Linear publication belongs to the root; explicit manua
 publication retains its existing authorization. See
 [Codex backend](codex-backend.md#bounded-specialist-delegation) for limits,
 checkpoint semantics, rollout and recovery diagnostics.
+
+## Task planning tools
+
+Full control exposes 46 tools; read-only exposes 24. `list_task_planning` returns
+bounded groups (up to 50 Tasks per stage by default, at most 100) with totals,
+Run summaries and revision-bound cursors. Supply a status when continuing a group's
+cursor, retaining Project and all filters. Default groups exclude cancelled;
+request `status: "cancelled"` explicitly. A stale cursor requires a fresh first page.
+`get_task_planning` returns editable-field capabilities, both revisions and the
+Task detail console URL. Both tools are available read-only.
+
+`create_task` accepts optional `priority` and `preferred_agent_id`; it does not
+start a Run. `update_task` edits only supplied fields. Omission preserves a value;
+explicit null clears Repository or preferred Agent when allowed:
+
+```json
+{"task_id":"<Task UUID>","expected_revision":4,"priority":"high","preferred_agent_id":null,"repository_id":null}
+```
+
+`planned_start_date` and `planned_finish_date` are optional calendar dates in
+`YYYY-MM-DD` form, years 0001–9999. Finish is inclusive; equal dates mean one day.
+Omitting either field preserves it, and null clears it. A partial schedule is
+Unscheduled. Whenever either field is supplied (including null or an unchanged
+value), also supply `expected_board_revision` from `get_task_planning`:
+
+```json
+{"task_id":"<Task UUID>","expected_revision":4,"expected_board_revision":12,"planned_start_date":"2026-10-04","planned_finish_date":"2026-10-06"}
+```
+
+Dates and other supplied fields save atomically. A stale Task or planning revision
+rejects the whole edit, including a no-op; reload before expressing a new intent.
+Dates remain editable on source-managed Tasks or while Runs are active, subject
+to the existing locks on other fields. Dates never gate Run launch. Task creation
+still starts with no dates; save dates afterward through `update_task`.
+
+`move_task` accepts one placement and both fresh revisions:
+
+```json
+{"task_id":"<Task UUID>","expected_revision":5,"expected_board_revision":12,"status":"ready","placement":"end"}
+```
+
+Placements are `start`, `end`, `up`, `down`, `before`, and `after`; only the last
+two require `anchor_task_id` (a Task in the destination stage and same Project).
+Up/down stay within the current stage. Never derive saved positions from a filtered
+list index. On HTTP 409, re-read and decide whether to retry; no blind replay.
+Source-managed content, active-Run instructions and post-first-Run Repository locks
+apply to MCP exactly as to the console. Planning changes never start, cancel or
+reschedule Runs, and do not alter their immutable input snapshots or actual Agent.
+
+
+`list_task_timeline` is available in full and read-only modes. Supply `project_id`,
+`from` and `to` as inclusive YYYY-MM-DD dates (at most 366 days). It returns bounded
+scheduled and Unscheduled sections with exact totals; the default limit is 20 per
+section and maximum 100. Continue with `section` and its `next_cursor`, keeping
+filters, window and limit unchanged. A revision conflict requires reloading both
+sections. The existing 512 KiB output guard requests a smaller page limit rather
+than truncating results. Timeline is a planning read and never starts Runs.

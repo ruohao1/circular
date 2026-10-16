@@ -1,6 +1,13 @@
 import { Link } from "@tanstack/react-router";
 import { ArrowRight, LoaderCircle } from "lucide-react";
-import type { Agent, Project, Repository, Task } from "@/api";
+import type { Agent, Project, Repository, Task, TaskPriority } from "@/api";
+import {
+  priorityLabels,
+  taskPriorities,
+  stageLabels,
+  taskStages,
+} from "@/lib/task-planning";
+import { TaskScheduleFields } from "@/components/tasks/task-schedule-fields";
 import { ErrorAlert } from "@/components/error-alert";
 import { ResourceSelect } from "@/components/resource-select";
 import { Button } from "@/components/ui/button";
@@ -19,6 +26,10 @@ export type DraftFields = {
   description: string;
   repositoryId: string;
   agentId: string;
+  priority: TaskPriority;
+  boardStage?: Task["status"];
+  planned_start_date: string;
+  planned_finish_date: string;
 };
 export type LaunchDraft = DraftFields & {
   projectId: string;
@@ -26,12 +37,17 @@ export type LaunchDraft = DraftFields & {
   partial?: { taskId: string; agent: Agent; repository: Repository };
   error?: string;
   savedTaskId?: string;
+  repositoryInitialized?: boolean;
+  agentInitialized?: boolean;
+  agentExplicitlySelected?: boolean;
 };
 export type TaskLauncherDialogProps = {
   open: boolean;
   pending: boolean;
   loading: boolean;
   canLaunch: boolean;
+  canSave: boolean;
+  saving: boolean;
   project?: Project;
   draft?: LaunchDraft;
   repositories: Repository[];
@@ -42,6 +58,7 @@ export type TaskLauncherDialogProps = {
   onDraftChange(patch: Partial<DraftFields>): void;
   onOpenChange(open: boolean): void;
   onSubmit(): void;
+  onSave(): void;
   onRetry?(): void;
   onStartAnother(): void;
   onSetup(section: "repositories" | "agents"): void;
@@ -49,12 +66,14 @@ export type TaskLauncherDialogProps = {
 };
 export function TaskLauncherDialog(p: TaskLauncherDialogProps) {
   const { draft, pending } = p;
+  const planningOnly = !!draft?.boardStage;
   const readonly = !!draft?.imported || !!draft?.partial;
   const repository = draft?.partial?.repository;
   const agent = draft?.partial?.agent;
   const repositories = repository ? [repository] : p.repositories;
   const agents = agent ? [agent] : p.agents.filter((a) => a.enabled);
   const selectedAgent = agent ?? agents.find((a) => a.id === draft?.agentId);
+  const sourceManaged = !!draft?.imported?.external_refs?.linear;
   const unavailable =
     !p.loading &&
     !p.optionsError &&
@@ -76,13 +95,17 @@ export function TaskLauncherDialog(p: TaskLauncherDialogProps) {
             {p.discovery
               ? "Repository discovery"
               : draft?.imported
-                ? "Imported Task"
+                ? sourceManaged
+                  ? "Imported Task"
+                  : "Saved Task"
                 : "New Task"}
           </DialogTitle>
           <DialogDescription className="text-sm text-muted-foreground">
             {p.discovery
               ? "Get a project brief, priorities, and recommended agents from the repository."
-              : "Give an Agent a Task to run in an isolated Workspace."}
+              : planningOnly
+                ? "Add work to the board. Dates are optional."
+                : "Save work for later, or start an Agent in an isolated Workspace."}
           </DialogDescription>
           {p.project && (
             <p className="text-xs text-muted-foreground">
@@ -97,7 +120,8 @@ export function TaskLauncherDialog(p: TaskLauncherDialogProps) {
           className="space-y-5"
           onSubmit={(e) => {
             e.preventDefault();
-            p.onSubmit();
+            if (planningOnly) p.onSave();
+            else p.onSubmit();
           }}
         >
           <fieldset
@@ -112,40 +136,96 @@ export function TaskLauncherDialog(p: TaskLauncherDialogProps) {
                 onChange={(e) => p.onDraftChange({ title: e.target.value })}
                 readOnly={readonly}
                 required
-                maxLength={500}
+                maxLength={1000}
                 placeholder="What would you like to work on?"
               />
             </div>
+            {draft?.boardStage && (
+              <ResourceSelect
+                id="new-task-stage"
+                label="Workflow stage"
+                value={draft.boardStage}
+                onValueChange={(value) => {
+                  const stage = taskStages.find((stage) => stage === value);
+                  if (stage) p.onDraftChange({ boardStage: stage });
+                }}
+                options={taskStages.map((value) => ({
+                  value,
+                  label: stageLabels[value],
+                }))}
+                placeholder="Workflow stage"
+                disabled={pending}
+              />
+            )}
             <div className="grid min-w-0 gap-4 sm:grid-cols-2">
               <ResourceSelect
                 id="repository"
                 label="Repository"
-                value={draft?.repositoryId ?? ""}
-                onValueChange={(repositoryId) =>
-                  p.onDraftChange({ repositoryId })
-                }
-                options={repositories.map((r) => ({
-                  value: r.id,
-                  label: r.name,
-                }))}
+                value={draft?.repositoryId || "none"}
+                onValueChange={(repositoryId) => {
+                  if (repositoryId)
+                    p.onDraftChange({
+                      repositoryId: repositoryId === "none" ? "" : repositoryId,
+                    });
+                }}
+                options={[
+                  { value: "none", label: "No Repository" },
+                  ...repositories.map((r) => ({
+                    value: r.id,
+                    label: r.name,
+                  })),
+                ]}
                 placeholder="No repositories"
                 disabled={readonly || pending}
-                required
               />
               <ResourceSelect
                 id="agent"
                 label="Agent"
-                value={draft?.agentId ?? ""}
-                onValueChange={(agentId) => p.onDraftChange({ agentId })}
-                options={agents.map((a) => ({
-                  value: a.id,
-                  label: `${a.name} · ${a.backend}`,
-                }))}
+                value={draft?.agentId || "none"}
+                onValueChange={(agentId) => {
+                  if (agentId)
+                    p.onDraftChange({
+                      agentId: agentId === "none" ? "" : agentId,
+                    });
+                }}
+                options={[
+                  { value: "none", label: "No preferred Agent" },
+                  ...(draft?.agentId &&
+                  !agents.some((a) => a.id === draft.agentId)
+                    ? [
+                        {
+                          value: draft.agentId,
+                          label: "Unavailable preferred Agent · choose another",
+                          disabled: true,
+                        },
+                      ]
+                    : []),
+                  ...agents.map((a) => ({
+                    value: a.id,
+                    label: `${a.name} · ${a.backend}`,
+                  })),
+                ]}
                 placeholder="No enabled agents"
                 disabled={pending || !!draft?.partial}
-                required
               />
             </div>
+            {!readonly && (
+              <ResourceSelect
+                id="task-priority"
+                label="Priority"
+                value={draft?.priority ?? "none"}
+                onValueChange={(value) =>
+                  p.onDraftChange({
+                    priority: taskPriorities.find((p) => p === value) ?? "none",
+                  })
+                }
+                options={taskPriorities.map((value) => ({
+                  value,
+                  label: priorityLabels[value],
+                }))}
+                placeholder="No priority"
+              />
+            )}
             <div className="grid gap-2">
               <Label htmlFor="description">
                 Description{" "}
@@ -166,13 +246,16 @@ export function TaskLauncherDialog(p: TaskLauncherDialogProps) {
                 placeholder="Add context, constraints, or a definition of done."
               />
             </div>
+            {planningOnly && draft && (
+              <TaskScheduleFields draft={draft} onChange={p.onDraftChange} />
+            )}
           </fieldset>
           {p.loading && (
             <p role="status" className="text-sm text-muted-foreground">
               Loading Task and launch options…
             </p>
           )}
-          {unavailable && (
+          {unavailable && !planningOnly && (
             <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border bg-muted/30 p-3">
               <p className="text-sm text-muted-foreground">
                 {!repositories.length
@@ -218,14 +301,26 @@ export function TaskLauncherDialog(p: TaskLauncherDialogProps) {
             </p>
           )}
           <div className="flex flex-wrap items-center justify-between gap-3 border-t pt-5">
-            <span className="text-xs text-muted-foreground">
-              {draft?.partial
-                ? `Task saved · ${draft.partial.taskId.slice(0, 8)}`
-                : selectedAgent
-                  ? `${selectedAgent.backend === "fake" ? "Network disabled" : "Network enabled"} · Dedicated Workspace`
-                  : "Select a Repository and Agent"}
-            </span>
-            <div className="flex flex-wrap gap-2">
+            {!planningOnly && (
+              <span className="text-xs text-muted-foreground">
+                {draft?.partial
+                  ? `Task saved · ${draft.partial.taskId.slice(0, 8)}`
+                  : selectedAgent
+                    ? `${selectedAgent.backend === "fake" ? "Network disabled" : "Network enabled"} · Dedicated Workspace`
+                    : "Select a Repository and Agent"}
+              </span>
+            )}
+            <div className="ml-auto flex flex-wrap gap-2">
+              {!readonly && (
+                <Button
+                  type={planningOnly ? "submit" : "button"}
+                  variant={planningOnly ? "default" : "outline"}
+                  disabled={pending || !p.canSave}
+                  onClick={planningOnly ? undefined : p.onSave}
+                >
+                  {p.saving ? "Saving…" : "Save Task"}
+                </Button>
+              )}
               {draft?.partial && (
                 <Button
                   type="button"
@@ -236,18 +331,20 @@ export function TaskLauncherDialog(p: TaskLauncherDialogProps) {
                   Start another Task
                 </Button>
               )}
-              <Button type="submit" disabled={pending || !p.canLaunch}>
-                {pending ? (
-                  <LoaderCircle className="animate-spin" aria-hidden="true" />
-                ) : (
-                  <ArrowRight aria-hidden="true" />
-                )}
-                {pending
-                  ? "Starting…"
-                  : draft?.partial
-                    ? "Retry starting Run"
-                    : "Start Run"}
-              </Button>
+              {!planningOnly && (
+                <Button type="submit" disabled={pending || !p.canLaunch}>
+                  {pending ? (
+                    <LoaderCircle className="animate-spin" aria-hidden="true" />
+                  ) : (
+                    <ArrowRight aria-hidden="true" />
+                  )}
+                  {pending
+                    ? "Starting…"
+                    : draft?.partial
+                      ? "Retry starting Run"
+                      : "Start Run"}
+                </Button>
+              )}
             </div>
           </div>
         </form>

@@ -39,8 +39,8 @@ is ignored by git and excluded from Docker build contexts.
 
 Target: `ubuntu@141.95.112.190`, SSH key `~/.ssh/imoki-lab`, deployment directory
 `/opt/circular`. Ubuntu 26.04 runs Docker 29.1.3 and Compose 2.40.3 on 2 CPUs and
-4 GB RAM. Server images now use release tag
-`vps-worker-receipts-20261004`. Caddy is pinned by digest and retains its
+4 GB RAM. API and migrator use `vps-tasks-20261007`; worker and webhook receiver
+retain `vps-console-20261007`. Caddy is pinned by digest and retains its
 certificate state in a Docker volume.
 
 The production configuration is in `infra/production/`. The public vitrine is
@@ -52,6 +52,41 @@ The DNS record remains Porkbun A host `circular`, answer `141.95.112.190`, TTL
 600. The root domain's existing records were not changed. Public ports 80 and
 443 serve the vitrine; private port 8080 remains bound to loopback. Backend and
 database services have no published host ports.
+
+## Tasks, Kanban and planned dates — 2026-10-07
+
+The private console now serves `/tasks?view=board` with List/Board views and
+planned start/finish fields. The API and migrator use `vps-tasks-20261007`.
+Schema revisions `0016` and `0017` were applied together. Before/after
+fingerprints confirm all existing table data was preserved, excluding the
+new planning columns; all 20 Tasks and 22 terminal Runs remain.
+
+The candidate preserves the deployed review/Git source and the newer console
+release. Worker, webhook receiver, runner, gateway, provider configuration,
+and public/private access settings remain unchanged. The API and migrator
+use scoped release overrides; the shared release remains `vps-console-20261007`.
+
+The first activation restarted an obsolete migration container through Compose
+dependency handling. API/web automatically reverted; the unchanged worker and
+receiver were restarted directly. The successful resume replaced the migration
+service with the schema-compatible image, then activated the tested API/web.
+No database rollback or new Run was performed.
+
+Database, configuration and previous web build are backed up privately at
+`/opt/circular/backups/vps-tasks-20261007/`. API/web rollback can retain schema
+`0017`; keep `CIRCULAR_MIGRATE_RELEASE=vps-tasks-20261007` and point only
+`CIRCULAR_API_RELEASE` back to `vps-console-20261007`. Restore the prior index
+from the web archive. Old hashed assets remain available for open tabs.
+
+Release source, hashes, guarded scripts and checks are retained in
+`infra/production/.local/tasks-ui-deploy-20261006/`. Verification passed 41
+frontend tests, 46 mocked browser cases, typecheck, contract check, production
+build, and race-enabled migration/PostgreSQL/HTTP/MCP/integration suites.
+Live browser checks verified the five-column Board, List switching, date
+editor, search, and 390px layout without saving changes or creating Runs.
+There were no browser errors or failed requests. All 51 public/private
+separation checks passed; console/API access still requires the SSH tunnel
+and existing owner login.
 
 ## First real repository request — 2026-10-03
 

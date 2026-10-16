@@ -10,7 +10,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { RunDuration } from "@/components/console/run-duration";
+import { RunDuration } from "./run-duration";
 
 export function RunQueue({ items }: { items: RunQueueItem[] }) {
   return (
