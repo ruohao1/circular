@@ -1,4 +1,5 @@
 import type { Page } from "@playwright/test";
+import type { components } from "../../apps/web/src/generated/api";
 
 export const A = "11111111-1111-4111-8111-111111111111",
   B = "22222222-2222-4222-8222-222222222222",
@@ -65,6 +66,7 @@ export async function fixture(page: Page) {
     writeError: 0,
     writeGate: undefined as Promise<void> | undefined,
     active: false,
+    latestRun: null as components["schemas"]["TaskPlanningRun"] | null,
     failRun: false,
     history: false,
     gate: undefined as Promise<void> | undefined,
@@ -192,8 +194,8 @@ export async function fixture(page: Page) {
                 repositories.find((r) => r.id === task.repository_id) ?? null,
               preferred_agent:
                 agents.find((a) => a.id === task.preferred_agent_id) ?? null,
-              latest_run: null,
-              run_count: state.active ? 1 : 0,
+              latest_run: state.latestRun,
+              run_count: Number(!!state.latestRun) + Number(state.active),
               active_run_count: state.active ? 1 : 0,
             })),
             next_cursor:
@@ -261,8 +263,8 @@ export async function fixture(page: Page) {
               repositories.find((r) => r.id === task.repository_id) ?? null,
             preferred_agent:
               agents.find((a) => a.id === task.preferred_agent_id) ?? null,
-            latest_run: null,
-            run_count: state.active ? 1 : 0,
+            latest_run: state.latestRun,
+            run_count: Number(!!state.latestRun) + Number(state.active),
             active_run_count: state.active ? 1 : 0,
           }));
         const start = cursor ? Number(cursor.split(":")[1]) : 0;

@@ -2,6 +2,125 @@ import { test, expect } from "@playwright/test";
 import { A, B, T, dates, fixture } from "./task-fixture";
 
 for (const width of [390, 1440]) {
+  test(`compact List keeps task and execution metadata distinct at ${width}px`, async ({
+    page,
+  }, info) => {
+    const state = await fixture(page);
+    const title =
+      "Compact planning task with a deliberately long title and an unbroken-reference-abcdefghijklmnopqrstuvwxyz0123456789abcdefghijklmnopqrstuvwxyz0123456789";
+    state.tasks[0].title = title;
+    state.tasks[0].priority = "high";
+    state.tasks[0].planned_start_date = "2026-10-16";
+    state.tasks[0].planned_finish_date = "2026-10-20";
+    state.agents[0].name = "Preferred specialist";
+    state.agents[0].enabled = false;
+    state.active = true;
+    state.latestRun = {
+      id: B,
+      agent_id: "66666666-6666-4666-8666-666666666666",
+      agent_name: "Actual executor",
+      attempt: 3,
+      created_at: dates.created_at,
+      started_at: dates.created_at,
+      finished_at: dates.updated_at,
+      kind: "coding",
+      status: "succeeded",
+    };
+    await page.setViewportSize({ width, height: 1000 });
+    await page.goto(
+      "/tasks?view=list&q=Compact&priority=high&date=2026-10-16&scale=month",
+    );
+    const group = page.getByRole("region", { name: "Backlog", exact: true });
+    const row = group.getByRole("listitem");
+    const link = row.getByRole("link", { name: title, exact: true });
+    await expect(row).toHaveCount(1);
+    await expect(link).toBeVisible();
+    for (const value of [
+      /Backlog/,
+      /High/,
+      /Source/,
+      /Preferred specialist/,
+      /disabled/i,
+      /2026-10-16.*2026-10-20/,
+      /succeeded/i,
+      /Actual executor/,
+      /Attempt 3/i,
+      /1 active Run/,
+    ]) {
+      await expect(link).toHaveAccessibleDescription(value);
+    }
+    await expect(link.getByText("succeeded", { exact: true })).toBeVisible();
+    await expect(link.getByText("1 active", { exact: true })).toBeVisible();
+    if (width === 1440) {
+      await expect(link.getByText(/Preferred specialist/)).toBeVisible();
+      await expect(link.getByText("Disabled", { exact: true })).toBeVisible();
+      const bounds = (await row.boundingBox())!;
+      expect(bounds.height).toBeGreaterThanOrEqual(40);
+      expect(bounds.height).toBeLessThanOrEqual(48);
+    }
+    const rowBounds = (await row.boundingBox())!;
+    expect(rowBounds.height).toBeLessThanOrEqual(64);
+    const linkBounds = (await link.boundingBox())!;
+    expect(Math.abs(rowBounds.width - linkBounds.width)).toBeLessThanOrEqual(2);
+    expect(
+      await page.evaluate(
+        () => document.documentElement.scrollWidth <= innerWidth,
+      ),
+    ).toBe(true);
+    await page.screenshot({
+      path: info.outputPath(`compact-list-${width}.png`),
+    });
+    await link.click();
+    await expect(
+      page.getByRole("dialog").getByLabel("Task title", { exact: true }),
+    ).toHaveValue(title);
+    const url = new URL(page.url());
+    expect(url.searchParams.get("view") ?? "list").toBe("list");
+    expect(Object.fromEntries(url.searchParams)).toMatchObject({
+      q: "Compact",
+      priority: "high",
+      date: "2026-10-16",
+      scale: "month",
+      taskId: T,
+    });
+    expect(state.posts).toHaveLength(0);
+    expect(state.tasks[0].status).toBe("open");
+  });
+}
+
+test("compact List retains server totals while paging a filtered stage", async ({
+  page,
+}) => {
+  const state = await fixture(page);
+  for (let i = 0; i < 54; i++) {
+    state.tasks.push({
+      ...state.tasks[0],
+      id: `compact-${i}`,
+      title: `Compact ${i}`,
+      priority: "high",
+    });
+  }
+  await page.goto("/tasks?view=list&priority=high&q=Compact");
+  const group = page.getByRole("region", { name: "Backlog", exact: true });
+  await expect(group.getByRole("listitem")).toHaveCount(50);
+  await expect(group.getByText("54", { exact: true })).toBeVisible();
+  await group
+    .getByRole("button", { name: "Load more Backlog Tasks", exact: true })
+    .click();
+  await expect(group.getByRole("listitem")).toHaveCount(54);
+  await expect(group.getByText("54", { exact: true })).toBeVisible();
+  expect(
+    state.urls.some(
+      (url) =>
+        url.includes("cursor=2%3A50") &&
+        url.includes("priority=high") &&
+        url.includes("q=Compact"),
+    ),
+  ).toBe(true);
+  expect(state.posts).toHaveLength(0);
+});
+
+for (const width of [390, 1440]) {
   test(`Kanban quick add saves in its column and updates every view at ${width}px`, async ({
     page,
   }, info) => {
