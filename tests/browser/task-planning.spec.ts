@@ -2,14 +2,24 @@ import { test, expect } from "@playwright/test";
 import { execFileSync } from "node:child_process";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
-const base = "http://127.0.0.1:18000/api/v1";
+import { basename, join } from "node:path";
+
+const compose = process.env.CIRCULAR_E2E_COMPOSE === "1";
+const base = `http://127.0.0.1:${compose ? "8000" : "18000"}/api/v1`;
 
 test("save, edit, reload and launch the same Task through the real API", async ({
   page,
   request,
 }, info) => {
-  const source = mkdtempSync(join(tmpdir(), "circular-planning-source-"));
+  const source = mkdtempSync(
+    join(
+      compose ? process.env.CIRCULAR_EXECUTION_HOST_ROOT! : tmpdir(),
+      "circular-planning-source-",
+    ),
+  );
+  const cloneUrl = compose
+    ? `/var/lib/circular/${basename(source)}/fixture.bundle`
+    : source;
   const git = (...args: string[]) =>
     execFileSync("git", ["-C", source, ...args]);
   git("init", "--initial-branch=main");
@@ -18,6 +28,8 @@ test("save, edit, reload and launch the same Task through the real API", async (
   writeFileSync(join(source, "README.md"), "fixture\n");
   git("add", ".");
   git("commit", "-m", "initial");
+  // A bundle is readable across host/container UIDs without relaxing Git ownership checks.
+  if (compose) git("bundle", "create", "fixture.bundle", "--all");
   const post = async (path: string, data: object) => {
     const r = await request.post(`${base}/${path}`, { data });
     expect(r.status()).toBe(201);
@@ -30,7 +42,7 @@ test("save, edit, reload and launch the same Task through the real API", async (
     await post("repositories", {
       project_id: project.id,
       name: "Source",
-      clone_url: source,
+      clone_url: cloneUrl,
     });
     await post("agents", {
       project_id: project.id,

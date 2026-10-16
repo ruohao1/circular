@@ -72,6 +72,14 @@ passed 72 tests/subtests without skips. All 31 Task/Kanban and 26 Gantt browser
 tests passed. A Compose configuration check verified shared/scoped image tags and
 private backend ports using synthetic values. No production state was changed.
 
+A focused integration review found that the imported real-API planning tests used
+the local API port and a host-only repository path in Compose mode. The fixture
+now reuses the existing execution tests' mode-specific API URL and mounted Git
+bundle, without relaxing Git ownership checks. All three planning scenarios and
+MCP discovery passed against both the local Go stack and a freshly built default
+Compose stack on the combined delegation branch. Both draft branches include the
+fixture correction.
+
 This is the prerequisite branch for the delegation draft PR. The combined branch
 must retain migration `0018` for delegation and pass its integration checks before
 either draft is considered for release.
