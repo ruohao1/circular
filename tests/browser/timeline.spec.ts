@@ -46,13 +46,11 @@ for (const width of [390, 667, 1440]) {
     const filters = page.getByRole("button", { name: /^Filters/ });
     if (width === 1440) {
       const controls = [
-        page.getByRole("heading", { name: "Tasks", exact: true }),
-        page.getByRole("tablist", { name: "Task views" }),
-        page.getByRole("button", { name: "Today", exact: true }),
-        page.getByLabel("Gantt anchor", { exact: true }),
-        page.getByRole("group", { name: "Gantt scale" }),
+        page.getByRole("button", { name: "Active", exact: true }),
+        page.getByRole("tablist", { name: "Task layouts" }),
         page.getByRole("textbox", { name: "Search Tasks", exact: true }),
         filters,
+        page.getByRole("button", { name: "Show Task sidebar", exact: true }),
       ];
       const centers = await Promise.all(
         controls.map(async (control) => {
@@ -61,6 +59,12 @@ for (const width of [390, 667, 1440]) {
         }),
       );
       expect(Math.max(...centers) - Math.min(...centers)).toBeLessThan(2);
+      const breadcrumb = (await page
+        .getByRole("navigation", { name: "Breadcrumb", exact: true })
+        .boundingBox())!;
+      expect(breadcrumb.y + breadcrumb.height).toBeLessThan(
+        Math.min(...centers),
+      );
     }
     expect(
       await page.evaluate(
@@ -91,7 +95,7 @@ for (const width of [390, 667, 1440]) {
       .getByRole("combobox", { name: "Priority filter", exact: true })
       .click();
     await page.getByRole("option", { name: "High", exact: true }).click();
-    await expect(filters).toHaveText("Filters (1)");
+    await expect(filters).toHaveAccessibleName("Filters (1)");
     await expect(page).toHaveURL(/priority=high/);
     await panel
       .getByRole("combobox", { name: "Workflow filter", exact: true })
@@ -103,7 +107,7 @@ for (const width of [390, 667, 1440]) {
     await expect(filters).toBeFocused();
     await expect(page.locator('[data-slot="gantt-bar"]')).toHaveCount(0);
     await page.getByRole("tab", { name: "Kanban", exact: true }).click();
-    await expect(filters).toHaveText("Filters (1)");
+    await expect(filters).toHaveAccessibleName("Filters (1)");
     expect(
       await page.evaluate(
         () => document.documentElement.scrollWidth <= innerWidth,

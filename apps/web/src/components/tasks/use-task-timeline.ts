@@ -35,6 +35,7 @@ export function useTaskTimeline({
   paused: boolean;
 }): TaskTimelineState {
   const values = {
+    scope: search.scope,
     ...timelineWindow(search.date ?? "0001-01-01", search.scale),
     q: search.q,
     status: search.status || undefined,

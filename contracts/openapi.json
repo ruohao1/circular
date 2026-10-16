@@ -9533,6 +9533,20 @@
             }
           },
           {
+            "name": "scope",
+            "in": "query",
+            "required": false,
+            "description": "Task preset: active includes ready, in_progress, and in_review; backlog includes open; all includes every status, including completed and cancelled. An explicit status intersects the preset. When omitted, returns every status except cancelled unless status is explicitly supplied. Cursors are bound to the scope.",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "active",
+                "backlog",
+                "all"
+              ]
+            }
+          },
+          {
             "name": "status",
             "in": "query",
             "required": false,
@@ -9717,6 +9731,20 @@
             "schema": {
               "type": "string",
               "maxLength": 200
+            }
+          },
+          {
+            "name": "scope",
+            "in": "query",
+            "required": false,
+            "description": "Task preset: active includes ready, in_progress, and in_review; backlog includes open; all includes every status, including completed and cancelled. An explicit status intersects the preset. When omitted, returns every status except cancelled unless status is explicitly supplied. Cursors are bound to the scope.",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "active",
+                "backlog",
+                "all"
+              ]
             }
           },
           {

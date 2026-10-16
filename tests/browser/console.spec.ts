@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+import { fixture as taskFixture } from "./task-fixture";
 
 const A = "11111111-1111-4111-8111-111111111111";
 const B = "22222222-2222-4222-8222-222222222222";
@@ -253,6 +254,105 @@ async function selectProject(page: Page, name: string) {
   await page.getByRole("combobox", { name: "Project", exact: true }).click();
   await page.getByRole("option", { name, exact: true }).click();
 }
+
+for (const width of [390, 1440]) {
+  test(`Tasks breadcrumb fits at ${width}px and preserves Project selection`, async ({
+    page,
+  }, testInfo) => {
+    const state = await taskFixture(page);
+    const longName =
+      "A very long Project name with a detailed workspace label";
+    state.projects[0].name = longName;
+    await page.setViewportSize({ width, height: 900 });
+    await page.goto("/tasks");
+    const header = page.getByRole("banner");
+    const breadcrumb = header.getByRole("navigation", { name: "Breadcrumb" });
+    const project = header.getByRole("combobox", {
+      name: "Project",
+      exact: true,
+    });
+    await expect(
+      breadcrumb.getByRole("heading", { name: "Tasks", exact: true }),
+    ).toBeVisible();
+    await expect(project).toContainText(longName);
+    await expect(
+      header.getByRole("button", { name: "New Task", exact: true }),
+    ).toHaveCount(0);
+    expect((await header.boundingBox())!.height).toBeLessThanOrEqual(48);
+    expect(
+      await page.evaluate(
+        () => document.documentElement.scrollWidth <= innerWidth,
+      ),
+    ).toBe(true);
+    if (width === 390)
+      await expect(
+        header.getByRole("button", { name: "Open navigation", exact: true }),
+      ).toBeVisible();
+
+    await project.focus();
+    await page.keyboard.press("Enter");
+    await expect(
+      page.getByRole("option", { name: longName, exact: true }),
+    ).toBeFocused();
+    await page.keyboard.press("End");
+    await expect(
+      page.getByRole("option", { name: "Project B", exact: true }),
+    ).toBeFocused();
+    await page.keyboard.press("Enter");
+    await expect(project).toContainText("Project B");
+    await expect(
+      page.getByRole("link", { name: "Plan the console", exact: true }),
+    ).toHaveCount(0);
+    await selectProject(page, longName);
+    await page
+      .getByRole("link", { name: "Plan the console", exact: true })
+      .click();
+    const dialog = page.getByRole("dialog");
+    await dialog
+      .getByLabel("Task title", { exact: true })
+      .fill("Unfinished edit");
+    await expect(page.locator("#project")).toBeDisabled();
+    page.once("dialog", (confirmation) => confirmation.accept());
+    await dialog.getByRole("button", { name: "Close", exact: true }).click();
+    await expect(project).toBeEnabled();
+    await expect(
+      breadcrumb.getByRole("heading", { name: "Tasks", exact: true }),
+    ).toBeInViewport();
+    await page.screenshot({
+      path: testInfo.outputPath(`tasks-breadcrumb-${width}.png`),
+      fullPage: true,
+      animations: "disabled",
+    });
+    expect(state.posts).toHaveLength(0);
+  });
+}
+
+test("Tasks breadcrumb disables Project selection while loading and empty", async ({
+  page,
+}) => {
+  const state = await taskFixture(page);
+  state.projects.length = 0;
+  let release!: () => void;
+  const loaded = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  await page.route("**/api/v1/projects", async (route) => {
+    await loaded;
+    await route.fallback();
+  });
+  await page.goto("/tasks");
+  const project = page
+    .getByRole("banner")
+    .getByRole("combobox", { name: "Project", exact: true });
+  await expect(project).toContainText("Loading Projects…");
+  await expect(project).toBeDisabled();
+  release();
+  await expect(project).toContainText("No Projects yet");
+  await expect(project).toBeDisabled();
+  await expect(
+    page.getByRole("heading", { name: "No Projects yet", exact: true }),
+  ).toBeVisible();
+});
 
 test("Project context survives navigation and storage failure", async ({
   page,
@@ -576,6 +676,41 @@ test("Setup tabs fit their mobile grid and support keyboard selection", async ({
   await expect(
     page.getByRole("tab", { name: "Repositories", exact: true }),
   ).toHaveAttribute("aria-selected", "true");
+});
+
+test("Tasks keeps New Task disabled while a setup save finishes after navigation", async ({
+  page,
+}) => {
+  const state = await fixture(page);
+  let releaseSetup!: () => void;
+  state.setupGate = new Promise<void>((resolve) => {
+    releaseSetup = resolve;
+  });
+  await page.route("**/api/v1/projects/*/task-planning*", (route) =>
+    route.fulfill({ json: { board_revision: 1, groups: [] } }),
+  );
+  await page.goto("/setup?section=projects");
+  await page.getByLabel("Project name", { exact: true }).fill("Project C");
+  await page
+    .getByRole("button", { name: "Create project", exact: true })
+    .click();
+  await expect(
+    page.getByRole("button", { name: "Saving…", exact: true }),
+  ).toBeDisabled();
+  await page.getByRole("link", { name: "Tasks", exact: true }).click();
+  const newTask = page.getByRole("button", { name: "New Task", exact: true });
+  const project = page.getByRole("combobox", { name: "Project", exact: true });
+  await expect(project).toBeDisabled();
+  await expect(newTask).toBeDisabled();
+  releaseSetup();
+  await expect(project).toContainText("Project C");
+  await expect(newTask).toBeEnabled();
+  await newTask.click();
+  await expect(
+    page.getByRole("dialog").getByText("Project C", { exact: true }),
+  ).toBeVisible();
+  expect(state.taskPosts).toHaveLength(0);
+  expect(state.runPosts).toHaveLength(0);
 });
 
 test("Setup and request saves hold their Project", async ({ page }) => {

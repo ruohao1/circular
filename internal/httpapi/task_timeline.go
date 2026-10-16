@@ -42,7 +42,7 @@ type taskTimelinePage struct {
 	Groups             []taskTimelineGroup `json:"groups"`
 }
 
-const timelineWhere = `t.project_id=$1 AND (($2='' AND t.status<>'cancelled') OR t.status=$2)
+const timelineWhere = `t.project_id=$1 AND t.status=ANY($2::text[])
  AND ($3='' OR strpos(lower(t.title),lower($3))>0) AND ($4='' OR t.priority=$4)
  AND ($5::uuid IS NULL OR t.repository_id=$5) AND ($6::uuid IS NULL OR t.preferred_agent_id=$6)
  AND $7::date <= $8::date`
@@ -56,7 +56,12 @@ func (a *api) taskTimeline(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	q := r.URL.Query()
-	scope := taskTimelineScope{taskPlanningFilter: taskPlanningFilter{Project: project.String(), Query: strings.TrimSpace(q.Get("q")), Status: q.Get("status"), Priority: q.Get("priority")}, From: q.Get("from"), To: q.Get("to"), Section: q.Get("section")}
+	scope := taskTimelineScope{taskPlanningFilter: taskPlanningFilter{Project: project.String(), Query: strings.TrimSpace(q.Get("q")), Scope: q.Get("scope"), Status: q.Get("status"), Priority: q.Get("priority")}, From: q.Get("from"), To: q.Get("to"), Section: q.Get("section")}
+	statuses, validScope := taskPlanningStatuses(scope.Scope, scope.Status)
+	if !validScope {
+		invalid(w, "query", "scope", "value_error", "Scope must be active, backlog, or all")
+		return
+	}
 	if scope.From == "" || scope.To == "" || postgres.ValidateTaskSchedule(&scope.From, &scope.To) != nil {
 		invalid(w, "query", "from", "value_error", "from and to must be real YYYY-MM-DD dates with from on or before to")
 		return
@@ -140,7 +145,7 @@ func (a *api) taskTimeline(w http.ResponseWriter, r *http.Request) {
 		problem(w, 409, "Task Timeline changed; reload both sections before continuing")
 		return
 	}
-	args := []any{project, scope.Status, scope.Query, scope.Priority, repository, agent, scope.From, scope.To}
+	args := []any{project, statuses, scope.Query, scope.Priority, repository, agent, scope.From, scope.To}
 	var scheduled, unscheduled int64
 	err = tx.QueryRow(r.Context(), `SELECT /* task timeline totals */
  count(*) FILTER(WHERE `+timelineScheduled+` AND `+timelineOverlap+`),

@@ -45,6 +45,7 @@ export type TaskMove = components["schemas"]["TaskMove"];
 export type TaskPlanningMutation =
   components["schemas"]["TaskPlanningMutation"];
 export interface TaskPlanningQuery {
+  scope?: "active" | "backlog" | "all";
   q?: string;
   status?: Task["status"];
   priority?: TaskPriority;

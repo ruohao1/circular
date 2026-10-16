@@ -4,6 +4,7 @@ import {
   taskDropIntent,
   parseTaskPlanningSearch,
   mergeTaskPlanningPage,
+  taskPlanningOptions,
 } from "./task-planning";
 import { runQueueOptions } from "./run-queue";
 
@@ -20,6 +21,7 @@ describe("Task planning scope and pagination", () => {
       }),
     ).toEqual({
       view: "list",
+      scope: "all",
       scale: "week",
       date: undefined,
       status: "",
@@ -32,6 +34,19 @@ describe("Task planning scope and pagination", () => {
     expect(
       Array.from(parseTaskPlanningSearch({ q: "🌍".repeat(201) }).q),
     ).toHaveLength(200);
+  });
+  it("normalizes presets and keeps their server queries in separate caches", () => {
+    expect(parseTaskPlanningSearch({ scope: "bad" }).scope).toBe("all");
+    expect(parseTaskPlanningSearch({ scope: "active" }).scope).toBe("active");
+    expect(parseTaskPlanningSearch({ scope: "backlog" }).scope).toBe("backlog");
+    const all = taskPlanningOptions("project", { scope: "all" });
+    const active = taskPlanningOptions("project", { scope: "active" });
+    expect(all.queryKey).not.toEqual(active.queryKey);
+    expect(active.queryKey).toEqual([
+      "task-planning",
+      "project",
+      { scope: "active", q: "", limit: 50 },
+    ]);
   });
   it("keeps unrelated Run queue scopes compatible and retains Task history filters", () => {
     expect(

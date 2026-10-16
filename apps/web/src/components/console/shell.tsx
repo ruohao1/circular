@@ -18,6 +18,14 @@ import { ResourceSelect } from "@/components/resource-select";
 import { ErrorAlert } from "@/components/error-alert";
 import { Button } from "@/components/ui/button";
 import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
   Dialog,
   DialogContent,
   DialogTitle,
@@ -113,6 +121,7 @@ export function ConsoleShell({ children }: { children: ReactNode }) {
   });
   const navigate = useNavigate();
   const client = useQueryClient();
+  const tasksPage = pathname === "/tasks";
   function chooseProject(id: string) {
     if (selectionLocked || saving || id === selectedProject) return;
     const request = pathname.startsWith("/requests/")
@@ -149,45 +158,113 @@ export function ConsoleShell({ children }: { children: ReactNode }) {
         </p>
       </aside>
       <div className="min-w-0">
-        <header className="flex min-h-20 items-center gap-3 border-b bg-sidebar/40 px-4 py-3 sm:px-6 lg:px-8">
+        <header
+          className={
+            tasksPage
+              ? "flex h-11 items-center gap-2 border-b bg-sidebar/40 px-4 sm:px-6 lg:px-8"
+              : "flex min-h-20 items-center gap-3 border-b bg-sidebar/40 px-4 py-3 sm:px-6 lg:px-8"
+          }
+        >
           <Button
             variant="ghost"
             size="icon"
-            className="sm:hidden"
+            className="shrink-0 sm:hidden"
             aria-label="Open navigation"
             onClick={() => setMenuOpen(true)}
           >
             <Menu aria-hidden="true" />
           </Button>
-          <ResourceSelect
-            id="project"
-            label="Project"
-            className="w-full max-w-64"
-            value={selectedProject}
-            onValueChange={chooseProject}
-            options={(projects.data ?? []).map((p) => ({
-              value: p.id,
-              label: p.name,
-            }))}
-            disabled={selectionLocked || saving || projects.isPending}
-            placeholder={
-              projects.isPending ? "Loading Projects…" : "No Projects yet"
-            }
-          />
-          <Button
-            id="new-task"
-            className="ml-auto"
-            disabled={
-              !selectedProject ||
-              projects.isPending ||
-              selectionLocked ||
-              saving
-            }
-            onClick={() => openNewTask()}
-          >
-            <Plus aria-hidden="true" />
-            New Task
-          </Button>
+          {tasksPage ? (
+            <nav aria-label="Breadcrumb" className="min-w-0">
+              <ol className="flex min-w-0 items-center gap-2 text-[13px]">
+                <li className="min-w-0">
+                  <Select
+                    name="project"
+                    value={selectedProject}
+                    onValueChange={chooseProject}
+                    disabled={
+                      selectionLocked ||
+                      saving ||
+                      projects.isPending ||
+                      !projects.data?.length
+                    }
+                  >
+                    <SelectTrigger
+                      id="project"
+                      aria-label="Project"
+                      size="sm"
+                      className="max-w-64 min-w-0 border-transparent px-1.5 text-[13px] dark:bg-transparent"
+                    >
+                      <SelectValue
+                        placeholder={
+                          projects.isPending
+                            ? "Loading Projects…"
+                            : "No Projects yet"
+                        }
+                      />
+                    </SelectTrigger>
+                    <SelectContent
+                      position="popper"
+                      align="start"
+                      className="max-w-[calc(100vw-2rem)]"
+                    >
+                      <SelectGroup>
+                        {(projects.data ?? []).map((project) => (
+                          <SelectItem
+                            key={project.id}
+                            value={project.id}
+                            textValue={project.name}
+                          >
+                            <span className="truncate">{project.name}</span>
+                          </SelectItem>
+                        ))}
+                      </SelectGroup>
+                    </SelectContent>
+                  </Select>
+                </li>
+                <li aria-hidden="true" className="text-muted-foreground/60">
+                  /
+                </li>
+                <li className="shrink-0">
+                  <h1 aria-current="page" className="font-medium">
+                    Tasks
+                  </h1>
+                </li>
+              </ol>
+            </nav>
+          ) : (
+            <>
+              <ResourceSelect
+                id="project"
+                label="Project"
+                className="w-full max-w-64"
+                value={selectedProject}
+                onValueChange={chooseProject}
+                options={(projects.data ?? []).map((p) => ({
+                  value: p.id,
+                  label: p.name,
+                }))}
+                disabled={selectionLocked || saving || projects.isPending}
+                placeholder={
+                  projects.isPending ? "Loading Projects…" : "No Projects yet"
+                }
+              />
+              <Button
+                id="new-task"
+                className="ml-auto"
+                disabled={
+                  !selectedProject ||
+                  projects.isPending ||
+                  selectionLocked ||
+                  saving
+                }
+                onClick={() => openNewTask()}
+              >
+                <Plus aria-hidden="true" />
+                New Task
+              </Button>
+            </>
+          )}
         </header>
         {projects.error && (
           <div className="px-4 pt-4 sm:px-6">

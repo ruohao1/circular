@@ -37,7 +37,7 @@ export function TaskList({
   loadingGroups: string[];
 }) {
   return (
-    <div className="space-y-3">
+    <div className="@container space-y-3">
       {page.groups.map((group) => (
         <section
           key={group.status}
@@ -80,25 +80,25 @@ export function TaskList({
                         `Latest Run: ${latestRun}`,
                         activeRuns,
                       ].join(". ")}
-                      className="grid min-h-11 grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 rounded-md px-3 py-2 text-[13px] hover:bg-muted/40 focus-visible:bg-muted/40 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring sm:grid-cols-[minmax(0,1fr)_4.5rem_12rem] lg:grid-cols-[minmax(0,1fr)_4.5rem_7rem_12rem] xl:grid-cols-[minmax(0,1fr)_4.5rem_7rem_9rem_11rem_12rem]"
+                      className="grid min-h-11 grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 rounded-md px-3 py-2 text-[13px] hover:bg-muted/40 focus-visible:bg-muted/40 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring @[480px]:grid-cols-[minmax(0,1fr)_4.5rem_12rem] @[720px]:grid-cols-[minmax(0,1fr)_4.5rem_7rem_12rem] @[1000px]:grid-cols-[minmax(0,1fr)_4.5rem_7rem_9rem_11rem_12rem]"
                     >
                       <span
-                        className="line-clamp-2 min-w-0 break-words font-medium sm:line-clamp-1"
+                        className="line-clamp-2 min-w-0 break-words font-medium @[480px]:line-clamp-1"
                         title={item.task.title}
                       >
                         {item.task.title}
                       </span>
-                      <span className="hidden text-xs text-muted-foreground sm:block">
+                      <span className="hidden text-xs text-muted-foreground @[480px]:block">
                         {priorityLabels[item.task.priority]}
                       </span>
                       <span
-                        className="hidden truncate text-xs text-muted-foreground lg:block"
+                        className="hidden truncate text-xs text-muted-foreground @[720px]:block"
                         title={`Repository: ${item.repository?.name ?? "No Repository"}`}
                       >
                         {item.repository?.name ?? "No Repository"}
                       </span>
                       <span
-                        className="hidden min-w-0 items-center gap-1 text-xs text-muted-foreground xl:flex"
+                        className="hidden min-w-0 items-center gap-1 text-xs text-muted-foreground @[1000px]:flex"
                         title={`Preferred Agent: ${preferredAgent}`}
                       >
                         <span className="truncate">
@@ -110,13 +110,13 @@ export function TaskList({
                           )}
                       </span>
                       <span
-                        className="hidden truncate text-xs text-muted-foreground xl:block"
+                        className="hidden truncate text-xs text-muted-foreground @[1000px]:block"
                         title={scheduleLabel(item.task)}
                       >
                         {scheduleLabel(item.task)}
                       </span>
                       <span
-                        className="flex min-w-0 max-w-48 items-center justify-end gap-1.5 text-xs text-muted-foreground sm:justify-start"
+                        className="flex min-w-0 max-w-48 items-center justify-end gap-1.5 text-xs text-muted-foreground @[480px]:justify-start"
                         title={`Latest Run: ${latestRun}. ${activeRuns}`}
                       >
                         {item.latest_run ? (

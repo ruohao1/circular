@@ -5661,6 +5661,8 @@ export interface operations {
                 priority?: components["schemas"]["TaskPriority"];
                 q?: string;
                 repository_id?: string;
+                /** @description Task preset: active includes ready, in_progress, and in_review; backlog includes open; all includes every status, including completed and cancelled. An explicit status intersects the preset. When omitted, returns every status except cancelled unless status is explicitly supplied. Cursors are bound to the scope. */
+                scope?: "active" | "backlog" | "all";
                 status?: components["schemas"]["TaskStatus"];
             };
             header?: never;
@@ -5713,6 +5715,8 @@ export interface operations {
                 priority?: components["schemas"]["TaskPriority"];
                 q?: string;
                 repository_id?: string;
+                /** @description Task preset: active includes ready, in_progress, and in_review; backlog includes open; all includes every status, including completed and cancelled. An explicit status intersects the preset. When omitted, returns every status except cancelled unless status is explicitly supplied. Cursors are bound to the scope. */
+                scope?: "active" | "backlog" | "all";
                 section?: "scheduled" | "unscheduled";
                 status?: components["schemas"]["TaskStatus"];
                 to: string;

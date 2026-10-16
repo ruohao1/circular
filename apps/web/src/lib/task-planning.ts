@@ -40,8 +40,14 @@ export const priorityLabels: Record<TaskPriority, string> = {
   high: "High",
   urgent: "Urgent",
 };
+export const taskScopes = {
+  active: { label: "Active", stages: ["ready", "in_progress", "in_review"] },
+  backlog: { label: "Backlog", stages: ["open"] },
+  all: { label: "All Tasks", stages: taskStages },
+} as const;
 export interface TaskPlanningSearch {
   view: "list" | "board" | "timeline";
+  scope: keyof typeof taskScopes;
   scale: TimelineScale;
   date?: string;
   q: string;
@@ -57,6 +63,10 @@ export function parseTaskPlanningSearch(
   const text = (key: string) =>
     typeof search[key] === "string" ? search[key] : "";
   return {
+    scope:
+      search.scope === "active" || search.scope === "backlog"
+        ? search.scope
+        : "all",
     view:
       search.view === "timeline"
         ? "timeline"
@@ -81,6 +91,7 @@ export function taskPlanningOptions(
   query: TaskPlanningQuery = {},
 ) {
   const normalized: TaskPlanningQuery = {
+    ...(query.scope ? { scope: query.scope } : {}),
     q: query.q?.trim() ?? "",
     ...(query.status ? { status: query.status } : {}),
     ...(query.priority ? { priority: query.priority } : {}),
