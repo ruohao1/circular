@@ -147,9 +147,10 @@ for (const [scale, timezoneId] of [
 ]) {
   test(`Gantt move resize and Undo persist daily dates in ${scale} view`, async ({
     browser,
+    baseURL,
   }) => {
     const context = await browser.newContext({
-      baseURL: "http://127.0.0.1:15178",
+      baseURL,
       viewport: { width: 1600, height: 1000 },
       timezoneId,
     });
@@ -741,10 +742,11 @@ for (const [timezone, today, nextToday] of [
 ]) {
   test(`local Today and highlight agree in ${timezone}; anchor survives midnight`, async ({
     browser,
+    baseURL,
   }) => {
     const context = await browser.newContext({
       timezoneId: timezone,
-      baseURL: "http://127.0.0.1:15178",
+      baseURL,
     });
     const page = await context.newPage();
     await clock(page, "2026-10-07T00:30:00Z");
@@ -810,9 +812,10 @@ test("extreme years, one-day and clipped schedules retain real dates", async ({
 
 test("narrow touch layout scrolls without unintended edits and supports both themes", async ({
   browser,
+  baseURL,
 }) => {
   const context = await browser.newContext({
-    baseURL: "http://127.0.0.1:15178",
+    baseURL,
     viewport: { width: 390, height: 844 },
     hasTouch: true,
   });
@@ -967,9 +970,10 @@ test("filter and window round trips reset both cursor histories and show plannin
 
 test("CDP touch swipe, hold-drag, resize and cancellation", async ({
   browser,
+  baseURL,
 }) => {
   const context = await browser.newContext({
-    baseURL: "http://127.0.0.1:15178",
+    baseURL,
     hasTouch: true,
     viewport: { width: 1200, height: 900 },
   });

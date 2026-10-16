@@ -83,3 +83,10 @@ fixture correction.
 This is the prerequisite branch for the delegation draft PR. The combined branch
 must retain migration `0018` for delegation and pass its integration checks before
 either draft is considered for release.
+
+The first full GitHub browser run then exposed eight Timeline cases whose custom
+browser contexts hardcoded the standalone port `15178`. Four context constructors
+now inherit Playwright's `baseURL` fixture, preserving their timezone, viewport
+and touch settings across standalone, local CI and Compose configurations. All
+eight affected cases passed with both the default local stack and a freshly built
+Compose stack. Independent review found no further issues in this test-only fix.
