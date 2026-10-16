@@ -48,10 +48,12 @@ type agentModel struct {
 }
 
 type taskCreate struct {
-	ProjectID    string `json:"project_id"`
-	RepositoryID string `json:"repository_id,omitempty" jsonschema:"Repository from the same project; required for executing coding work"`
-	Title        string `json:"title" jsonschema:"Task objective, maximum 500 characters"`
-	Description  string `json:"description,omitempty" jsonschema:"Detailed requirements and acceptance criteria"`
+	ProjectID        string `json:"project_id"`
+	RepositoryID     string `json:"repository_id,omitempty" jsonschema:"Repository from the same project; required for executing coding work"`
+	Title            string `json:"title" jsonschema:"Task objective, maximum 500 characters"`
+	Description      string `json:"description,omitempty" jsonschema:"Detailed requirements and acceptance criteria"`
+	Priority         string `json:"priority,omitempty" jsonschema:"Planning priority: none, low, normal, high, urgent. Does not schedule execution"`
+	PreferredAgentID string `json:"preferred_agent_id,omitempty" jsonschema:"Optional default Agent for future explicit launches; same Project and enabled"`
 }
 
 type discoveryCreate struct {
@@ -142,6 +144,11 @@ func (c *client) addMutations(server *mcp.Server) {
 		func(ctx context.Context, input taskCreate) (object, error) {
 			if err := textField("title", input.Title, 500); err != nil {
 				return nil, err
+			}
+			if input.Priority != "" || input.PreferredAgentID != "" {
+				if err := c.requireTaskPlanning(ctx); err != nil {
+					return nil, err
+				}
 			}
 			return c.record(ctx, http.MethodPost, "/tasks", "task", input)
 		})

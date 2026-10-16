@@ -27,6 +27,31 @@ export interface RunQueueQuery {
   q?: string;
   cursor?: string;
   limit?: number;
+  task_id?: string;
+}
+
+export type TaskPriority = components["schemas"]["TaskPriority"];
+export type TaskTimelinePage = components["schemas"]["TaskTimelinePage"];
+export interface TaskTimelineQuery extends TaskPlanningQuery {
+  from: string;
+  to: string;
+  section?: "scheduled" | "unscheduled";
+}
+export type TaskPlanningPage = components["schemas"]["TaskPlanningPage"];
+export type TaskPlanningItem = components["schemas"]["TaskPlanningItem"];
+export type TaskPlanningDetail = components["schemas"]["TaskPlanningDetail"];
+export type TaskPlanningUpdate = components["schemas"]["TaskPlanningUpdate"];
+export type TaskMove = components["schemas"]["TaskMove"];
+export type TaskPlanningMutation =
+  components["schemas"]["TaskPlanningMutation"];
+export interface TaskPlanningQuery {
+  q?: string;
+  status?: Task["status"];
+  priority?: TaskPriority;
+  repository_id?: string;
+  preferred_agent_id?: string;
+  limit?: number;
+  cursor?: string;
 }
 
 export type Execution = components["schemas"]["RunExecutionRead"];
@@ -36,7 +61,14 @@ export type Task = components["schemas"]["TaskRead"];
 export type Connection = components["schemas"]["ConnectionRead"];
 export type Provider = Connection["provider"];
 type Schema = components["schemas"];
-type TaskCreate = components["schemas"]["TaskCreate"];
+// Callers can omit defaulted properties even though openapi-typescript requires them.
+export type TaskCreate = Omit<
+  components["schemas"]["TaskCreate"],
+  "priority" | "status"
+> & {
+  priority?: TaskPriority;
+  status?: Task["status"];
+};
 type RunCreate = components["schemas"]["RunCreate"];
 
 export const apiUrl =
@@ -56,9 +88,11 @@ async function request<T>(
   body?: unknown,
   credentials?: RequestCredentials,
   method = "POST",
+  signal?: AbortSignal,
 ): Promise<T> {
   const response = await fetch(`${apiUrl}${path}`, {
     credentials,
+    signal,
     ...(body === undefined
       ? {}
       : {
@@ -260,7 +294,7 @@ export const api = {
     }),
   runQueue: (project: string, values: RunQueueQuery = {}) =>
     request<RunQueuePage>(
-      `/projects/${encodeURIComponent(project)}/run-queue?${new URLSearchParams({ group: values.group ?? "all", q: values.q ?? "", cursor: values.cursor ?? "", limit: String(values.limit ?? 50) })}`,
+      `/projects/${encodeURIComponent(project)}/run-queue?${new URLSearchParams({ group: values.group ?? "all", q: values.q ?? "", cursor: values.cursor ?? "", limit: String(values.limit ?? 50), ...(values.task_id ? { task_id: values.task_id } : {}) })}`,
     ),
   runs: (project?: string) =>
     request<Run[]>(
@@ -274,6 +308,44 @@ export const api = {
     ),
   createTask: (body: TaskCreate) => request<Task>("/tasks", body),
   task: (id: string) => request<Task>(`/tasks/${encodeURIComponent(id)}`),
+  taskPlanning: (project: string, values: TaskPlanningQuery = {}) =>
+    request<TaskPlanningPage>(
+      `/projects/${encodeURIComponent(project)}/task-planning?${new URLSearchParams(
+        Object.entries(values)
+          .filter(([, value]) => value !== undefined && value !== "")
+          .map(([key, value]) => [key, String(value)]),
+      )}`,
+    ),
+  taskTimeline: (
+    project: string,
+    values: TaskTimelineQuery,
+    signal?: AbortSignal,
+  ) =>
+    request<TaskTimelinePage>(
+      `/projects/${encodeURIComponent(project)}/task-timeline?${new URLSearchParams(
+        Object.entries(values)
+          .filter(([, v]) => v !== undefined && v !== "")
+          .map(([k, v]) => [k, String(v)]),
+      )}`,
+      undefined,
+      undefined,
+      "GET",
+      signal,
+    ),
+  taskPlanningDetail: (id: string) =>
+    request<TaskPlanningDetail>(`/tasks/${encodeURIComponent(id)}/planning`),
+  updateTaskPlanning: (id: string, body: TaskPlanningUpdate) =>
+    request<TaskPlanningMutation>(
+      `/tasks/${encodeURIComponent(id)}`,
+      body,
+      undefined,
+      "PATCH",
+    ),
+  moveTask: (id: string, body: TaskMove) =>
+    request<TaskPlanningMutation>(
+      `/tasks/${encodeURIComponent(id)}/move`,
+      body,
+    ),
   connections: (project: string) =>
     request<Connection[]>(connectionsPath(project)),
   connect: (project: string, provider: Provider) =>

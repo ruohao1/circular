@@ -190,6 +190,8 @@ func New(config Config) (*mcp.Server, error) {
 	c.addGitHubDeliveryReadTools(server)
 	c.addPRReviewReadTools(server)
 	c.addExternalRequestReads(server)
+	c.addTaskPlanningTools(server)
+	c.addTaskTimelineTool(server)
 	if !config.ReadOnly {
 		c.addMutations(server)
 		c.addGitHubMutations(server)

@@ -9,25 +9,33 @@ import {
 } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useRouterState } from "@tanstack/react-router";
-import { api } from "@/api";
-import { launchTask, LaunchError } from "@/launch";
+import { api, type Task } from "@/api";
+import { scheduleError } from "@/lib/task-schedules";
+import { launchTask, LaunchError, validateTaskDraft } from "@/launch";
 import { useProject, useProjectSelectionLock } from "@/use-project";
 import {
   TaskLauncherDialog,
   type DraftFields,
   type LaunchDraft,
-} from "@/components/console/task-launcher";
+} from "./task-launcher";
 
 const LauncherContext = createContext<{
-  openNewTask(): void;
+  openNewTask(stage?: Task["status"]): void;
   openImportedTask(taskId: string): void;
 } | null>(null);
-const emptyDraft = (projectId: string): LaunchDraft => ({
+const emptyDraft = (
+  projectId: string,
+  boardStage?: Task["status"],
+): LaunchDraft => ({
   projectId,
   repositoryId: "",
   agentId: "",
   title: "",
   description: "",
+  priority: "none",
+  boardStage,
+  planned_start_date: "",
+  planned_finish_date: "",
 });
 export function TaskLauncherProvider({ children }: { children: ReactNode }) {
   const { selectedProject, projects, selectProject } = useProject();
@@ -55,17 +63,22 @@ export function TaskLauncherProvider({ children }: { children: ReactNode }) {
         ? document.activeElement
         : null;
   };
-  const openNewTask = useCallback(() => {
-    if (!selectedProject) return;
-    rememberOpener();
-    const key = `new:${selectedProject}`;
-    setDrafts((current) =>
-      current[key]
-        ? current
-        : { ...current, [key]: emptyDraft(selectedProject) },
-    );
-    setOpenKey(key);
-  }, [selectedProject]);
+  const openNewTask = useCallback(
+    (stage?: Task["status"]) => {
+      if (!selectedProject) return;
+      rememberOpener();
+      const key = stage
+        ? `board:${selectedProject}:${stage}`
+        : `new:${selectedProject}`;
+      setDrafts((current) =>
+        current[key]
+          ? current
+          : { ...current, [key]: emptyDraft(selectedProject, stage) },
+      );
+      setOpenKey(key);
+    },
+    [selectedProject],
+  );
   const openImportedTask = useCallback((taskId: string) => {
     rememberOpener();
     setOpenKey(`task:${taskId}`);
@@ -81,20 +94,27 @@ export function TaskLauncherProvider({ children }: { children: ReactNode }) {
     )
       return;
     selectProject(task.project_id);
-    setDrafts((current) =>
-      current[openKey]
-        ? current
-        : {
-            ...current,
-            [openKey]: {
-              ...emptyDraft(task.project_id),
-              imported: task,
-              title: task.title,
-              description: task.description,
-              repositoryId: task.repository_id ?? "",
-            },
-          },
-    );
+    setDrafts((current) => {
+      const previous = current[openKey];
+      if (previous?.partial || previous?.imported === task) return current;
+      const preferenceChanged =
+        previous?.imported?.preferred_agent_id !== task.preferred_agent_id;
+      return {
+        ...current,
+        [openKey]: {
+          ...(previous ?? emptyDraft(task.project_id)),
+          imported: task,
+          title: task.title,
+          description: task.description,
+          repositoryId: task.repository_id ?? "",
+          repositoryInitialized: true,
+          priority: task.priority ?? "none",
+          ...(preferenceChanged && !previous?.agentExplicitlySelected
+            ? { agentInitialized: false }
+            : {}),
+        },
+      };
+    });
   }, [openKey, importedId, imported.data, projects.data, selectProject]);
   const project = projects.data?.find((p) => p.id === draft?.projectId);
   const projectId = draft?.projectId ?? "";
@@ -122,40 +142,67 @@ export function TaskLauncherProvider({ children }: { children: ReactNode }) {
   // redirect a draft to a different Repository or Agent after a refetch.
   useEffect(() => {
     if (!openKey || !draft || draft.partial) return;
+    const initRepository =
+      !draft.repositoryInitialized && repositories.isSuccess;
+    const initAgent = !draft.agentInitialized && agents.isSuccess;
+    if (!initRepository && !initAgent) return;
     const repositoryId =
-      !draft.imported && !draft.repositoryId
-        ? repositories.data?.[0]?.id
-        : undefined;
+      initRepository && !draft.imported
+        ? (repositories.data?.[0]?.id ?? "")
+        : draft.repositoryId;
     const enabled = agents.data?.filter((a) => a.enabled);
-    const agentId = !draft.agentId
-      ? suggested
-        ? enabled?.find((a) => a.id === suggested)?.id
-        : (enabled?.find((a) => !a.preset) ?? enabled?.[0])?.id
-      : undefined;
-    if (!repositoryId && !agentId) return;
+    const agentId = initAgent
+      ? (suggested ??
+        draft.imported?.preferred_agent_id ??
+        (enabled?.find((a) => !a.preset) ?? enabled?.[0])?.id ??
+        "")
+      : draft.agentId;
     setDrafts((current) => ({
       ...current,
       [openKey]: {
         ...current[openKey],
-        ...(repositoryId ? { repositoryId } : {}),
-        ...(agentId ? { agentId } : {}),
+        repositoryId,
+        agentId,
+        ...(initRepository ? { repositoryInitialized: true } : {}),
+        ...(initAgent ? { agentInitialized: true } : {}),
       },
     }));
-  }, [openKey, draft, repositories.data, agents.data, suggested]);
+  }, [
+    openKey,
+    draft,
+    repositories.data,
+    repositories.isSuccess,
+    agents.data,
+    agents.isSuccess,
+    suggested,
+  ]);
   const repository =
     draft?.partial?.repository ??
     repositories.data?.find((r) => r.id === draft?.repositoryId);
   const agent =
     draft?.partial?.agent ??
     agents.data?.find((a) => a.id === draft?.agentId && a.enabled);
+  const importedRefreshing =
+    !!importedId && (imported.isFetching || draft?.imported !== imported.data);
   const canLaunch =
+    !importedRefreshing &&
     !!draft &&
+    (!importedId || !!draft.agentInitialized) &&
     !!project &&
     (!!draft.partial ||
       (!!repository &&
         !!agent &&
         !!draft.title.trim() &&
-        draft.title.trim().length <= 500));
+        Array.from(draft.title.trim()).length <= 500));
+  const canSave =
+    !!draft &&
+    !draft.imported &&
+    !draft.partial &&
+    !!project &&
+    !!draft.title.trim() &&
+    Array.from(draft.title.trim()).length <= 500 &&
+    (!draft.boardStage ||
+      !scheduleError(draft.planned_start_date, draft.planned_finish_date));
   const clearImportSearch = () => {
     if (location.pathname === "/" && "taskId" in location.search) {
       void navigate({
@@ -188,6 +235,7 @@ export function TaskLauncherProvider({ children }: { children: ReactNode }) {
                 agent,
                 title: draft.title,
                 description: draft.description,
+                priority: draft.priority,
               });
         return { run, key, projectId: project.id };
       } catch (error) {
@@ -214,23 +262,104 @@ export function TaskLauncherProvider({ children }: { children: ReactNode }) {
       setOpenKey(undefined);
       void client.invalidateQueries({ queryKey: ["run-queue", projectId] });
       void client.invalidateQueries({ queryKey: ["runs", projectId] });
+      void client.invalidateQueries({ queryKey: ["task-planning", projectId] });
       void navigate({ to: "/runs/$runId", params: { runId: run.id } });
     },
   });
+  const save = useMutation({
+    mutationKey: ["task-save"],
+    mutationFn: async () => {
+      if (!openKey || !draft || !project || draft.imported || draft.partial)
+        throw new Error("Enter a new Task.");
+      const key = openKey;
+      try {
+        const invalidSchedule =
+          draft.boardStage &&
+          scheduleError(draft.planned_start_date, draft.planned_finish_date);
+        if (invalidSchedule) throw new Error(invalidSchedule);
+        const task = await api.createTask({
+          ...validateTaskDraft(
+            {
+              title: draft.title,
+              description: draft.description,
+              repository_id: draft.repositoryId || null,
+              preferred_agent_id: draft.agentId || null,
+              priority: draft.priority,
+            },
+            project,
+            repositories.data ?? [],
+            agents.data ?? [],
+          ),
+          ...(draft.boardStage
+            ? {
+                status: draft.boardStage,
+                planned_start_date: draft.planned_start_date || null,
+                planned_finish_date: draft.planned_finish_date || null,
+              }
+            : {}),
+        });
+        return { task, key, fromBoard: !!draft.boardStage };
+      } catch (error) {
+        setDrafts((current) => ({
+          ...current,
+          [key]: {
+            ...current[key],
+            error:
+              error instanceof Error
+                ? error.message
+                : "Task could not be saved",
+          },
+        }));
+        throw error;
+      }
+    },
+    onSuccess: async ({ task, key, fromBoard }) => {
+      await Promise.all([
+        client.invalidateQueries({
+          queryKey: ["task-planning", task.project_id],
+        }),
+        client.invalidateQueries({
+          queryKey: ["task-timeline", task.project_id],
+        }),
+      ]);
+      setDrafts((current) => {
+        const next = { ...current };
+        delete next[key];
+        return next;
+      });
+      setOpenKey(undefined);
+      if (fromBoard) return;
+      void navigate({
+        to: "/tasks",
+        search: { view: "list", taskId: task.id },
+        state: { taskPlanningProject: task.project_id },
+      });
+    },
+  });
+  const pending = launch.isPending || save.isPending;
   function close() {
-    if (launch.isPending) return;
+    if (pending) return;
     setOpenKey(undefined);
     clearImportSearch();
   }
   function change(patch: Partial<DraftFields>) {
-    if (!openKey || !draft || launch.isPending || draft.partial) return;
+    if (!openKey || !draft || pending || draft.partial) return;
     // Imported inputs belong to the saved Task. Select's form synchronization
     // can emit an empty value before its async options arrive, even if disabled.
-    if (draft.imported) patch = patch.agentId ? { agentId: patch.agentId } : {};
+    if (draft.imported)
+      patch = "agentId" in patch ? { agentId: patch.agentId } : {};
     if (!Object.keys(patch).length) return;
     setDrafts((current) => ({
       ...current,
-      [openKey]: { ...current[openKey], ...patch, error: undefined },
+      [openKey]: {
+        ...current[openKey],
+        ...patch,
+        ...("agentId" in patch
+          ? { agentInitialized: true, agentExplicitlySelected: true }
+          : {}),
+        ...("repositoryId" in patch ? { repositoryInitialized: true } : {}),
+        error: undefined,
+      },
     }));
   }
   const importError =
@@ -266,12 +395,20 @@ export function TaskLauncherProvider({ children }: { children: ReactNode }) {
       {children}
       <TaskLauncherDialog
         open={!!openKey}
-        pending={launch.isPending}
+        pending={pending}
+        saving={save.isPending}
+        canSave={canSave && !importError}
+        onSave={() => {
+          if (canSave && !pending) save.mutate();
+        }}
         loading={
           !!openKey &&
           !importError &&
           !optionsError &&
-          (!draft || repositories.isPending || agents.isPending)
+          (!draft ||
+            importedRefreshing ||
+            repositories.isPending ||
+            agents.isPending)
         }
         project={project}
         draft={draft}
@@ -284,7 +421,7 @@ export function TaskLauncherProvider({ children }: { children: ReactNode }) {
         onRetry={retryLoading}
         onDraftChange={change}
         onSubmit={() => {
-          if (canLaunch && !launch.isPending) launch.mutate();
+          if (canLaunch && !pending) launch.mutate();
         }}
         onOpenChange={(open) => {
           if (!open) close();
@@ -293,7 +430,9 @@ export function TaskLauncherProvider({ children }: { children: ReactNode }) {
           event.preventDefault();
           const target = opener.current?.isConnected
             ? opener.current
-            : document.getElementById("new-task");
+            : (opener.current?.id &&
+                document.getElementById(opener.current.id)) ||
+              document.getElementById("new-task");
           target?.focus();
         }}
         onSetup={(section) => {
