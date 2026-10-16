@@ -19,6 +19,7 @@ import (
 	"github.com/ruohao1/circular/internal/agentproposals"
 	"github.com/ruohao1/circular/internal/codexauth"
 	"github.com/ruohao1/circular/internal/codexconfig"
+	"github.com/ruohao1/circular/internal/delegations"
 	"github.com/ruohao1/circular/internal/prreviews"
 )
 
@@ -30,15 +31,17 @@ const (
 )
 
 type request struct {
-	prompt           string
-	model            string
-	effort           string
-	apiKey           string
-	authMode         string
-	purpose          string
-	contextSHA256    string
-	reviewContext    *prreviews.Context
-	contextDirectory string
+	delegationContextSHA256 string
+	prompt                  string
+	model                   string
+	effort                  string
+	apiKey                  string
+	authMode                string
+	purpose                 string
+	contextSHA256           string
+	reviewContext           *prreviews.Context
+	contextDirectory        string
+	delegationTargets       []delegations.Target
 }
 
 // Run receives a versioned request on stdin. Subscription output is redacted
@@ -61,6 +64,9 @@ func runAt(ctx context.Context, stdin io.Reader, stdout, stderr io.Writer, progr
 // Only fixture tests can choose a context directory. Production always uses the
 // trusted runtime's fixed /review-context mount.
 func runAtContext(ctx context.Context, stdin io.Reader, stdout, stderr io.Writer, program, authDir, contextDirectory string) int {
+	return runAtContexts(ctx, stdin, stdout, stderr, program, authDir, contextDirectory, "/delegation-context")
+}
+func runAtContexts(ctx context.Context, stdin io.Reader, stdout, stderr io.Writer, program, authDir, contextDirectory, delegationDirectory string) int {
 	if ctx.Err() != nil {
 		return 1
 	}
@@ -83,6 +89,13 @@ func runAtContext(ctx context.Context, stdin io.Reader, stdout, stderr io.Writer
 		}
 		value.reviewContext = &review
 		value.contextDirectory = contextDirectory
+	}
+	if value.delegationContextSHA256 != "" {
+		bundle, err := delegations.ReadContext(delegationDirectory)
+		digest, digestErr := delegations.ContextFingerprint(bundle)
+		if err != nil || digestErr != nil || digest != value.delegationContextSHA256 {
+			return diagnostic(stderr, "delegation input could not be verified", 2)
+		}
 	}
 	if value.authMode == "api_key" {
 		return executeRun(ctx, value, stdout, stderr, program, "")
@@ -143,6 +156,7 @@ func executeRun(ctx context.Context, value request, stdout, stderr io.Writer, pr
 	defer os.RemoveAll(proposalDir)
 	var publish func(io.Writer) error
 	var reviewSpool *prreviews.Spool
+	var delegationSpool *delegations.Spool
 	mcpConfig := `mcp_servers.circular={command="/circular-codex-workload",args=["mcp",` + strconv.Quote(proposalDir) + `],required=true,enabled_tools=["propose_agent","list_models"]}`
 	if value.purpose == "pr_review" {
 		if value.reviewContext == nil {
@@ -173,6 +187,17 @@ func executeRun(ctx context.Context, value request, stdout, stderr io.Writer, pr
 			return diagnostic(stderr, "cannot prepare Circular agent tools", 1)
 		}
 		publish = proposals.Publish
+		if len(value.delegationTargets) > 0 {
+			dir := filepath.Join(proposalDir, "delegation")
+			if os.Mkdir(dir, 0700) != nil {
+				return diagnostic(stderr, "cannot prepare delegation tools", 1)
+			}
+			delegationSpool, err = delegations.NewSpool(dir)
+			if err != nil || delegationSpool.SaveTargets(value.delegationTargets) != nil {
+				return diagnostic(stderr, "cannot prepare delegation tools", 1)
+			}
+			mcpConfig = strings.Replace(mcpConfig, `"list_models"]`, `"list_models","delegate_task"]`, 1)
+		}
 	}
 
 	method := "chatgpt"
@@ -235,6 +260,11 @@ func executeRun(ctx context.Context, value request, stdout, stderr io.Writer, pr
 	if child.Err() == nil && forwarder == nil {
 		if err := publish(stdout); err != nil {
 			return diagnostic(stderr, "cannot publish Circular agent output", 1)
+		}
+		if code == 0 && delegationSpool != nil {
+			if err := delegationSpool.Publish(stdout); err != nil {
+				return diagnostic(stderr, "cannot publish delegation request", 1)
+			}
 		}
 		if redactor != nil {
 			if err := redactor.finish(); err != nil {
@@ -355,7 +385,7 @@ func parse(input []byte) (request, error) {
 		if err != nil || !ok {
 			return request{}, invalid
 		}
-		if name != "protocol_version" && name != "prompt" && name != "model" && name != "reasoning_effort" && name != "api_key" && name != "auth_mode" && name != "purpose" && name != "review_context_sha256" {
+		if name != "protocol_version" && name != "prompt" && name != "model" && name != "reasoning_effort" && name != "api_key" && name != "auth_mode" && name != "purpose" && name != "review_context_sha256" && name != "delegation_targets" && name != "delegation_context_sha256" {
 			return request{}, invalid
 		}
 		if _, duplicate := fields[name]; duplicate {
@@ -377,7 +407,7 @@ func parse(input []byte) (request, error) {
 	for _, field := range []struct {
 		name   string
 		target *string
-	}{{"prompt", &value.prompt}, {"api_key", &value.apiKey}, {"model", &value.model}, {"reasoning_effort", &value.effort}, {"auth_mode", &value.authMode}, {"purpose", &value.purpose}, {"review_context_sha256", &value.contextSHA256}} {
+	}{{"prompt", &value.prompt}, {"api_key", &value.apiKey}, {"model", &value.model}, {"reasoning_effort", &value.effort}, {"auth_mode", &value.authMode}, {"purpose", &value.purpose}, {"review_context_sha256", &value.contextSHA256}, {"delegation_context_sha256", &value.delegationContextSHA256}} {
 		raw, found := fields[field.name]
 		if !found && field.name != "prompt" {
 			continue
@@ -409,6 +439,14 @@ func parse(input []byte) (request, error) {
 		return request{}, invalid
 	}
 	settings, err := codexconfig.Resolve(value.model, value.effort)
+	if raw, ok := fields["delegation_targets"]; ok {
+		if value.purpose != "coding" || len(raw) > delegations.MaxRequestBytes || prreviews.DecodeStrict(raw, &value.delegationTargets) != nil || delegations.ValidateTargets(value.delegationTargets) != nil {
+			return request{}, invalid
+		}
+	}
+	if _, supplied := fields["delegation_context_sha256"]; supplied && (value.purpose != "coding" || !prreviews.DigestPattern.MatchString(value.delegationContextSHA256) || len(value.delegationTargets) > 0) {
+		return request{}, invalid
+	}
 	if err != nil {
 		return request{}, invalid
 	}

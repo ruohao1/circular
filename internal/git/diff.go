@@ -44,6 +44,9 @@ func (l *Local) Capture(ctx context.Context, worktree string) (diff Diff, result
 	if err != nil {
 		return Diff{}, errors.Join(ErrDiff, err)
 	}
+	if base.Delegated {
+		return l.captureDelegation(ctx, worktree, repository, base)
+	}
 	file, err := os.CreateTemp(filepath.Dir(worktree), "."+runID.String()+".diff-index-")
 	if err != nil {
 		return Diff{}, ErrDiff

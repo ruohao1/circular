@@ -114,13 +114,23 @@ func (s *Supervisor) Execute(ctx context.Context, claim worker.Claim, owner stri
 	if owner != s.owner || claim.RunID == uuid.Nil {
 		return postgres.ErrLeaseLost
 	}
+	bound, err := s.store.ForInvocation(claim.Invocation)
+	if err != nil {
+		return err
+	}
+	owned := *s
+	retention := *s.retention
+	owned.store = bound
+	retention.store = bound
+	owned.retention = &retention
+	s = &owned
 	preflight, preflightCancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 	status, err := s.store.Heartbeat(preflight, claim.RunID)
 	preflightCancel()
 	if err != nil {
 		return err
 	}
-	if status != runstate.Cancelled && (claim.Recovery && !status.Terminal() || !claim.Recovery && status != runstate.Provisioning) {
+	if status != runstate.Cancelled && (claim.Recovery && !status.Terminal() || !claim.Recovery && ((!claim.Continuation && status != runstate.Provisioning) || (claim.Continuation && (claim.Invocation != 2 || status != runstate.WaitingForInput)))) {
 		return postgres.ErrResourceState
 	}
 	executing, cancelExecution := context.WithCancel(ctx)
@@ -134,6 +144,9 @@ func (s *Supervisor) Execute(ctx context.Context, claim worker.Claim, owner stri
 		executionErr = ctx.Err()
 	} else if !claim.Recovery && !status.Terminal() {
 		executionErr = s.execute(executing, claim.RunID)
+	}
+	if errors.Is(executionErr, errDelegationSuspended) {
+		return nil
 	}
 	message := "execution ended without a terminal outcome"
 	var raw map[string]any
@@ -212,13 +225,20 @@ func (s *Supervisor) execute(ctx context.Context, id uuid.UUID) error {
 		return err
 	}
 	defer stop()
-	if err := s.ingest(execution, id, handle, backend); err != nil {
+	candidate, err := s.ingest(execution, id, handle, backend)
+	if err != nil {
 		if errors.Is(execution.Err(), context.DeadlineExceeded) {
 			// This is the review's execution limit, not worker shutdown. Keep
 			// its public reason instead of projecting generic cancellation.
 			return executionFailure("PR review exceeded its 15-minute execution limit", nil)
 		}
 		return err
+	}
+	if candidate != nil {
+		if err := s.handoff(ctx, id, *candidate); err != nil {
+			return err
+		}
+		return errDelegationSuspended
 	}
 	if err := s.store.WithRun(ctx, id, func(r *postgres.RunResources) error { return r.BeginFinalizing() }); err != nil {
 		return executionFailure("could not begin Run finalization", err)
@@ -264,11 +284,20 @@ func (s *Supervisor) provision(ctx context.Context, id uuid.UUID, backend *prepa
 			}
 		}
 	}()
+	state, err := s.store.Read(ctx, id)
+	if err != nil {
+		return handle, err
+	}
+	if state.Invocation == 2 {
+		if _, err = s.prepareDelegationContext(ctx, id); err != nil {
+			return handle, executionFailure("could not verify delegation continuation", err)
+		}
+	}
 	var inputs postgres.ProvisioningContext
 	path := filepath.Join(s.retention.worktreeRoot, id.String())
-	err := s.store.WithRun(ctx, id, func(r *postgres.RunResources) error {
+	err = s.store.WithRun(ctx, id, func(r *postgres.RunResources) error {
 		var err error
-		inputs, err = r.ProvisioningContext()
+		inputs, err = r.InvocationInput()
 		if err != nil {
 			return err
 		}
@@ -279,6 +308,9 @@ func (s *Supervisor) provision(ctx context.Context, id uuid.UUID, backend *prepa
 			}
 		} else if inputs.Backend != "codex" || !s.config.CodexEnabled {
 			return &backends.Failure{Message: "PR reviews require an enabled Codex worker"}
+		}
+		if inputs.Invocation == 2 {
+			return r.ResumeWorkspace()
 		}
 		_, err = r.CreatePending(path)
 		return err
@@ -301,7 +333,7 @@ func (s *Supervisor) provision(ctx context.Context, id uuid.UUID, backend *prepa
 		if err != nil {
 			return handle, err
 		}
-	} else {
+	} else if inputs.Invocation != 2 {
 		repository, err = s.retention.git.Checkout(ctx, inputs.RepositoryID, inputs.CloneURL)
 		if err != nil {
 			return handle, executionFailure("could not prepare Repository checkout", err)
@@ -309,6 +341,18 @@ func (s *Supervisor) provision(ctx context.Context, id uuid.UUID, backend *prepa
 	}
 
 	if err := s.withAllocation(ctx, inputs, func(operation context.Context, _ *postgres.RunResources) error {
+		if inputs.Invocation == 2 {
+			return nil
+		}
+		if inputs.SourceCheckpoint != nil {
+			source, err := s.retention.content.OpenVerified(operation, inputs.SourceRunID, inputs.SourceCheckpoint.Source)
+			if err != nil {
+				return err
+			}
+			defer source.Close()
+			_, err = s.retention.git.ProvisionDelegation(operation, id, repository, inputs.BaseRef, source)
+			return err
+		}
 		_, err := s.retention.git.Provision(operation, id, repository, inputs.BaseRef)
 		return err
 	}); err != nil {
@@ -320,7 +364,11 @@ func (s *Supervisor) provision(ctx context.Context, id uuid.UUID, backend *prepa
 		if inputs.Kind == runstate.PRReview {
 			reviewMount = &runtimes.ReviewMount{ContextSHA256: inputs.ReviewContextSHA256}
 		}
-		handle, err = s.docker.Start(operation, runtimes.Spec{Kind: inputs.Kind, Review: reviewMount, RunID: id, Image: backend.image, Worktree: filepath.Join(s.config.Docker.WorktreeRoot, id.String()), Command: backend.invocation.Command, Stdin: backend.invocation.Stdin, CPULimit: s.config.CPULimit, MemoryLimitMB: s.config.MemoryLimitMB, NetworkEnabled: backend.invocation.NetworkEnabled, UseCredentials: backend.invocation.UseCredentials, TemporaryStorageMB: backend.invocation.TemporaryStorageMB})
+		var delegationMount *runtimes.DelegationMount
+		if inputs.Invocation == 2 {
+			delegationMount = &runtimes.DelegationMount{ContextSHA256: inputs.DelegationContextSHA256}
+		}
+		handle, err = s.docker.Start(operation, runtimes.Spec{Kind: inputs.Kind, Review: reviewMount, Delegation: delegationMount, RunID: id, Image: backend.image, Worktree: filepath.Join(s.config.Docker.WorktreeRoot, id.String()), Command: backend.invocation.Command, Stdin: backend.invocation.Stdin, CPULimit: s.config.CPULimit, MemoryLimitMB: s.config.MemoryLimitMB, NetworkEnabled: backend.invocation.NetworkEnabled, UseCredentials: backend.invocation.UseCredentials, TemporaryStorageMB: backend.invocation.TemporaryStorageMB})
 		if err != nil {
 			return executionFailure("could not start Run container", err)
 		}
@@ -331,7 +379,13 @@ func (s *Supervisor) provision(ctx context.Context, id uuid.UUID, backend *prepa
 		return handle, executionFailure("could not persist Run container identity", err)
 	}
 	identityRecorded = true
-	if err := s.store.WithRun(ctx, id, func(r *postgres.RunResources) error { _, err := r.MarkRunning(); return err }); err != nil {
+	if err := s.store.WithRun(ctx, id, func(r *postgres.RunResources) error {
+		if inputs.Invocation == 2 {
+			return r.MarkContinued()
+		}
+		_, err := r.MarkRunning()
+		return err
+	}); err != nil {
 		return handle, executionFailure("could not mark Run Workspace ready", err)
 	}
 	return handle, nil
@@ -355,7 +409,7 @@ func (s *Supervisor) withAllocation(ctx context.Context, inputs postgres.Provisi
 		if err != nil {
 			return err
 		}
-		if state.Status != runstate.Provisioning || state.RepositoryID == nil || *state.RepositoryID != inputs.RepositoryID || state.Workspace == nil || state.Workspace.Status != "pending" || state.Workspace.ContainerID != nil || state.Workspace.WorktreePath != filepath.Join(s.retention.worktreeRoot, inputs.RunID.String()) {
+		if (state.Status != runstate.Provisioning && !(inputs.Invocation == 2 && state.Status == runstate.WaitingForInput)) || state.RepositoryID == nil || *state.RepositoryID != inputs.RepositoryID || state.Workspace == nil || state.Workspace.Status != "pending" || state.Workspace.ContainerID != nil || state.Workspace.WorktreePath != filepath.Join(s.retention.worktreeRoot, inputs.RunID.String()) {
 			return postgres.ErrResourceState
 		}
 		if err := action(operation, r); err != nil {
@@ -386,7 +440,7 @@ func (s *Supervisor) prepareBackend(inputs postgres.ProvisioningContext) (prepar
 		return prepared, &backends.Failure{Message: "unsupported Run backend"}
 	}
 	var err error
-	prepared.invocation, err = adapter.Prepare(backends.Input{Kind: inputs.Kind, ReviewContextSHA256: inputs.ReviewContextSHA256, RunID: inputs.RunID, TaskTitle: inputs.TaskTitle, TaskDescription: inputs.TaskDescription, Instructions: inputs.Instructions, Config: inputs.BackendConfig})
+	prepared.invocation, err = adapter.Prepare(backends.Input{DelegationContextSHA256: inputs.DelegationContextSHA256, Kind: inputs.Kind, ReviewContextSHA256: inputs.ReviewContextSHA256, RunID: inputs.RunID, TaskTitle: inputs.TaskTitle, TaskDescription: inputs.TaskDescription, Instructions: inputs.Instructions, Config: inputs.BackendConfig, DelegationTargets: inputs.DelegationTargets})
 	return prepared, err
 }
 

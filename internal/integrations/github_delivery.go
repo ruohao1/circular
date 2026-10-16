@@ -287,6 +287,9 @@ func (s *Service) ProcessGitHubRunDelivery(ctx context.Context) (bool, error) {
 		case errors.Is(err, errDeliveryUncertain):
 			status = "uncertain"
 			message = errDeliveryUncertain.Error()
+		case errors.Is(err, errDelegationPublication):
+			status = "failed"
+			message = errDelegationPublication.Error()
 		case errors.Is(err, errDeliveryDisabled):
 			status = "failed"
 			message = errDeliveryDisabled.Error()

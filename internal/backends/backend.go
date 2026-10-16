@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 
 	"github.com/google/uuid"
+	"github.com/ruohao1/circular/internal/delegations"
 	"github.com/ruohao1/circular/internal/runstate"
 	"github.com/ruohao1/circular/internal/runtimes"
 )
@@ -14,13 +15,15 @@ import (
 const MaxLineBytes = 1024 * 1024
 
 type Input struct {
-	RunID               uuid.UUID
-	Kind                runstate.Kind
-	ReviewContextSHA256 string
-	TaskTitle           string
-	TaskDescription     string
-	Instructions        string
-	Config              json.RawMessage
+	DelegationContextSHA256 string
+	RunID                   uuid.UUID
+	Kind                    runstate.Kind
+	ReviewContextSHA256     string
+	TaskTitle               string
+	TaskDescription         string
+	Instructions            string
+	Config                  json.RawMessage
+	DelegationTargets       []delegations.Target
 }
 
 // Event carries both the normalized projection and the original backend record.

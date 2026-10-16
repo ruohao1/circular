@@ -17,15 +17,18 @@ import (
 // stored (resourceID == ""). Callers must hold the Run's durable lease/row lock
 // while mutating resources; this module does not grant or transfer Run ownership.
 func (d *Docker) Release(ctx context.Context, runID uuid.UUID, resourceID string) error {
-	return d.release(ctx, runID, resourceID, nil)
+	return d.release(ctx, runID, resourceID, nil, nil)
 }
 
 // ReleaseReview verifies the retained context identity before adopting a crashed
 // review container for cleanup. Ordinary Release preserves the legacy policy.
 func (d *Docker) ReleaseReview(ctx context.Context, runID uuid.UUID, resourceID, contextSHA256 string) error {
-	return d.release(ctx, runID, resourceID, &ReviewMount{ContextSHA256: contextSHA256})
+	return d.release(ctx, runID, resourceID, &ReviewMount{ContextSHA256: contextSHA256}, nil)
 }
-func (d *Docker) release(ctx context.Context, runID uuid.UUID, resourceID string, review *ReviewMount) error {
+func (d *Docker) ReleaseDelegation(ctx context.Context, runID uuid.UUID, resourceID, contextSHA256 string) error {
+	return d.release(ctx, runID, resourceID, nil, &DelegationMount{ContextSHA256: contextSHA256})
+}
+func (d *Docker) release(ctx context.Context, runID uuid.UUID, resourceID string, review *ReviewMount, delegation *DelegationMount) error {
 	if resourceID != "" && !containerID.MatchString(resourceID) {
 		return fmt.Errorf("%w: persisted identity is invalid", ErrDiscard)
 	}
@@ -43,6 +46,9 @@ func (d *Docker) release(ctx context.Context, runID uuid.UUID, resourceID string
 	d.mu.Unlock()
 	if e != nil {
 		if (review != nil) != (e.launch.plan.Kind == runstate.PRReview) || review != nil && e.launch.plan.ReviewContextSHA256 != review.ContextSHA256 {
+			return ErrDiscard
+		}
+		if (delegation != nil) != (e.launch.plan.DelegationContextSHA256 != "") || delegation != nil && e.launch.plan.DelegationContextSHA256 != delegation.ContextSHA256 {
 			return ErrDiscard
 		}
 		if resourceID != "" && resourceID != e.handle.ResourceID {
@@ -88,7 +94,20 @@ func (d *Docker) release(ctx context.Context, runID uuid.UUID, resourceID string
 	} else if labels["io.circular.kind"] != nil || labels["io.circular.review_context_sha256"] != nil {
 		return ErrDiscard
 	}
-	credentials, validMounts := inspectedBindMounts(container["Mounts"], filepath.Join(d.config.WorktreeRoot, runID.String()), reviewSource)
+	delegationSource := ""
+	if delegation != nil {
+		if review != nil || !prreviews.DigestPattern.MatchString(delegation.ContextSHA256) || labels["io.circular.delegation_context_sha256"] != delegation.ContextSHA256 {
+			return ErrDiscard
+		}
+		delegationSource = filepath.Join(d.config.WorktreeRoot, ".delegations", runID.String())
+		canonical, err := resolveMissing(delegationSource)
+		if err != nil || canonical != delegationSource || isSymlink(delegationSource) {
+			return ErrDiscard
+		}
+	} else if labels["io.circular.delegation_context_sha256"] != nil {
+		return ErrDiscard
+	}
+	credentials, validMounts := inspectedBindMounts(container["Mounts"], filepath.Join(d.config.WorktreeRoot, runID.String()), reviewSource, delegationSource)
 	if !validMounts || credentials != "" && credentials != d.config.CredentialRoot {
 		return fmt.Errorf("%w: container ownership could not be verified", ErrDiscard)
 	}

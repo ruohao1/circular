@@ -16,12 +16,68 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/ruohao1/circular/internal/backends"
 	"github.com/ruohao1/circular/internal/runstate"
 	"github.com/ruohao1/circular/internal/runtimes"
+	"github.com/ruohao1/circular/internal/testsupport"
 )
 
 const realImage = "circular-go-runtime:test"
 const volumeImage = "circular-go-runtime-volume:test"
+
+func TestDelegationDockerIsolation(t *testing.T) {
+	d, spec := realRuntime(t, 1000, realImage)
+	digest := testsupport.DelegationContext(t, filepath.Dir(spec.Worktree), spec.RunID)
+	invocation, err := (backends.Fake{}).Prepare(backends.Input{RunID: spec.RunID, TaskTitle: "Continue parent", Config: json.RawMessage(`{"delay_ms":1000}`), DelegationContextSHA256: digest})
+	if err != nil {
+		t.Fatal(err)
+	}
+	spec.Stdin, spec.Command = invocation.Stdin, invocation.Command
+	spec.Delegation = &runtimes.DelegationMount{ContextSHA256: digest}
+	handle, err := d.Start(t.Context(), spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The same non-root fixture can write its worktree, but not the context mount.
+	probe := exec.CommandContext(t.Context(), "docker", "exec", "--interactive", "--workdir", "/delegation-context", handle.ResourceID, "/circular-fake-workload", "--write-output")
+	probe.Stdin = strings.NewReader(fmt.Sprintf(`{"protocol_version":1,"run":{"id":%q,"task_title":"Write probe","task_description":"","instructions":""},"behavior":{"delay_ms":0,"failure":"none"}}`, uuid.NewString()))
+	if output, err := probe.CombinedOutput(); err == nil {
+		t.Fatal("context mount writable", string(output))
+	}
+	result, err := d.Wait(t.Context(), handle)
+	if err != nil || result.ExitCode == nil || *result.ExitCode != 0 {
+		t.Fatal(result, err)
+	}
+	streams := outputBytes(t, d, handle)
+	if !strings.Contains(streams[runtimes.Stdout], "Child outcome: succeeded") || !strings.Contains(streams[runtimes.Stdout], "source inspected") || !strings.Contains(streams[runtimes.Stdout], "Patch not applied") {
+		t.Fatal("continuation did not consume context", streams)
+	}
+	if _, err = os.Stat(filepath.Join(spec.Worktree, "circular-continuation-"+spec.RunID.String()+".txt")); err != nil {
+		t.Fatal("parent worktree was not writable", err)
+	}
+	var inspect []struct {
+		Mounts []struct {
+			Destination string
+			RW          bool
+		}
+		HostConfig struct{ NetworkMode string }
+		Config     struct{ User string }
+	}
+	raw, err := dockerCommand(t.Context(), "inspect", handle.ResourceID)
+	if err != nil || json.Unmarshal(raw, &inspect) != nil || len(inspect) != 1 {
+		t.Fatal(err, string(raw))
+	}
+	mounts := map[string]bool{}
+	for _, mount := range inspect[0].Mounts {
+		mounts[mount.Destination] = mount.RW
+	}
+	if len(mounts) != 2 || !mounts["/workspace"] || mounts["/delegation-context"] || inspect[0].HostConfig.NetworkMode != "none" || inspect[0].Config.User != "65532:65532" {
+		t.Fatal("isolation policy", inspect)
+	}
+	if err = d.ReleaseDelegation(t.Context(), spec.RunID, handle.ResourceID, digest); err != nil {
+		t.Fatal(err)
+	}
+}
 
 var imageBuild sync.Once
 var imageBuildError error

@@ -95,11 +95,11 @@ func inspectedTemporaryStorage(host map[string]any) (int64, bool) {
 // Each container has its Run worktree and optionally one credential directory.
 // The caller must compare the returned credential source with its trusted plan
 // or recovery configuration; arbitrary bind sources are never adopted.
-func inspectedBindMounts(value any, worktree, reviewContext string) (string, bool) {
+func inspectedBindMounts(value any, worktree, reviewContext, delegationContext string) (string, bool) {
 	mounts, ok := value.([]any)
 	review := reviewContext != ""
 	min, max := 1, 2
-	if review {
+	if review || delegationContext != "" {
 		min, max = 2, 3
 	}
 	if !ok || len(mounts) < min || len(mounts) > max {
@@ -122,6 +122,11 @@ func inspectedBindMounts(value any, worktree, reviewContext string) (string, boo
 				return "", false
 			}
 			contextSeen = true
+		case "/delegation-context":
+			if delegationContext == "" || contextSeen || mount["Source"] != delegationContext || mount["RW"] != false {
+				return "", false
+			}
+			contextSeen = true
 		case credentialDestination:
 			source, ok := mount["Source"].(string)
 			if !ok || source == "" || credentials != "" || mount["RW"] != true {
@@ -132,7 +137,7 @@ func inspectedBindMounts(value any, worktree, reviewContext string) (string, boo
 			return "", false
 		}
 	}
-	return credentials, workspaceSeen && contextSeen == review
+	return credentials, workspaceSeen && contextSeen == (review || delegationContext != "")
 }
 
 func (d *Docker) verifyPolicy(ctx context.Context, id string, plan Plan, nonce string) error {
@@ -141,7 +146,7 @@ func (d *Docker) verifyPolicy(ctx context.Context, id string, plan Plan, nonce s
 		return err
 	}
 	config, host := object(container["Config"]), object(container["HostConfig"])
-	credentials, mountsOK := inspectedBindMounts(container["Mounts"], plan.WorktreeSource, plan.ReviewContextSource)
+	credentials, mountsOK := inspectedBindMounts(container["Mounts"], plan.WorktreeSource, plan.ReviewContextSource, plan.DelegationContextSource)
 	if !mountsOK || credentials != plan.CredentialSource {
 		return fmt.Errorf("%w: container mount policy mismatch", ErrStart)
 	}

@@ -18,11 +18,15 @@ import (
 	"unicode/utf8"
 
 	"github.com/google/uuid"
+	"github.com/ruohao1/circular/internal/delegations"
+	"github.com/ruohao1/circular/internal/prreviews"
 )
 
 type request struct {
 	id, title, description, instructions, failure string
 	delay                                         time.Duration
+	delegation                                    *delegations.Request
+	contextSHA256                                 string
 }
 
 // Run accepts only the versioned request on stdin. Output and exit codes form
@@ -50,8 +54,38 @@ func Run(ctx context.Context, stdin io.Reader, stdout, stderr io.Writer, writeOu
 		return failure("injected failure before emitting events")
 	}
 	content := "Fake container workload completed: " + value.title
+	filename := "circular-result-" + value.id + ".txt"
+	if value.contextSHA256 != "" {
+		bundle, err := delegations.ReadContext("/delegation-context")
+		digest, digestErr := delegations.ContextFingerprint(bundle)
+		if err != nil || digestErr != nil || digest != value.contextSHA256 || bundle.RunID.String() != value.id {
+			_ = line(stderr, map[string]any{"protocol_version": 1, "error": map[string]string{"code": "invalid_input", "message": "invalid delegation context"}})
+			return 2
+		}
+		content += "\nChild outcome: " + string(bundle.Result.Status)
+		if bundle.Result.Error != "" {
+			content += "\nChild error: " + bundle.Result.Error
+		}
+		if bundle.Result.Report != nil {
+			file, err := os.Open("/delegation-context/report.txt")
+			if err != nil {
+				return 1
+			}
+			report, err := io.ReadAll(io.LimitReader(file, 64*1024))
+			file.Close()
+			if err != nil {
+				return 1
+			}
+			content += "\nChild report: " + string(report)
+		}
+		if bundle.Result.Patch != nil {
+			content += "\nVerified patch SHA256: " + bundle.Result.Patch.SHA256
+		}
+		content += "\nPatch not applied: this fixture preserves the parent checkpoint."
+		filename = "circular-continuation-" + value.id + ".txt"
+	}
 	if writeOutput {
-		file, err := os.OpenFile("circular-result-"+value.id+".txt", os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0644)
+		file, err := os.OpenFile(filename, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0644)
 		if err != nil {
 			return 1
 		}
@@ -86,6 +120,11 @@ func Run(ctx context.Context, stdin io.Reader, stdout, stderr io.Writer, writeOu
 		}
 		if i == 0 && value.failure == "after_first_event" {
 			return failure("injected failure after first event")
+		}
+	}
+	if value.delegation != nil {
+		if line(stdout, map[string]any{"type": "circular.delegation.requested", "request": value.delegation}) != nil {
+			return 1
 		}
 	}
 	return 0
@@ -135,6 +174,21 @@ func parse(data []byte) (request, error) {
 	if json.Unmarshal(data, &input) != nil || input == nil {
 		return bad("stdin must contain one JSON object")
 	}
+	var value request
+	if raw, exists := input["delegation_request"]; exists {
+		candidate, err := delegations.Decode(raw)
+		if err != nil {
+			return bad("invalid delegation_request")
+		}
+		value.delegation = &candidate
+		delete(input, "delegation_request")
+	}
+	if raw, exists := input["delegation_context_sha256"]; exists {
+		if json.Unmarshal(raw, &value.contextSHA256) != nil || !prreviews.DigestPattern.MatchString(value.contextSHA256) || value.delegation != nil {
+			return bad("invalid delegation_context_sha256")
+		}
+		delete(input, "delegation_context_sha256")
+	}
 	if err := fields(input, "input", "protocol_version", "run", "behavior"); err != nil {
 		return request{}, err
 	}
@@ -148,7 +202,6 @@ func parse(data []byte) (request, error) {
 	if err := fields(run, "run", "id", "task_title", "task_description", "instructions"); err != nil {
 		return request{}, err
 	}
-	var value request
 	if json.Unmarshal(run["id"], &value.id) != nil {
 		return bad("run.id must be a canonical UUID")
 	}

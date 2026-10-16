@@ -52,7 +52,7 @@ func TestWorkspaceHandoffCommitsItsIdentityAndEventsTogether(t *testing.T) {
 	if s.Events[1].Data["stage"] != "container_started" {
 		t.Fatal(s.Events[1])
 	}
-	testsupport.AssertJSON(t, s.Events[3].Data, map[string]any{"backend": "fake"})
+	testsupport.AssertJSON(t, s.Events[3].Data, map[string]any{"invocation": 1, "backend": "fake"})
 }
 
 func TestFinalDiffAndEventsCommitAtomicallyAndIdenticalRetriesDoNotDuplicate(t *testing.T) {
@@ -117,7 +117,7 @@ func TestFinalDiffAndEventsCommitAtomicallyAndIdenticalRetriesDoNotDuplicate(t *
 	if a.Metadata["changed_files"].(json.Number).String() != "1" || a.Metadata["empty"] != false || a.Metadata["size_bytes"].(json.Number).String() != "5" {
 		t.Fatal(a.Metadata)
 	}
-	data := map[string]any{"artifact_id": a.ID.String(), "uri": a.URI}
+	data := map[string]any{"invocation": 1, "artifact_id": a.ID.String(), "uri": a.URI}
 	for k, v := range a.Metadata {
 		data[k] = v
 	}

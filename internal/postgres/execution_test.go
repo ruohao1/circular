@@ -106,10 +106,10 @@ func TestBackendEventsPreserveNormalizedDataAndRawFailureForHTTPReplay(t *testin
 	if delta.Type != "agent.message.delta" || delta.Source != "fake-container-workload" || failed.Type != "run.failed" {
 		t.Fatal(s.Types())
 	}
-	testsupport.AssertJSON(t, delta.Data, map[string]any{"delta": "hello 🌍"})
+	testsupport.AssertJSON(t, delta.Data, map[string]any{"invocation": 1, "delta": "hello 🌍"})
 	testsupport.AssertJSON(t, delta.Raw, raw)
 	testsupport.AssertJSON(t, failed.Raw, failure)
-	testsupport.AssertJSON(t, failed.Data, map[string]any{"error": *s.Run.Error})
+	testsupport.AssertJSON(t, failed.Data, map[string]any{"invocation": 1, "error": *s.Run.Error})
 }
 
 func TestProposalEventAndDraftAreAtomicAndCannotCreateAgents(t *testing.T) {
@@ -163,7 +163,7 @@ func TestProposalEventAndDraftAreAtomicAndCannotCreateAgents(t *testing.T) {
 	if last.Type != "agent.proposed" {
 		t.Fatal("proposal missing from timeline")
 	}
-	testsupport.AssertJSON(t, last.Data, map[string]any{"proposal_id": data["id"], "name": data["name"]})
+	testsupport.AssertJSON(t, last.Data, map[string]any{"invocation": 1, "proposal_id": data["id"], "name": data["name"]})
 	var model, effort, reason string
 	if err := pool.QueryRow(t.Context(), "SELECT backend_config->>'model',backend_config->>'reasoning_effort',model_reason FROM agent_proposals WHERE id=$1", data["id"]).Scan(&model, &effort, &reason); err != nil || model != data["model"] || effort != data["reasoning_effort"] || reason != data["model_reason"] {
 		t.Fatal("worker discarded the model recommendation", err)
@@ -224,7 +224,7 @@ func TestExecutionDecisionKeepsItsClaimUntilWorkspaceReleaseAndCannotBeOverwritt
 		t.Fatal("lease not released", err)
 	}
 	s.AssertTypes(t, "workspace.provisioning", "workspace.provisioning", "workspace.ready", "run.started", "run.completed", "workspace.released")
-	testsupport.AssertJSON(t, s.Events[4].Data, map[string]any{})
+	testsupport.AssertJSON(t, s.Events[4].Data, map[string]any{"invocation": 1})
 	if s.Events[4].Source != "worker" {
 		t.Fatal(s.Events[4])
 	}
@@ -313,5 +313,5 @@ func TestProvisioningFailureCommitsTheContainerIdentityWorkspaceAndRunTogether(t
 	if s.Events[1].Data["container_id"] != "late-container-id" || s.Events[2].Data["container_id"] != "late-container-id" || s.Events[2].Source != "worker" || s.Events[3].Raw != nil {
 		t.Fatal(s.Events)
 	}
-	testsupport.AssertJSON(t, s.Events[3].Data, map[string]any{"error": "container handoff failed"})
+	testsupport.AssertJSON(t, s.Events[3].Data, map[string]any{"invocation": 1, "error": "container handoff failed"})
 }

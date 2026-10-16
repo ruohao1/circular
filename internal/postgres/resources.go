@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"maps"
 	"time"
 
 	"github.com/google/uuid"
@@ -29,22 +30,25 @@ type Workspace struct {
 }
 
 type ResourceState struct {
-	RunID               uuid.UUID
-	Kind                runstate.Kind
-	StartedAt           *time.Time
-	ReviewContextSHA256 string
-	Status              runstate.Status
-	Backend             string
-	RepositoryID        *uuid.UUID
-	Workspace           *Workspace
-	Artifacts           []artifacts.Record
+	Invocation              int
+	DelegationContextSHA256 string
+	RunID                   uuid.UUID
+	Kind                    runstate.Kind
+	StartedAt               *time.Time
+	ReviewContextSHA256     string
+	Status                  runstate.Status
+	Backend                 string
+	RepositoryID            *uuid.UUID
+	Workspace               *Workspace
+	Artifacts               []artifacts.Record
 }
 
 // Resources requires an explicit execution owner; it cannot bypass lease checks
 // as an administrative/API session. Each mutation locks the Run before its data.
 type Resources struct {
-	pool  *pgxpool.Pool
-	owner string
+	pool       *pgxpool.Pool
+	owner      string
+	invocation int
 }
 
 func NewResources(pool *pgxpool.Pool, owner string) (*Resources, error) {
@@ -54,7 +58,17 @@ func NewResources(pool *pgxpool.Pool, owner string) (*Resources, error) {
 	if err := worker.ValidateID(owner); err != nil {
 		return nil, err
 	}
-	return &Resources{pool: pool, owner: owner}, nil
+	return &Resources{pool: pool, owner: owner, invocation: 1}, nil
+}
+
+// ForInvocation makes claim-local fencing independent of a shared supervisor.
+func (s *Resources) ForInvocation(number int) (*Resources, error) {
+	if number != 1 && number != 2 {
+		return nil, ErrResourceState
+	}
+	copy := *s
+	copy.invocation = number
+	return &copy, nil
 }
 
 // WithRun fences resource operations against recovery and commits state plus
@@ -74,14 +88,14 @@ func (s *Resources) WithRun(ctx context.Context, id uuid.UUID, action func(*RunR
 	defer func() { run.open = false }()
 	var owner *string
 	var expires *time.Time
-	err = tx.QueryRow(ctx, `SELECT status, backend, worker_id, lease_expires_at,kind,started_at FROM runs WHERE id=$1 FOR UPDATE`, id).Scan(&run.status, &run.backend, &owner, &expires, &run.kind, &run.startedAt)
+	err = tx.QueryRow(ctx, `SELECT status, backend, worker_id, lease_expires_at,kind,started_at,invocation FROM runs WHERE id=$1 FOR UPDATE`, id).Scan(&run.status, &run.backend, &owner, &expires, &run.kind, &run.startedAt, &run.invocation)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return ErrRunUnavailable
 	}
 	if err != nil {
 		return err
 	}
-	if owner == nil || *owner != s.owner || expires == nil || !expires.After(time.Now().UTC()) {
+	if owner == nil || *owner != s.owner || expires == nil || !expires.After(time.Now().UTC()) || s.invocation != run.invocation {
 		return ErrLeaseLost
 	}
 	if !run.status.Valid() {
@@ -99,14 +113,15 @@ func (s *Resources) Read(ctx context.Context, id uuid.UUID) (state ResourceState
 }
 
 type RunResources struct {
-	ctx       context.Context
-	tx        pgx.Tx
-	id        uuid.UUID
-	status    runstate.Status
-	backend   string
-	kind      runstate.Kind
-	startedAt *time.Time
-	open      bool
+	invocation int
+	ctx        context.Context
+	tx         pgx.Tx
+	id         uuid.UUID
+	status     runstate.Status
+	backend    string
+	kind       runstate.Kind
+	startedAt  *time.Time
+	open       bool
 }
 
 func (r *RunResources) guard() error {
@@ -120,13 +135,21 @@ func (r *RunResources) State() (ResourceState, error) {
 	if err := r.guard(); err != nil {
 		return ResourceState{}, err
 	}
-	state := ResourceState{RunID: r.id, Status: r.status, Backend: r.backend, Kind: r.kind, StartedAt: r.startedAt}
+	state := ResourceState{RunID: r.id, Status: r.status, Backend: r.backend, Kind: r.kind, StartedAt: r.startedAt, Invocation: r.invocation}
 	err := r.tx.QueryRow(r.ctx, `SELECT tasks.repository_id FROM tasks JOIN runs ON runs.task_id=tasks.id WHERE runs.id=$1`, r.id).Scan(&state.RepositoryID)
 	if err != nil {
 		return ResourceState{}, err
 	}
 	if r.kind == runstate.PRReview {
 		if err := r.tx.QueryRow(r.ctx, `SELECT context_sha256 FROM pr_reviews WHERE run_id=$1`, r.id).Scan(&state.ReviewContextSHA256); err != nil {
+			return ResourceState{}, err
+		}
+	}
+	if r.invocation == 2 {
+		input, err := readInvocation(r.ctx, r.tx, r.id, 2)
+		if err == nil {
+			state.DelegationContextSHA256 = input.DelegationContextSHA256
+		} else if !errors.Is(err, pgx.ErrNoRows) {
 			return ResourceState{}, err
 		}
 	}
@@ -151,7 +174,7 @@ func (r *RunResources) workspace() (*Workspace, error) {
 		return nil, err
 	}
 	switch w.Status {
-	case "pending", "ready", "failed", "released":
+	case "pending", "ready", "suspended", "failed", "released":
 	default:
 		return nil, ErrResourceState
 	}
@@ -166,9 +189,21 @@ func (r *RunResources) eventWithRaw(kind, source string, data, raw map[string]an
 	if err := r.guard(); err != nil {
 		return err
 	}
+	data = maps.Clone(data)
+	if data == nil {
+		data = map[string]any{}
+	}
+	data["invocation"] = r.invocation
 	payload, err := json.Marshal(data)
 	if err != nil {
 		return err
+	}
+	if kind == "usage.updated" {
+		var replay bool
+		err = r.tx.QueryRow(r.ctx, `SELECT COALESCE((SELECT data::jsonb=$2::jsonb FROM events WHERE run_id=$1 AND type='usage.updated' AND CASE WHEN data->>'invocation'='2' THEN 2 ELSE 1 END=$3 ORDER BY sequence DESC LIMIT 1),false)`, r.id, payload, r.invocation).Scan(&replay)
+		if err != nil || replay {
+			return err
+		}
 	}
 	var original []byte
 	if raw != nil {

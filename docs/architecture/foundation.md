@@ -87,6 +87,36 @@ and reconciles its persisted resources; it does not automatically repeat agent e
 At most three cleanup recovery attempts are made. A still-unreleased Workspace then
 requires operator attention. A fresh Run is the explicit execution retry boundary.
 
+## Delegation lifecycle
+
+Owner-managed `agent_delegation_targets` opt a coding Agent into one specialist
+handoff. The private `delegate_task` tool saves a bounded objective, target and
+request key; its `pending_handoff` response does not create work. The Supervisor
+requires a clean invocation exit, exact source checkpoint and released parent
+container before transactional admission. Project, Task and Run locks protect
+policy, source identity and the unique parent/child relationship. A child gets a
+new Task and Run, frozen input and an isolated worktree hydrated from the raw
+checkpoint. Git attributes cannot rewrite these bytes. Child patches use the
+checkpoint commit, while the parent's final patch uses its original base.
+
+The parent waits without a claim in `waiting_for_input`; its Workspace is
+`suspended` and retained. Terminal child status alone is insufficient: only after
+child cleanup and claim release can the queue atomically claim parent invocation
+2. The invocation fence rejects stale workers. A fresh backend invocation uses
+frozen parent input and verified read-only context containing progress, child
+status, report and patch. Native CLI sessions are not resumed, and child patches
+are never applied by the platform. The same Run and attempt emit `run.continued`
+instead of another `run.started`.
+
+Parent cancellation locks the parent before its child, stops unfinished child work
+and prevents continuation. Independent child failure or cancellation remains an
+honest result for the parent. Recovery preserves safely parked parents and cleans
+abandoned terminal parents; interrupted active invocations are not replayed.
+Child cleanup never locks the parent. Automatic provider queues and consumers both
+exclude delegated children, preserving the root Linear session. Parent usage sums
+the latest cumulative sample per invocation, excluding child usage. Private Run
+reads expose linkage and invocation; SSE remains live across suspension.
+
 The web launcher creates a Task followed by a queued Run. The execution page combines a
 coherent HTTP snapshot with ordered event history and cursor-based SSE. The frontend
 schema types are generated from the checked-in OpenAPI document; `pnpm contracts:check`

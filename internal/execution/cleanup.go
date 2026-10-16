@@ -60,6 +60,9 @@ func (r *Retention) Cleanup(caller context.Context, id uuid.UUID, docker *runtim
 		if initial.Kind == runstate.PRReview {
 			return docker.ReleaseReview(ctx, id, containerID, initial.ReviewContextSHA256)
 		}
+		if initial.DelegationContextSHA256 != "" {
+			return docker.ReleaseDelegation(ctx, id, containerID, initial.DelegationContextSHA256)
+		}
 		return docker.Release(ctx, id, containerID)
 	}); err != nil {
 		return err
@@ -79,6 +82,9 @@ func (r *Retention) Cleanup(caller context.Context, id uuid.UUID, docker *runtim
 		if err := r.FinalizePRReview(ctx, id); err != nil {
 			return err
 		}
+	}
+	if err := r.retainDelegationReport(ctx, id, target); err != nil {
+		return err
 	}
 	if present {
 		if initial.RepositoryID == nil {
@@ -122,12 +128,20 @@ func (r *Retention) Cleanup(caller context.Context, id uuid.UUID, docker *runtim
 				if err := r.git.Release(ctx, git.Worktree{RunID: id, RepositoryPath: repository, Path: target, Branch: "circular/run/" + id.String()}, git.ReleaseOptions{DiscardChanges: true}); err != nil {
 					return err
 				}
+				if err := r.git.ReleaseDelegationSource(ctx, id, *current.RepositoryID); err != nil {
+					return err
+				}
 			} else if present {
 				return ErrRetention
 			}
 		}
 		if current.Kind == runstate.PRReview {
 			if err := r.removeReviewContext(ctx, current); err != nil {
+				return err
+			}
+		}
+		if current.DelegationContextSHA256 != "" {
+			if err := r.removeDelegationContext(current); err != nil {
 				return err
 			}
 		}

@@ -79,7 +79,9 @@ test("connect to bundled MCP with one command and real assistant activity", asyn
   );
 
   const tools = await discoverTools(request, url, "Circular browser check");
-  expect(tools).toHaveLength(44);
+  expect(tools).toHaveLength(46);
+  expect(tools).toContain("get_delegation_targets");
+  expect(tools).toContain("set_delegation_targets");
   expect(tools).toEqual(
     expect.arrayContaining([
       "list_task_planning",
@@ -130,7 +132,9 @@ test("connect to bundled MCP with one command and real assistant activity", asyn
     `${url}/read-only`,
     "Circular read-only check",
   );
-  expect(readOnlyTools).toHaveLength(23);
+  expect(readOnlyTools).toHaveLength(24);
+  expect(readOnlyTools).toContain("get_delegation_targets");
+  expect(readOnlyTools).not.toContain("set_delegation_targets");
   expect(readOnlyTools).toContain("list_task_planning");
   expect(readOnlyTools).toContain("get_task_planning");
   expect(readOnlyTools).not.toContain("update_task");

@@ -213,8 +213,9 @@ Unicode characters; collection pages contain at most 100 records and 256 KiB.
 ## Separation from the in-run proposal server
 
 `internal/controlmcp` and `cmd/circular-mcp` serve external clients.
-`internal/agenttools` remains the private proposal MCP inside Codex workloads,
-with only `list_models` and `propose_agent`. Run containers are not given this
+`internal/agenttools` remains the private MCP inside Codex workloads,
+with `list_models`, `propose_agent`, and role-scoped `delegate_task` or
+`submit_pr_review`. Run containers are not given this
 control server, its API address, or authority to start more work. Saved draft
 recommendations still enter the same console review flow.
 
@@ -256,9 +257,32 @@ Use `circular_list_requests` (a project or `unrouted=true`) and
 future provider writes and descendant reviews. App setup, signing secrets and
 route enablement remain console-only.
 
+## Delegation policy and observation
+
+`get_delegation_targets` accepts `agent_id` and is available in both access modes.
+Full control also exposes `set_delegation_targets`, accepting `agent_id` and
+`target_ids`. The operation replaces the complete allowed set; `[]` disables
+future delegation admissions. Only enabled, same-Project specialists are allowed.
+Policy is owner-controlled and unavailable to Run containers. Setting policy does
+not start work, and revoking it does not cancel an already admitted child.
+
+An opted-in parent may request one child through its private `delegate_task` tool.
+`get_run` exposes the same `invocation` number and `delegation` linkage as the Run
+execution API, and existing event reads show suspension and continuation. The
+parent stays in the same Run and attempt while waiting. It automatically continues
+only after the child has terminated and released its resources. The usage response
+keeps its existing shape and sums parent invocations only.
+
+Use the existing cancellation tool on the parent to stop both unfinished Runs and
+prevent continuation. Cancelling only the child resumes the parent with a cancelled
+outcome. Automatic GitHub/Linear publication belongs to the root; explicit manual
+publication retains its existing authorization. See
+[Codex backend](codex-backend.md#bounded-specialist-delegation) for limits,
+checkpoint semantics, rollout and recovery diagnostics.
+
 ## Task planning tools
 
-Full control exposes 44 tools; read-only exposes 23. `list_task_planning` returns
+Full control exposes 46 tools; read-only exposes 24. `list_task_planning` returns
 bounded groups (up to 50 Tasks per stage by default, at most 100) with totals,
 Run summaries and revision-bound cursors. Supply a status when continuing a group's
 cursor, retaining Project and all filters. Default groups exclude cancelled;

@@ -49,6 +49,18 @@ func (q *Queue) Acquire(ctx context.Context, workerID string) (*worker.Claim, er
 		return nil, err
 	}
 	if claim == nil {
+		claim, err = claimOrphanedDelegation(ctx, tx, workerID, now)
+		if err != nil {
+			return nil, err
+		}
+	}
+	if claim == nil {
+		claim, err = claimContinuation(ctx, tx, workerID, now)
+		if err != nil {
+			return nil, err
+		}
+	}
+	if claim == nil {
 		var id string
 		err := tx.QueryRow(ctx, `SELECT id::text FROM runs
 			WHERE status = 'queued' ORDER BY created_at, id
@@ -69,7 +81,7 @@ func (q *Queue) Acquire(ctx context.Context, workerID string) (*worker.Claim, er
 		if err != nil {
 			return nil, err
 		}
-		claim = &worker.Claim{RunID: runID}
+		claim = &worker.Claim{RunID: runID, Invocation: 1}
 	}
 	if err := tx.Commit(ctx); err != nil {
 		// A lost commit acknowledgement must never start an executor. The
@@ -82,12 +94,12 @@ func (q *Queue) Acquire(ctx context.Context, workerID string) (*worker.Claim, er
 func recoverExpired(ctx context.Context, tx pgx.Tx, owner string, now time.Time) (*worker.Claim, error) {
 	var id string
 	var status runstate.Status
-	var attempts int
-	err := tx.QueryRow(ctx, `SELECT id::text, status, recovery_attempts FROM runs
+	var attempts, invocation int
+	err := tx.QueryRow(ctx, `SELECT id::text, status, recovery_attempts, invocation FROM runs
 		WHERE status <> 'queued' AND worker_id IS NOT NULL AND recovery_attempts < $3
 		AND (lease_expires_at <= $1 OR (lease_expires_at IS NULL AND claimed_at < $2))
 		ORDER BY claimed_at, id FOR UPDATE SKIP LOCKED LIMIT 1`,
-		now, now.Add(-LeaseDuration), MaxRecoveries).Scan(&id, &status, &attempts)
+		now, now.Add(-LeaseDuration), MaxRecoveries).Scan(&id, &status, &attempts, &invocation)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
 	}
@@ -113,7 +125,7 @@ func recoverExpired(ctx context.Context, tx pgx.Tx, owner string, now time.Time)
 			return nil, err
 		}
 	}
-	return &worker.Claim{RunID: runID, Recovery: true}, nil
+	return &worker.Claim{RunID: runID, Recovery: true, Invocation: invocation}, nil
 }
 
 // ReconcileExit preserves terminal decisions and leaves unreleased claims in
@@ -169,9 +181,12 @@ func failRun(ctx context.Context, tx pgx.Tx, id uuid.UUID, current runstate.Stat
 	}
 	_, err = tx.Exec(ctx, `INSERT INTO events
 		(id, run_id, sequence, type, source, data, raw, occurred_at)
-		SELECT $1, $2, COALESCE(MAX(sequence), 0) + 1, 'run.failed', $3, $4::json, NULL, $5
+		SELECT $1, $2, COALESCE(MAX(sequence), 0) + 1, 'run.failed', $3, ($4::jsonb || jsonb_build_object('invocation',(SELECT invocation FROM runs WHERE id=$2)))::json, NULL, $5
 		FROM events WHERE run_id = $2`, uuid.New(), id, source, payload, now)
-	return err
+	if err != nil {
+		return err
+	}
+	return settleDelegation(ctx, tx, id, runstate.Failed)
 }
 
 func rollback(ctx context.Context, tx pgx.Tx) {

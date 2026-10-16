@@ -33,6 +33,15 @@ var (
 )
 
 func (s *Service) publishGitHubRun(ctx context.Context, d *githubDelivery) error {
+	if d.Automatic {
+		child, err := s.delegatedChild(ctx, d.Run)
+		if err != nil {
+			return err
+		}
+		if child {
+			return errDelegationPublication
+		}
+	}
 	var valid, enabled bool
 	err := s.pool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM runs r JOIN tasks t ON t.id=r.task_id JOIN repositories repo ON repo.id=t.repository_id AND repo.project_id=t.project_id WHERE r.id=$1 AND r.status='succeeded' AND t.project_id=$2 AND repo.id=$3 AND repo.external_refs->'github'->>'repository_id'=$4 AND repo.external_refs->'github'->>'installation_id'=$5),COALESCE((SELECT enabled FROM github_run_delivery_settings WHERE project_id=$2),false)`, d.Run, d.Project, d.Repository, d.GitHubRepository, d.Installation).Scan(&valid, &enabled)
 	if err != nil {

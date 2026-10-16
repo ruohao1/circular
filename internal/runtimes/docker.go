@@ -247,6 +247,9 @@ func createArguments(plan Plan, nonce string) []string {
 			args = append(args, "--label", name+"="+plan.Labels[name])
 		}
 	}
+	if plan.DelegationContextSource != "" {
+		args = append(args, "--label", "io.circular.delegation_context_sha256="+plan.DelegationContextSHA256)
+	}
 	worktreeMount := "type=bind,src=" + plan.WorktreeSource + ",dst=" + plan.WorktreeDestination
 	if plan.WorktreeReadOnly {
 		worktreeMount += ",readonly"
@@ -258,6 +261,9 @@ func createArguments(plan Plan, nonce string) []string {
 		"--mount", worktreeMount, "--interactive")
 	if plan.ReviewContextSource != "" {
 		args = append(args, "--mount", "type=bind,src="+plan.ReviewContextSource+",dst="+plan.ReviewContextDestination+",readonly")
+	}
+	if plan.DelegationContextSource != "" {
+		args = append(args, "--mount", "type=bind,src="+plan.DelegationContextSource+",dst=/delegation-context,readonly")
 	}
 	if plan.CredentialSource != "" {
 		args = append(args, "--mount", "type=bind,src="+plan.CredentialSource+",dst="+plan.CredentialDestination)

@@ -86,8 +86,8 @@ func TestSupervisorCodexCompletesAndRetainsNormalizedReplayAndArtifacts(t *testi
 	if message.Source != "codex" || usage.Source != "codex" || message.Raw["type"] != "item.completed" || usage.Raw["type"] != "turn.completed" {
 		t.Fatalf("Codex raw event identity was lost: %+v %+v", message, usage)
 	}
-	testsupport.AssertJSON(t, message.Data, map[string]any{"content": "Implemented fixture 🌍"})
-	testsupport.AssertJSON(t, usage.Data, map[string]any{"input_tokens": 21, "output_tokens": 5})
+	testsupport.AssertJSON(t, message.Data, map[string]any{"invocation": 1, "content": "Implemented fixture 🌍"})
+	testsupport.AssertJSON(t, usage.Data, map[string]any{"invocation": 1, "input_tokens": 21, "output_tokens": 5})
 	testsupport.AssertJSON(t, message.Raw["item"], map[string]any{"id": "item_1", "type": "agent_message", "text": "Implemented fixture 🌍"})
 	testsupport.AssertJSON(t, usage.Raw["usage"], map[string]any{"input_tokens": 21, "cached_input_tokens": 8, "output_tokens": 5})
 	if snapshot.Usage.InputTokens != "21" || snapshot.Usage.OutputTokens != "5" {
@@ -421,7 +421,7 @@ func TestSupervisorCodexSubscriptionLifecyclePreservesDedicatedAuth(t *testing.T
 					if event.Source != "codex" || event.Raw["type"] != "item.completed" {
 						t.Fatal("subscription message lost its backend identity")
 					}
-					testsupport.AssertJSON(t, event.Data, map[string]any{"content": "Implemented fixture 🌍"})
+					testsupport.AssertJSON(t, event.Data, map[string]any{"invocation": 1, "content": "Implemented fixture 🌍"})
 				}
 				cancelled = cancelled || event.Type == "run.cancelled"
 			}

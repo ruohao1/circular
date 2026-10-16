@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { RunEvent } from "./api";
-import { emptyEvents, mergeEvents, outputFrom } from "./run-events";
+import { emptyEvents, mergeEvents, outputFrom, terminalEvents } from "./run-events";
 
 function event(
   sequence: number,
@@ -21,6 +21,14 @@ function event(
   };
 }
 describe("replayable Run events", () => {
+  it("keeps delegation suspension and continuation in one event cursor", () => {
+    const types = ["run.started", "delegation.requested", "delegation.created", "run.suspended", "workspace.suspended", "run.continued"];
+    const history = types.map((type, index) => event(index + 1, type));
+    const result = mergeEvents(mergeEvents(emptyEvents, history.slice(0, 4)), history.slice(3));
+    expect(result.cursor).toBe(6);
+    expect(result.events).toHaveLength(6);
+    expect(result.events.some((item) => terminalEvents.has(item.type))).toBe(false);
+  });
   it("merges replay and duplicate SSE delivery once", () => {
     const history = mergeEvents(emptyEvents, [event(1), event(2)]);
     const result = mergeEvents(history, [event(2), event(3), event(1)]);

@@ -4,6 +4,12 @@ import { emptyEvents, mergeEvents, terminalEvents } from "./run-events";
 
 const eventNames = [
   "run.started",
+  "run.suspended",
+  "run.continued",
+  "delegation.requested",
+  "delegation.created",
+  "delegation.rejected",
+  "workspace.suspended",
   ...terminalEvents,
   "workspace.provisioning",
   "workspace.ready",

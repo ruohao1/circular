@@ -19,10 +19,25 @@ var ErrBase = errors.New("Run base commit could not be verified")
 // runBase lives in the trusted cache, outside the agent's mounted worktree.
 // The ref also retains its object if the Run branch advances or is removed.
 type runBase struct {
+	Delegated    bool      `json:"delegated,omitempty"`
 	RunID        uuid.UUID `json:"run_id"`
 	RepositoryID uuid.UUID `json:"repository_id"`
 	Commit       string    `json:"commit"`
 	Ref          string    `json:"ref"`
+}
+
+func (l *Local) Base(ctx context.Context, repositoryID, runID uuid.UUID) (commit, ref string, err error) {
+	worktree := filepath.Join(l.config.WorktreeRoot, runID.String())
+	owned, err := hasMarker(worktree, runID, repositoryID)
+	if err != nil || !owned {
+		return "", "", ErrBase
+	}
+	directory, err := l.trustedGitDirectory(worktree, runID)
+	if err != nil || !canonical(worktree) || filepath.Dir(filepath.Dir(filepath.Dir(directory))) != filepath.Join(l.config.RepositoryCacheRoot, repositoryID.String()) {
+		return "", "", ErrBase
+	}
+	base, err := l.readBase(ctx, filepath.Join(l.config.RepositoryCacheRoot, repositoryID.String()), repositoryID, runID)
+	return base.Commit, base.Ref, err
 }
 
 func baseRef(runID uuid.UUID) string { return "refs/circular/bases/" + runID.String() }

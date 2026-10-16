@@ -3,10 +3,13 @@ package agenttools
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/ruohao1/circular/internal/agentproposals"
 	"github.com/ruohao1/circular/internal/codexconfig"
+	"github.com/ruohao1/circular/internal/delegations"
 )
 
 type proposalResult struct {
@@ -43,5 +46,20 @@ func Run(ctx context.Context, directory string) error {
 	if err != nil {
 		return err
 	}
-	return New(spool).Run(ctx, &mcp.StdioTransport{})
+	server := New(spool)
+	dir := filepath.Join(directory, "delegation")
+	if _, err := os.Lstat(dir); err == nil {
+		delegation, err := delegations.NewSpool(dir)
+		if err != nil {
+			return err
+		}
+		targets, err := delegation.Targets()
+		if err != nil {
+			return err
+		}
+		AddDelegation(server, delegation, targets)
+	} else if !os.IsNotExist(err) {
+		return err
+	}
+	return server.Run(ctx, &mcp.StdioTransport{})
 }

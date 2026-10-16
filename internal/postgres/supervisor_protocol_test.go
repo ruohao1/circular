@@ -2,6 +2,7 @@ package postgres_test
 
 import (
 	"encoding/json"
+	"maps"
 	"os"
 	"path/filepath"
 	"strings"
@@ -134,7 +135,9 @@ func TestSupervisorPreservesJSONLValidationAndFailureReplay(t *testing.T) {
 			for _, e := range snapshot.Events {
 				if e.Source == "fake-container-workload" {
 					actual = append(actual, e.Raw)
-					testsupport.AssertJSON(t, e.Data, e.Raw["data"])
+					expected := maps.Clone(e.Raw["data"].(map[string]any))
+					expected["invocation"] = 1
+					testsupport.AssertJSON(t, e.Data, expected)
 					if e.Type != e.Raw["type"] {
 						t.Fatal(e)
 					}
