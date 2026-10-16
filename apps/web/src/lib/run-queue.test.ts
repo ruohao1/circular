@@ -1,7 +1,33 @@
 import { describe, expect, it } from "vitest";
-import { parseRunQueueSearch, runDurationSeconds } from "./run-queue";
+import {
+  parseRunQueueSearch,
+  runDurationSeconds,
+  runQueueOptions,
+} from "./run-queue";
 
 describe("Run queue URL and elapsed execution", () => {
+  it("keeps actual Agent filters separate in cached Run pages", () => {
+    const options = runQueueOptions("project", {
+      agent_id: "agent-a",
+      task_id: "task",
+    });
+    expect(options.queryKey).toEqual([
+      "run-queue",
+      "project",
+      {
+        group: "all",
+        q: "",
+        cursor: "",
+        limit: 50,
+        task_id: "task",
+        agent_id: "agent-a",
+      },
+    ]);
+    expect(options.queryKey).not.toEqual(
+      runQueueOptions("project", { agent_id: "agent-b", task_id: "task" })
+        .queryKey,
+    );
+  });
   it("normalizes links without treating literal search symbols as wildcards", () => {
     expect(parseRunQueueSearch({ group: "unknown", q: "  Fix_%  " })).toEqual({
       group: "all",

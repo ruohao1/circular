@@ -5613,6 +5613,8 @@ export interface operations {
     listProjectRunQueue: {
         parameters: {
             query?: {
+                /** @description Filter by the Agent that performed the Run, including disabled Agents. Must belong to this Project. */
+                agent_id?: string;
                 cursor?: string;
                 group?: "all" | "active" | "failed" | "finished";
                 limit?: number;
@@ -5636,7 +5638,7 @@ export interface operations {
                     "application/json": components["schemas"]["RunQueuePage"];
                 };
             };
-            /** @description Project not found */
+            /** @description Project, Task, or Agent not found in the requested Project */
             404: {
                 headers: {
                     [name: string]: unknown;

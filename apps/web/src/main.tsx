@@ -29,6 +29,7 @@ import { ConsoleOverview } from "@/pages/overview";
 import { RequestPage } from "@/pages/request";
 import { RunsPage } from "@/pages/runs";
 import { TasksPage } from "@/pages/tasks";
+import { AgentsPage, AgentPage } from "@/pages/agents";
 import { parseTaskPlanningSearch } from "@/lib/task-planning";
 import {
   QueryClient,
@@ -529,6 +530,39 @@ const runRoute = createRoute({
   path: "/runs/$runId",
   component: RunDetail,
 });
+const agentsRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/agents",
+  validateSearch: (search: SearchSchemaInput & Record<string, unknown>) => ({
+    status:
+      search.status === "enabled" || search.status === "disabled"
+        ? search.status
+        : ("all" as const),
+    q:
+      typeof search.q === "string"
+        ? Array.from(search.q).slice(0, 200).join("")
+        : "",
+  }),
+  search: { middlewares: [stripSearchParams({ status: "all", q: "" })] },
+  component: AgentsPage,
+});
+const agentRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/agents/$agentId",
+  validateSearch: (search: SearchSchemaInput & Record<string, unknown>) => ({
+    ...parseRunQueueSearch(search),
+    tab:
+      search.tab === "tasks" || search.tab === "runs"
+        ? search.tab
+        : ("overview" as const),
+  }),
+  search: {
+    middlewares: [
+      stripSearchParams({ tab: "overview", group: "all", q: "", cursor: "" }),
+    ],
+  },
+  component: AgentPage,
+});
 const docsRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/docs/$",
@@ -645,6 +679,8 @@ const router = createRouter({
     requestRoute,
     runsRoute,
     tasksRoute,
+    agentsRoute,
+    agentRoute,
     runRoute,
     setupRoute,
     docsIndexRoute,

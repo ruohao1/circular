@@ -1,5 +1,5 @@
 import { useState, type ReactNode } from "react";
-import { useIsMutating, useQueryClient } from "@tanstack/react-query";
+import { useIsMutating, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate, useRouterState } from "@tanstack/react-router";
 import {
   BookOpen,
@@ -10,8 +10,9 @@ import {
   Menu,
   Plus,
   SlidersHorizontal,
+  Users,
 } from "lucide-react";
-import type { ExternalRequestDetail } from "@/api";
+import { api, type ExternalRequestDetail } from "@/api";
 import { useProject } from "@/use-project";
 import { useTaskLauncher } from "./task-launcher-context";
 import { ResourceSelect } from "@/components/resource-select";
@@ -68,6 +69,12 @@ function WorkspaceNavigation({ onNavigate }: { onNavigate?(): void }) {
       active: pathname === "/tasks",
     },
     {
+      to: "/agents" as const,
+      label: "Agents",
+      icon: Users,
+      active: pathname === "/agents" || pathname.startsWith("/agents/"),
+    },
+    {
       to: "/runs" as const,
       label: "Runs",
       icon: CircleDot,
@@ -122,6 +129,16 @@ export function ConsoleShell({ children }: { children: ReactNode }) {
   const navigate = useNavigate();
   const client = useQueryClient();
   const tasksPage = pathname === "/tasks";
+  const agentsPage = pathname === "/agents" || pathname.startsWith("/agents/");
+  const agentId = agentsPage ? pathname.split("/")[2] : undefined;
+  const agents = useQuery({
+    queryKey: ["agents", selectedProject],
+    queryFn: () => api.agents(selectedProject),
+    enabled: agentsPage && !!selectedProject,
+  });
+  const agent = agents.data?.find(
+    (item) => item.id === agentId && item.project_id === selectedProject,
+  );
   function chooseProject(id: string) {
     if (selectionLocked || saving || id === selectedProject) return;
     const request = pathname.startsWith("/requests/")
@@ -130,7 +147,8 @@ export function ConsoleShell({ children }: { children: ReactNode }) {
           pathname.split("/")[2],
         ])
       : undefined;
-    if (
+    if (agentsPage) void navigate({ to: "/agents" });
+    else if (
       pathname.startsWith("/runs/") ||
       (pathname.startsWith("/requests/") && request?.project_id)
     )
@@ -160,7 +178,7 @@ export function ConsoleShell({ children }: { children: ReactNode }) {
       <div className="min-w-0">
         <header
           className={
-            tasksPage
+            tasksPage || agentsPage
               ? "flex h-11 items-center gap-2 border-b bg-sidebar/40 px-4 sm:px-6 lg:px-8"
               : "flex min-h-20 items-center gap-3 border-b bg-sidebar/40 px-4 py-3 sm:px-6 lg:px-8"
           }
@@ -174,10 +192,10 @@ export function ConsoleShell({ children }: { children: ReactNode }) {
           >
             <Menu aria-hidden="true" />
           </Button>
-          {tasksPage ? (
+          {tasksPage || agentsPage ? (
             <nav aria-label="Breadcrumb" className="min-w-0">
               <ol className="flex min-w-0 items-center gap-2 text-[13px]">
-                <li className="min-w-0">
+                <li className="min-w-0 shrink-0">
                   <Select
                     name="project"
                     value={selectedProject}
@@ -193,7 +211,7 @@ export function ConsoleShell({ children }: { children: ReactNode }) {
                       id="project"
                       aria-label="Project"
                       size="sm"
-                      className="max-w-64 min-w-0 border-transparent px-1.5 text-[13px] dark:bg-transparent"
+                      className="max-w-[35vw] min-w-0 border-transparent px-1.5 text-[13px] dark:bg-transparent sm:max-w-64"
                     >
                       <SelectValue
                         placeholder={
@@ -226,10 +244,35 @@ export function ConsoleShell({ children }: { children: ReactNode }) {
                   /
                 </li>
                 <li className="shrink-0">
-                  <h1 aria-current="page" className="font-medium">
-                    Tasks
-                  </h1>
+                  {agentId ? (
+                    <Link
+                      to="/agents"
+                      className="rounded-sm text-muted-foreground hover:text-foreground focus-visible:outline-ring"
+                    >
+                      Agents
+                    </Link>
+                  ) : (
+                    <h1 aria-current="page" className="font-medium">
+                      {agentsPage ? "Agents" : "Tasks"}
+                    </h1>
+                  )}
                 </li>
+                {agentId && (
+                  <>
+                    <li aria-hidden="true" className="text-muted-foreground/60">
+                      /
+                    </li>
+                    <li className="min-w-0">
+                      <h1
+                        aria-current="page"
+                        className="truncate font-medium"
+                        title={agent?.name}
+                      >
+                        {agent?.name ?? "Agent"}
+                      </h1>
+                    </li>
+                  </>
+                )}
               </ol>
             </nav>
           ) : (

@@ -9488,6 +9488,16 @@
               "type": "string",
               "format": "uuid"
             }
+          },
+          {
+            "name": "agent_id",
+            "in": "query",
+            "required": false,
+            "description": "Filter by the Agent that performed the Run, including disabled Agents. Must belong to this Project.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
           }
         ],
         "responses": {
@@ -9502,7 +9512,7 @@
             }
           },
           "404": {
-            "description": "Project not found"
+            "description": "Project, Task, or Agent not found in the requested Project"
           },
           "422": {
             "description": "Invalid query or cursor"
