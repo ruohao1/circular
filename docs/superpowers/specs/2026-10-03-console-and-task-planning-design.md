@@ -1,22 +1,24 @@
 # Circular console and Task planning: design draft
 
-Status: initial phased design. The focused phase 1 console foundation is implemented; later phases remain outside its PR. The original planning choices below provide historical context.
+Status: console foundation implemented and verified; Task planning and Kanban implemented, verified and reviewed. Planned-date editing is implemented, verified and reviewed. Timeline, dependencies, drag/resize, and Run-review redesign remain future work.
 
-Phase 1 now has a [focused console design](2026-10-03-console-foundation-design.md) and [implementation plan](../plans/2026-10-03-console-foundation.md). These make the console slice concrete; later planning views retain the open choices recorded below.
+Phase 1 is recorded in the [focused console design](2026-10-03-console-foundation-design.md) and [completed implementation plan](../plans/2026-10-03-console-foundation.md). The completed increment has a [Task planning and Kanban design](2026-10-03-task-planning-kanban-design.md) and [implementation plan](../plans/2026-10-03-task-planning-kanban.md). The focused design supersedes the initial Kanban proposals below.
+
+The next increment has a [Task schedules and Gantt design](2026-10-04-task-schedules-gantt-design.md) and [implementation plan](../plans/2026-10-04-task-schedules-gantt.md). These supersede the initial Gantt proposals below and define calendar-day scheduling with manual dependencies and advisory date conflicts.
 
 ## Purpose and assumptions
 
 Make Circular useful throughout engineering work: plan Tasks, monitor execution, inspect results, and decide what happens next. Preserve the distinction between a durable Task and each execution Run.
 
-The user requested UI/UX references, liked the shortlist of shadcn, ReUI, AI Elements, and Pierre Diffs, then requested a plan and suggested Kanban and Gantt views. Kanban belongs in scope. This draft interprets Gantt as planning Task dates and dependencies; whether the user also wants an execution timeline remains an open product choice.
+The user requested UI/UX references, liked the shortlist of shadcn, ReUI, AI Elements, and Pierre Diffs, then requested a plan and suggested Kanban and Gantt views. Kanban is implemented. The next focused increment defines Gantt as planning Task dates and dependencies; an actual Run execution timeline is separate future scope.
 
 Success means a person can identify the work needing attention, find a Task across views, inspect its attempts, and review its output without losing Project context.
 
-## What exists today
+## Baseline before Task planning
 
 - `apps/web/components.json` selects `radix-nova`. The app uses React 19, Tailwind 4, Vite, TanStack Router/Query, and a Go/PostgreSQL backend.
-- `apps/web/src/main.tsx` contains the application shell, a large Task-and-Run launcher, a recent Runs table centered on IDs, and Run detail views for output, changes, and events.
-- `apps/web/src/use-project.tsx` already retains the selected Project. The selection control is currently repeated within individual pages.
+- Phase 1 supplies a shared console shell, a global New Task launcher with partial-launch recovery, an Overview attention view, and a searchable `/runs` queue labeled by Task title. Existing Run detail remains in `apps/web/src/main.tsx`.
+- `apps/web/src/use-project.tsx` retains the selected Project; the shell owns the shared selection control and respects selection locks during launch/recovery.
 - `apps/web/src/components/external-request-list.tsx` and `apps/web/src/pages/request.tsx` support incoming requests, including routing and review before starting work.
 - `contracts/openapi.json` defines Task statuses `open`, `in_progress`, `completed`, and `cancelled`. Tasks have no planning dates, preferred Agent, priority, dependencies, saved board order, or edit revision.
 - The HTTP API lists, creates, and reads Tasks, but has no Task editing endpoint. The frontend does not yet expose a Tasks collection view.
@@ -43,12 +45,12 @@ All Task views use the same records, mutations, filters, and Task detail surface
 ## Kanban design
 
 - Each card represents one Task. Its attempts are visible in Task details.
-- Proposed columns: Backlog, Ready, In progress, Review, Done. Preserve the existing wire values `open`, `in_progress`, and `completed`; add `ready` and `in_review` only when this workflow is accepted. Cancelled Tasks remain accessible through a filter.
+- Accepted columns: Backlog, Ready, In progress, Review, Done. Preserve the existing wire values `open`, `in_progress`, and `completed`; the next increment adds `ready` and `in_review`. Cancelled Tasks remain accessible through a filter.
 - Show title, Repository, priority, preferred Agent, and a separate execution-status indicator. A preferred Agent is a planning default; every Run still records the Agent actually selected.
 - Workflow stages are manually managed initially. Show completed Runs needing review as an attention signal; do not silently mark Tasks Done or overwrite their stage when an older attempt finishes.
 - Dragging a card changes its stage and saved ordering. It does not start, retry, cancel, publish, or approve a Run.
 - Provide a Move to action and ordering controls usable without dragging. Support keyboard and touch interaction.
-- Persist a move atomically and reconcile the server response. On a failed save, restore the previous card placement and explain the failure. On a stale edit, refresh rather than overwrite another person's change.
+- Persist a move atomically and reconcile the server response. Keep authoritative placement while saving, then refetch canonical state and explain any failure. On a stale edit, require refresh before a new intent rather than replaying it.
 - Preserve ordering when filters hide neighboring cards. The backend determines ordering within the complete Project and stage, rather than relying on a filtered array index.
 
 ## Gantt design
@@ -83,7 +85,8 @@ An execution timeline is a separate possible view: actual Run start/finish times
 | --- | --- | --- |
 | Foundation and navigation | Existing shadcn/Radix Nova | Preserve tokens, routing, focus behavior, and mobile navigation |
 | Run queue and detail layout | ReUI examples as references; free primitives where useful | Choose Radix variants; paid Pro source is an optional acquisition, not a dependency of the plan |
-| Board and Gantt | Evaluate ReUI first, Kibo second | Vite integration, keyboard interaction, controlled updates, date semantics, dependency rendering, and realistic data volume |
+| Board | Free ReUI Radix Kanban selected in the focused design | Verify keyboard/touch interaction, React 19, and controlled persistence during implementation |
+| Gantt | Pinned free ReUI Radix Gantt selected in the focused design | Source evaluation complete; runtime gate covers Vite, date semantics, touch/keyboard access, controlled updates and bounded pages |
 | Code review | Pierre Diffs | Patch formats, large-file behavior, theming, and download fallback |
 | Agent activity controls | Selected AI Elements patterns/components | Documentation assumes Next.js and AI SDK; inspect individual dependencies and adapt Circular Events explicitly |
 
@@ -93,13 +96,13 @@ A bounded component evaluation precedes adoption. Keep Circular's Task and Run m
 
 Each phase should produce a useful increment and receive its own implementation plan once its design is settled.
 
-1. **Console foundation and Run queue.** Put Project context in the shell, make task names visible, add a compact launcher, preserve existing deep links, and build the attention view from existing request and execution states. Include lookup APIs needed to avoid one request per row.
-2. **Run review.** Add file navigation and Pierre Diffs, improve outcome hierarchy, group readable activity, and preserve all current delivery/review actions. Keep raw events available for diagnosis.
-3. **Task planning and Kanban.** Introduce Task editing, workflow stages, priority, preferred Agent, revision checks, and persisted ordering. Ship Save Task, a shared Task detail surface, List and Board together. Extend OpenAPI, generated TypeScript, HTTP behavior, and relevant MCP Task operations consistently.
-4. **Task schedules and Gantt.** Add optional date ranges and dependencies, then Timeline over the same collection. Ship date editing and validation before drag scheduling. Add cycle protection, unscheduled Tasks, and clear date-conflict feedback.
+1. **Console foundation and Run queue — implemented and verified.** Shared Project context, Task names, compact launcher, preserved deep links, and attention from existing request/execution states, with bounded lookup APIs.
+2. **Task planning and Kanban — implemented and verified.** Introduce Task editing, workflow stages, priority, preferred Agent, revision checks, and persisted ordering. Ship Save Task, a shared Task detail surface, List and Board together. Extend OpenAPI, generated TypeScript, HTTP behavior, and relevant MCP Task operations consistently.
+3. **Task schedules and Gantt — date editing implemented and verified.** Next ship a bounded read-only Timeline, dependencies and warnings, then drag/resize. Reject cycles and preserve manual scheduling and Run independence.
+4. **Run review.** Add file navigation and Pierre Diffs, improve outcome hierarchy, group readable activity, and preserve all current delivery/review actions. Keep raw events available for diagnosis.
 5. **Navigation and onboarding polish.** Add contextual keyboard actions, richer Agent navigation, setup readiness guidance, responsive refinements, and documentation for the complete workflow.
 
-If planning is the immediate priority, phases 2 and 3 can exchange order. Gantt depends on the shared Task planning foundation; it should not block the first console improvements.
+Task schedules now take priority over Run-review polish. Gantt builds on the completed Task planning foundation; its focused design and four-stage implementation plan now record completed date editing and the remaining Timeline stages.
 
 ## Implementation boundaries to carry into the detailed plans
 
@@ -126,9 +129,9 @@ If planning is the immediate priority, phases 2 and 3 can exchange order. Gantt 
 
 ## Product choices for review
 
-The draft recommends List and Kanban as the first planning release, followed by Gantt for planned Task dates and dependency visibility. Full planning-and-execution scheduling together would have broader backend scope and delay the first usable release. If the real need is observing parallel Agent activity, prioritize an execution timeline instead of adding planning dates.
+List and Kanban are implemented. The next design specifies planned Task dates with inclusive finish, Unscheduled Tasks, manual finish-to-start dependencies, and advisory date warnings. Timeline uses the same Task detail and planning revisions, with bounded pagination. Run launch remains explicit and independent.
 
-The pending question is whether Gantt means Task scheduling, actual Run timing, or both as distinct views. The proposed workflow columns and manual stage changes should also be reviewed before detailed API work is planned.
+The selected ReUI renderer still needs its runtime integration gate. Actual Run timing, automatic rescheduling, and dependency execution gates require separate designs if requested.
 
 ## References
 

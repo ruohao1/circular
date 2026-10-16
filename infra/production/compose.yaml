@@ -36,7 +36,7 @@ services:
     logging: *logging
 
   migrate:
-    image: circular-migrate:${CIRCULAR_RELEASE:?Set CIRCULAR_RELEASE}
+    image: circular-migrate:${CIRCULAR_MIGRATE_RELEASE:-${CIRCULAR_RELEASE:?Set CIRCULAR_RELEASE}}
     environment:
       DATABASE_URL: postgresql://circular:${POSTGRES_PASSWORD}@postgres:5432/circular
     depends_on:
@@ -45,7 +45,7 @@ services:
     logging: *logging
 
   api:
-    image: circular-api:${CIRCULAR_RELEASE}
+    image: circular-api:${CIRCULAR_API_RELEASE:-${CIRCULAR_RELEASE}}
     restart: unless-stopped
     environment:
       <<: *integrations

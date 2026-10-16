@@ -743,6 +743,39 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/projects/{project_id}/task-planning": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["listTaskPlanning"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{project_id}/task-timeline": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description Bounded read-only Timeline. Inclusive from/to, at most 366 days. Default excludes cancelled Tasks. Unscheduled Tasks match filters regardless of window. Each section has independent keyset pagination. Cursor requires section and binds all filters, dates, limit and board revision; changed revision returns 409. Responses use one repeatable-read snapshot and Cache-Control: no-store. */
+        get: operations["listTaskTimeline"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/repositories": {
         parameters: {
             query?: never;
@@ -1033,6 +1066,38 @@ export interface paths {
         };
         /** Get task */
         get: operations["get_task"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch: operations["updateTaskPlanning"];
+        trace?: never;
+    };
+    "/api/v1/tasks/{task_id}/move": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["moveTask"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tasks/{task_id}/planning": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["getTaskPlanning"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1972,6 +2037,16 @@ export interface components {
             external_refs?: {
                 [key: string]: unknown;
             };
+            /** @description Optional planned calendar date in years 0001–9999. Finish is inclusive. */
+            planned_finish_date?: string | null;
+            /** @description Optional planned calendar date in years 0001–9999. Finish is inclusive. */
+            planned_start_date?: string | null;
+            preferred_agent_id?: string | null;
+            /**
+             * @default none
+             * @enum {string}
+             */
+            priority: "none" | "low" | "normal" | "high" | "urgent";
             /**
              * Project Id
              * Format: uuid
@@ -1979,9 +2054,145 @@ export interface components {
             project_id: string;
             /** Repository Id */
             repository_id?: string | null;
+            /**
+             * @default open
+             * @enum {string}
+             */
+            status: "open" | "ready" | "in_progress" | "in_review" | "completed" | "cancelled";
             /** Title */
             title: string;
         };
+        /** @description anchor_task_id is required for before/after and forbidden otherwise; up/down require the current stage. Planning never starts or cancels Runs. */
+        TaskMove: {
+            /** Format: uuid */
+            anchor_task_id?: string;
+            expected_board_revision: number;
+            expected_revision: number;
+            /** @enum {string} */
+            placement: "start" | "end" | "before" | "after" | "up" | "down";
+            status: components["schemas"]["TaskStatus"];
+        };
+        TaskPlanningAgent: {
+            backend: string;
+            enabled: boolean;
+            /** Format: uuid */
+            id: string;
+            name: string;
+        };
+        TaskPlanningDetail: {
+            board_revision: number;
+            content_editable: boolean;
+            content_lock_reason: ("source_managed" | "active_run") | null;
+            preferred_agent: components["schemas"]["TaskPlanningAgent"] | null;
+            repository: components["schemas"]["TaskPlanningRepository"] | null;
+            repository_editable: boolean;
+            repository_lock_reason: ("source_managed" | "has_runs") | null;
+            task: components["schemas"]["TaskRead"];
+        };
+        TaskPlanningGroup: {
+            items: components["schemas"]["TaskPlanningItem"][];
+            next_cursor: string;
+            status: components["schemas"]["TaskStatus"];
+            total: number;
+        };
+        TaskPlanningItem: {
+            active_run_count: number;
+            latest_run: components["schemas"]["TaskPlanningRun"] | null;
+            preferred_agent: components["schemas"]["TaskPlanningAgent"] | null;
+            repository: components["schemas"]["TaskPlanningRepository"] | null;
+            run_count: number;
+            task: components["schemas"]["TaskPlanningSummary"];
+        };
+        TaskPlanningMutation: {
+            board_revision: number;
+            task: components["schemas"]["TaskRead"];
+        };
+        TaskPlanningPage: {
+            board_revision: number;
+            groups: components["schemas"]["TaskPlanningGroup"][];
+        };
+        TaskPlanningRepository: {
+            /** Format: uuid */
+            id: string;
+            name: string;
+        };
+        TaskPlanningRun: {
+            /**
+             * Agent Id
+             * Format: uuid
+             */
+            agent_id: string;
+            agent_name: string;
+            /** Attempt */
+            attempt: number;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Finished At */
+            finished_at: string | null;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** @enum {string} */
+            kind: "coding" | "pr_review";
+            /** Started At */
+            started_at: string | null;
+            status: components["schemas"]["RunStatus"];
+        };
+        TaskPlanningSummary: {
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** @description Optional planned calendar date in years 0001–9999. Finish is inclusive. */
+            planned_finish_date: string | null;
+            /** @description Optional planned calendar date in years 0001–9999. Finish is inclusive. */
+            planned_start_date: string | null;
+            preferred_agent_id: string | null;
+            priority: components["schemas"]["TaskPriority"];
+            /**
+             * Project Id
+             * Format: uuid
+             */
+            project_id: string;
+            /** Repository Id */
+            repository_id: string | null;
+            revision: number;
+            status: components["schemas"]["TaskStatus"];
+            /** Title */
+            title: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+        };
+        TaskPlanningUpdate: {
+            description?: string;
+            /** @description Required whenever a planned date field is present; checked whenever supplied. */
+            expected_board_revision?: number;
+            expected_revision: number;
+            /** @description Optional planned calendar date in years 0001–9999. Finish is inclusive. */
+            planned_finish_date?: string | null;
+            /** @description Optional planned calendar date in years 0001–9999. Finish is inclusive. */
+            planned_start_date?: string | null;
+            preferred_agent_id?: string | null;
+            priority?: components["schemas"]["TaskPriority"];
+            repository_id?: string | null;
+            title?: string;
+        };
+        /** @enum {string} */
+        TaskPriority: "none" | "low" | "normal" | "high" | "urgent";
         /** TaskRead */
         TaskRead: {
             /**
@@ -2003,6 +2214,12 @@ export interface components {
              * Format: uuid
              */
             id: string;
+            /** @description Optional planned calendar date in years 0001–9999. Finish is inclusive. */
+            planned_finish_date: string | null;
+            /** @description Optional planned calendar date in years 0001–9999. Finish is inclusive. */
+            planned_start_date: string | null;
+            preferred_agent_id: string | null;
+            priority: components["schemas"]["TaskPriority"];
             /**
              * Project Id
              * Format: uuid
@@ -2010,6 +2227,7 @@ export interface components {
             project_id: string;
             /** Repository Id */
             repository_id?: string | null;
+            revision: number;
             status: components["schemas"]["TaskStatus"];
             /** Title */
             title: string;
@@ -2023,7 +2241,23 @@ export interface components {
          * TaskStatus
          * @enum {string}
          */
-        TaskStatus: "open" | "in_progress" | "completed" | "cancelled";
+        TaskStatus: "open" | "ready" | "in_progress" | "in_review" | "completed" | "cancelled";
+        TaskTimelineGroup: {
+            items: components["schemas"]["TaskPlanningItem"][];
+            next_cursor: string;
+            /** @enum {string} */
+            section: "scheduled" | "unscheduled";
+            total: number;
+        };
+        TaskTimelinePage: {
+            board_revision: number;
+            /** Format: date */
+            from: string;
+            groups: components["schemas"]["TaskTimelineGroup"][];
+            outside_window_total: number;
+            /** Format: date */
+            to: string;
+        };
         /** UsageRead */
         UsageRead: {
             /**
@@ -5259,6 +5493,7 @@ export interface operations {
                 group?: "all" | "active" | "failed" | "finished";
                 limit?: number;
                 q?: string;
+                task_id?: string;
             };
             header?: never;
             path: {
@@ -5285,6 +5520,111 @@ export interface operations {
                 content?: never;
             };
             /** @description Invalid query or cursor */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    listTaskPlanning: {
+        parameters: {
+            query?: {
+                cursor?: string;
+                limit?: number;
+                preferred_agent_id?: string;
+                priority?: components["schemas"]["TaskPriority"];
+                q?: string;
+                repository_id?: string;
+                status?: components["schemas"]["TaskStatus"];
+            };
+            header?: never;
+            path: {
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Task planning result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TaskPlanningPage"];
+                };
+            };
+            /** @description Scoped resource not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Task locked or revision changed */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Invalid input */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    listTaskTimeline: {
+        parameters: {
+            query: {
+                cursor?: string;
+                from: string;
+                limit?: number;
+                preferred_agent_id?: string;
+                priority?: components["schemas"]["TaskPriority"];
+                q?: string;
+                repository_id?: string;
+                section?: "scheduled" | "unscheduled";
+                status?: components["schemas"]["TaskStatus"];
+                to: string;
+            };
+            header?: never;
+            path: {
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Scheduled and Unscheduled Task pages with exact filtered totals */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TaskTimelinePage"];
+                };
+            };
+            /** @description Scoped resource not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Task locked or revision changed */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Invalid input */
             422: {
                 headers: {
                     [name: string]: unknown;
@@ -6352,6 +6692,157 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["IntegrationProblem"];
                 };
+            };
+        };
+    };
+    updateTaskPlanning: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                task_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TaskPlanningUpdate"];
+            };
+        };
+        responses: {
+            /** @description Task planning result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TaskPlanningMutation"];
+                };
+            };
+            /** @description Scoped resource not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Task locked or revision changed */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Body exceeds 128 KiB */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Invalid input */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    moveTask: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                task_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TaskMove"];
+            };
+        };
+        responses: {
+            /** @description Task planning result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TaskPlanningMutation"];
+                };
+            };
+            /** @description Scoped resource not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Task locked or revision changed */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Body exceeds 128 KiB */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Invalid input */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    getTaskPlanning: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                task_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Task planning result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TaskPlanningDetail"];
+                };
+            };
+            /** @description Scoped resource not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Task locked or revision changed */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Invalid input */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };

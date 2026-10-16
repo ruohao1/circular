@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { api, type Agent, type Project, type Repository } from "./api";
-import { LaunchError, launchTask } from "./launch";
+import { LaunchError, launchTask, validateTaskDraft } from "./launch";
 
 const dates = {
   created_at: "2026-01-01T00:00:00Z",
@@ -45,8 +45,20 @@ describe("Task to Run launcher", () => {
           repository_id: "repository",
           title: "Implement slice",
           description: "Test it.",
+          priority: "none",
+          preferred_agent_id: "agent",
         });
-        return { ...body, ...dates, id: "task", status: "open" };
+        return {
+          ...body,
+          ...dates,
+          id: "task",
+          status: "open",
+          priority: body.priority ?? "none",
+          preferred_agent_id: body.preferred_agent_id ?? null,
+          revision: 1,
+          planned_start_date: null,
+          planned_finish_date: null,
+        };
       });
     const createRun = vi
       .spyOn(api, "createRun")
@@ -80,5 +92,58 @@ describe("Task to Run launcher", () => {
   });
   it("retains the saved Task identity for a retry when Run creation fails", () => {
     expect(new LaunchError("unavailable", "task").taskId).toBe("task");
+  });
+});
+
+describe("saved Task validation", () => {
+  it("allows title-only planning without execution resources", () => {
+    expect(
+      validateTaskDraft(
+        {
+          title: "  Plan it  ",
+          description: "",
+          repository_id: null,
+          preferred_agent_id: null,
+          priority: "none",
+        },
+        project,
+        [],
+        [],
+      ),
+    ).toEqual({
+      project_id: project.id,
+      title: "Plan it",
+      description: "",
+      priority: "none",
+    });
+  });
+  it("accepts 500 Unicode code points and rejects wrong scope or disabled preferences", () => {
+    const draft = {
+      title: "🌍".repeat(500),
+      description: "",
+      repository_id: null,
+      preferred_agent_id: null,
+      priority: "high" as const,
+    };
+    expect(validateTaskDraft(draft, project, [], []).title).toHaveLength(1000);
+    expect(() =>
+      validateTaskDraft({ ...draft, title: "🌍".repeat(501) }, project, [], []),
+    ).toThrow();
+    expect(() =>
+      validateTaskDraft(
+        { ...draft, preferred_agent_id: agent.id },
+        project,
+        [],
+        [{ ...agent, enabled: false }],
+      ),
+    ).toThrow();
+    expect(() =>
+      validateTaskDraft(
+        { ...draft, repository_id: repository.id },
+        project,
+        [{ ...repository, project_id: "other" }],
+        [],
+      ),
+    ).toThrow();
   });
 });

@@ -737,7 +737,7 @@ export function SetupPage({
           }}
           className="gap-5"
         >
-          <TabsList className="grid w-full grid-cols-2 group-data-horizontal/tabs:h-auto sm:w-fit sm:grid-cols-5">
+          <TabsList className="grid w-full grid-cols-2 group-data-[orientation=horizontal]/tabs:h-auto sm:w-fit sm:grid-cols-5">
             <TabsTrigger value="projects" className="h-auto py-2">
               <FolderOpen aria-hidden="true" />
               Projects

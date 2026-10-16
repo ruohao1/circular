@@ -53,6 +53,13 @@ Caddy image digest in the private `.env`. Database passwords must contain only
 URL-safe characters. The state root must match the host path mounted at the
 worker's `/var/lib/circular`.
 
+`CIRCULAR_API_RELEASE` and `CIRCULAR_MIGRATE_RELEASE` optionally override the
+shared `CIRCULAR_RELEASE` for scoped upgrades. After a schema upgrade, retain a
+compatible migrator even if the API is rolled back. Replace the Compose
+`migrate` service with the new image; an obsolete completed container may be
+started again by dependency handling. Use `docker start` to resume unchanged
+worker/webhook containers without restarting their dependencies.
+
 The owner password is hashed with `caddy hash-password` through stdin, then
 stored as `owner <hash>` in `owner.users`. Set `.env` and `owner.users` to 0600,
 with `owner.users` owned by root. Make `Caddyfile` and both frontend builds

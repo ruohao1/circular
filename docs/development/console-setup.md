@@ -7,7 +7,7 @@ Open **Setup** in the desktop sidebar or mobile navigation at
 http://localhost:5173/setup. Resource forms and integrations use the shared shadcn
 components and save through the resource API.
 
-The console navigation contains **Overview**, **Runs**, **Requests**, **Setup**,
+The console navigation contains **Overview**, **Tasks**, **Runs**, **Requests**, **Setup**,
 and **Docs**. A shared header provides the **Project** picker and **New Task**
 button across console pages; Docs has its own layout.
 
@@ -94,6 +94,36 @@ succeeded, failed, and cancelled attempts. The newest page contains up to 50 Run
 in the URL and browser history. Changing a filter, search, or Project starts at
 the newest page. Older pages do not refresh automatically. If a background
 refresh fails, a visible notice identifies the retained data and offers retry.
+
+## Planning Tasks
+
+**Tasks** at `/tasks` shares List and Board views, filters, search and a Task detail
+dialog. **Save Task** in the New Task dialog saves work without starting a Run;
+Repository and preferred Agent are optional. **Start Run** requires both resources
+and explicitly launches an attempt. Saving opens the Task details.
+
+The five manual workflow stages are **Backlog**, **Ready**, **In progress**,
+**Review**, and **Done**. Use the Workflow filter to find **Cancelled** Tasks.
+Changing a stage never starts or cancels a Run, and a successful Run never marks
+its Task Done. Details show each attempt and its actual Agent; the preferred Agent
+is only a launch suggestion. If that Agent is disabled, explicitly choose an enabled
+replacement when launching. Doing so does not overwrite the Task preference.
+
+Drag a card by its handle. For keyboard dragging, focus the handle, press Space,
+use arrows, then Space to drop or Escape to cancel. The card's **Move** menu also
+offers every stage, up/down, and top/bottom. A column-header drop moves to that
+stage's complete end; dropping beside a card uses that neighbor even with filters
+or unloaded pages. Each stage initially shows up to 50 matching Tasks; **Load more**
+continues its saved ordering. List and Board retain the selected Task and filters.
+
+Task details save edits explicitly. Source-managed instructions are read-only;
+local instructions lock while any Run is active, and Repository locks after the
+first Run. Priority, preferred Agent and workflow remain editable. Unsaved changes
+prompt before leaving. A conflicting save keeps the draft and offers **Reload
+latest**; review the refreshed Task before saving again. A failed move keeps the
+saved order and permits an explicit retry. Reopening a saved Task launcher refreshes
+its instructions and Repository while retaining an explicitly chosen actual Agent. A changed board invalidates loaded pages.
+Gantt dates, dependencies and automatic scheduling remain future work.
 
 ## Starting and resuming Tasks
 

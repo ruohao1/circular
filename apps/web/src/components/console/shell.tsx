@@ -4,6 +4,7 @@ import { Link, useNavigate, useRouterState } from "@tanstack/react-router";
 import {
   BookOpen,
   CircleDot,
+  ListTodo,
   LayoutDashboard,
   Inbox,
   Menu,
@@ -12,7 +13,7 @@ import {
 } from "lucide-react";
 import type { ExternalRequestDetail } from "@/api";
 import { useProject } from "@/use-project";
-import { useTaskLauncher } from "@/components/console/task-launcher-context";
+import { useTaskLauncher } from "./task-launcher-context";
 import { ResourceSelect } from "@/components/resource-select";
 import { ErrorAlert } from "@/components/error-alert";
 import { Button } from "@/components/ui/button";
@@ -51,6 +52,12 @@ function WorkspaceNavigation({ onNavigate }: { onNavigate?(): void }) {
       label: "Overview",
       icon: LayoutDashboard,
       active: pathname === "/",
+    },
+    {
+      to: "/tasks" as const,
+      label: "Tasks",
+      icon: ListTodo,
+      active: pathname === "/tasks",
     },
     {
       to: "/runs" as const,
@@ -176,7 +183,7 @@ export function ConsoleShell({ children }: { children: ReactNode }) {
               selectionLocked ||
               saving
             }
-            onClick={openNewTask}
+            onClick={() => openNewTask()}
           >
             <Plus aria-hidden="true" />
             New Task

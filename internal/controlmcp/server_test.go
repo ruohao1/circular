@@ -89,7 +89,7 @@ func TestControlMCPWorkflowUsesPublicAPIAndPreservesRunIntent(t *testing.T) {
 	}
 	client := connect(t, config)
 	listed, err := client.ListTools(t.Context(), nil)
-	if err != nil || len(listed.Tools) != 39 {
+	if err != nil || len(listed.Tools) != 44 {
 		t.Fatal("missing tool surface", err, listed)
 	}
 	project := call(t, client, "create_project", object{"name": "MCP project"})["project"].(object)
@@ -240,7 +240,7 @@ func TestReadOnlyAndInvalidInputsNeverReachMutationEndpoints(t *testing.T) {
 	defer api.Close()
 	client := connect(t, controlmcp.Config{APIURL: api.URL, ReadOnly: true})
 	list, err := client.ListTools(t.Context(), nil)
-	if err != nil || len(list.Tools) != 20 {
+	if err != nil || len(list.Tools) != 23 {
 		t.Fatal(err, list)
 	}
 	for _, tool := range list.Tools {
