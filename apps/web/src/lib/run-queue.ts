@@ -32,6 +32,7 @@ export function runQueueOptions(project: string, query: RunQueueQuery = {}) {
     ...parseRunQueueSearch({ ...query }),
     limit: query.limit ?? 50,
     ...(query.task_id ? { task_id: query.task_id } : {}),
+    ...(query.agent_id ? { agent_id: query.agent_id } : {}),
   };
   return queryOptions({
     queryKey: ["run-queue", project, normalized],

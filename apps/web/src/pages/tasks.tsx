@@ -1,11 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useIsMutating, useQuery } from "@tanstack/react-query";
 import {
   ChartGantt,
   Columns3,
   List,
   Search,
   SlidersHorizontal,
+  PanelRight,
+  Plus,
 } from "lucide-react";
 import { Popover } from "radix-ui";
 import {
@@ -21,6 +23,7 @@ import {
   stageLabels,
   taskPriorities,
   taskStages,
+  taskScopes,
   type TaskPlanningSearch,
 } from "@/lib/task-planning";
 import { useTaskPlanning } from "@/components/tasks/use-task-planning";
@@ -32,6 +35,7 @@ import {
 import { localToday } from "@/lib/task-timeline";
 import { TaskBoard } from "@/components/tasks/task-board";
 import { TaskList } from "@/components/tasks/task-list";
+import { TaskSummary } from "@/components/tasks/task-summary";
 import { TaskDetail } from "@/components/tasks/task-detail";
 import { ErrorAlert } from "@/components/error-alert";
 import { ResourceSelect } from "@/components/resource-select";
@@ -46,7 +50,9 @@ declare module "@tanstack/react-router" {
 }
 export function TasksPage() {
   const { openNewTask } = useTaskLauncher();
-  const { selectedProject, selectProject } = useProject();
+  const savingSetup = useIsMutating({ mutationKey: ["setup"] }) > 0;
+  const { selectedProject, selectProject, projects, selectionLocked } =
+    useProject();
   const navigate = useNavigate();
   const location = useRouterState({ select: (s) => s.location });
   const urlSearch = useMemo(
@@ -66,6 +72,7 @@ export function TasksPage() {
   const alignedTask = useRef("");
   const [scheduleFocus, setScheduleFocus] = useState("");
   const [query, setQuery] = useState(search.q);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
   const taskViews = useRef<HTMLDivElement>(null);
   const undoFocus = useRef(false);
   const repositories = useQuery({
@@ -194,22 +201,26 @@ export function TasksPage() {
           aria-label="Task controls"
           className="flex flex-wrap items-center gap-2 border-b pb-2"
         >
-          <div className="flex items-center gap-4">
-            <h1 className="text-base font-semibold tracking-tight">Tasks</h1>
-            <TabsList ref={taskViews} aria-label="Task views" variant="line">
-              <TabsTrigger value="list" disabled={locked}>
-                <List aria-hidden="true" />
-                List
-              </TabsTrigger>
-              <TabsTrigger value="board" disabled={locked}>
-                <Columns3 aria-hidden="true" />
-                Kanban
-              </TabsTrigger>
-              <TabsTrigger value="timeline" disabled={locked}>
-                <ChartGantt aria-hidden="true" />
-                Gantt
-              </TabsTrigger>
-            </TabsList>
+          <div
+            role="group"
+            aria-label="Predefined Task views"
+            className="mr-auto flex shrink-0 items-center gap-1"
+          >
+            {(Object.keys(taskScopes) as Array<keyof typeof taskScopes>).map(
+              (scope) => (
+                <Button
+                  key={scope}
+                  size="sm"
+                  variant={search.scope === scope ? "secondary" : "ghost"}
+                  className="rounded-full px-2.5 text-xs"
+                  aria-pressed={search.scope === scope}
+                  disabled={locked}
+                  onClick={() => change({ scope, status: "", taskId: "" })}
+                >
+                  {taskScopes[scope].label}
+                </Button>
+              ),
+            )}
           </div>
           {search.view === "timeline" && search.date && (
             <TaskTimelineControls
@@ -219,7 +230,7 @@ export function TasksPage() {
               onChange={change}
             />
           )}
-          <div className="relative min-w-32 flex-1 sm:ml-auto sm:max-w-48">
+          <div className="relative min-w-24 flex-1 sm:max-w-40">
             <Search
               aria-hidden="true"
               className="pointer-events-none absolute left-2.5 top-2 size-4 text-muted-foreground"
@@ -233,14 +244,73 @@ export function TasksPage() {
               disabled={locked}
             />
           </div>
+          <Button
+            id="new-task"
+            variant="ghost"
+            size="icon-sm"
+            aria-label="New Task"
+            title="New Task"
+            disabled={
+              !selectedProject ||
+              projects.isPending ||
+              selectionLocked ||
+              locked ||
+              planning.dirty ||
+              savingSetup
+            }
+            onClick={() => openNewTask()}
+          >
+            <Plus aria-hidden="true" />
+          </Button>
+          <TabsList
+            ref={taskViews}
+            aria-label="Task layouts"
+            className="shrink-0"
+          >
+            {(
+              [
+                { value: "list", label: "List", icon: List },
+                { value: "board", label: "Kanban", icon: Columns3 },
+                { value: "timeline", label: "Gantt", icon: ChartGantt },
+              ] as const
+            ).map((layout) => (
+              <TabsTrigger
+                key={layout.value}
+                value={layout.value}
+                disabled={locked}
+                aria-label={layout.label}
+                title={layout.label}
+              >
+                <layout.icon aria-hidden="true" />
+                <span
+                  className={
+                    search.view === layout.value ? "text-xs" : "sr-only"
+                  }
+                >
+                  {layout.label}
+                </span>
+              </TabsTrigger>
+            ))}
+          </TabsList>
           <Popover.Root>
             <Popover.Trigger asChild>
               <Button
                 variant={filterCount ? "secondary" : "outline"}
+                size="icon-sm"
+                aria-label={`Filters${filterCount > 0 ? ` (${filterCount})` : ""}`}
+                title={`Filters${filterCount > 0 ? ` (${filterCount})` : ""}`}
+                className="relative shrink-0"
                 disabled={locked}
               >
                 <SlidersHorizontal aria-hidden="true" />
-                Filters{filterCount > 0 && ` (${filterCount})`}
+                {filterCount > 0 && (
+                  <span
+                    aria-hidden="true"
+                    className="absolute -top-1 -right-1 flex size-3.5 items-center justify-center rounded-full bg-primary text-[9px] text-primary-foreground"
+                  >
+                    {filterCount}
+                  </span>
+                )}
               </Button>
             </Popover.Trigger>
             <Popover.Portal>
@@ -260,8 +330,8 @@ export function TasksPage() {
                     })
                   }
                   options={[
-                    { value: "all", label: "All active stages" },
-                    ...taskStages.map((value) => ({
+                    { value: "all", label: "All stages in this view" },
+                    ...taskScopes[search.scope].stages.map((value) => ({
                       value,
                       label: stageLabels[value],
                     })),
@@ -325,113 +395,140 @@ export function TasksPage() {
               </Popover.Content>
             </Popover.Portal>
           </Popover.Root>
+          <Button
+            id="task-summary-toggle"
+            variant={sidebarOpen ? "secondary" : "ghost"}
+            size="icon-sm"
+            className="shrink-0"
+            aria-label={sidebarOpen ? "Hide Task sidebar" : "Show Task sidebar"}
+            title={sidebarOpen ? "Hide Task sidebar" : "Show Task sidebar"}
+            aria-expanded={sidebarOpen}
+            aria-controls={sidebarOpen ? "task-summary" : undefined}
+            onClick={() => setSidebarOpen(!sidebarOpen)}
+          >
+            <PanelRight aria-hidden="true" />
+          </Button>
         </div>
-        {(repositories.error || agents.error) && (
-          <ErrorAlert>
-            Filter options could not load.{" "}
-            <Button
-              variant="link"
-              onClick={() => {
-                void repositories.refetch();
-                void agents.refetch();
-              }}
-            >
-              Retry options
-            </Button>
-          </ErrorAlert>
-        )}
-        {planning.activeCollection.error && (
-          <ErrorAlert>
-            {planning.page && "Showing the last update. "}
-            {planning.activeCollection.error.message}{" "}
-            <Button
-              variant="link"
-              onClick={() => void planning.activeCollection.refetch()}
-            >
-              Retry Tasks
-            </Button>
-          </ErrorAlert>
-        )}
-        {(planning.notice || planning.hasScheduleUndo) && (
-          <div className="mb-3 flex flex-wrap items-center gap-3 text-sm text-muted-foreground">
-            <p role="status">{planning.notice}</p>
-            {planning.hasScheduleUndo && (
-              <Button
-                variant="outline"
-                size="sm"
-                aria-label="Undo schedule change"
-                disabled={!planning.canUndoSchedule}
-                onClick={() => {
-                  undoFocus.current = true;
-                  planning.undoSchedule();
-                }}
-              >
-                Undo
-              </Button>
+        <div className="flex min-w-0 items-start gap-3">
+          <div className="min-w-0 flex-1">
+            {(repositories.error || agents.error) && (
+              <ErrorAlert>
+                Filter options could not load.{" "}
+                <Button
+                  variant="link"
+                  onClick={() => {
+                    void repositories.refetch();
+                    void agents.refetch();
+                  }}
+                >
+                  Retry options
+                </Button>
+              </ErrorAlert>
+            )}
+            {planning.activeCollection.error && (
+              <ErrorAlert>
+                {planning.page && "Showing the last update. "}
+                {planning.activeCollection.error.message}{" "}
+                <Button
+                  variant="link"
+                  onClick={() => void planning.activeCollection.refetch()}
+                >
+                  Retry Tasks
+                </Button>
+              </ErrorAlert>
+            )}
+            {(planning.notice || planning.hasScheduleUndo) && (
+              <div className="mb-3 flex flex-wrap items-center gap-3 text-sm text-muted-foreground">
+                <p role="status">{planning.notice}</p>
+                {planning.hasScheduleUndo && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    aria-label="Undo schedule change"
+                    disabled={!planning.canUndoSchedule}
+                    onClick={() => {
+                      undoFocus.current = true;
+                      planning.undoSchedule();
+                    }}
+                  >
+                    Undo
+                  </Button>
+                )}
+              </div>
+            )}
+            {!selectedProject ? (
+              <p>Choose a Project to plan its Tasks.</p>
+            ) : planning.activeCollection.isPending ? (
+              <p role="status">Loading Tasks…</p>
+            ) : search.view === "timeline" ? (
+              search.date &&
+              planning.timeline.boardRevision !== null && (
+                <TabsContent value="timeline">
+                  <TaskTimeline
+                    state={planning.timeline}
+                    anchor={search.date}
+                    scale={search.scale}
+                    locked={locked}
+                    scheduleDisabled={planning.scheduleBlocked}
+                    pending={planning.pending}
+                    onReschedule={planning.reschedule}
+                    onInteracting={planning.setInteracting}
+                    onOpen={(id, schedule) => {
+                      setScheduleFocus(schedule ? id : "");
+                      change({ taskId: id });
+                    }}
+                  />
+                </TabsContent>
+              )
+            ) : (
+              planning.page && (
+                <>
+                  <TabsContent value="list">
+                    <TaskList
+                      page={planning.page}
+                      onLoadMore={planning.loadMore}
+                      loadingGroups={planning.loadingGroups}
+                    />
+                  </TabsContent>
+                  <TabsContent value="board">
+                    <TaskBoard
+                      key={JSON.stringify([
+                        selectedProject,
+                        search.scope,
+                        search.q,
+                        search.status,
+                        search.priority,
+                        search.repository_id,
+                        search.preferred_agent_id,
+                      ])}
+                      page={planning.page}
+                      pending={
+                        planning.pending ||
+                        planning.dirty ||
+                        planning.activeCollection.isError ||
+                        planning.activeCollection.isFetching
+                      }
+                      onMove={planning.move}
+                      onAdd={openNewTask}
+                      onLoadMore={planning.loadMore}
+                      loadingGroups={planning.loadingGroups}
+                      onInteracting={planning.setInteracting}
+                    />
+                  </TabsContent>
+                </>
+              )
             )}
           </div>
-        )}
-        {!selectedProject ? (
-          <p>Choose a Project to plan its Tasks.</p>
-        ) : planning.activeCollection.isPending ? (
-          <p role="status">Loading Tasks…</p>
-        ) : search.view === "timeline" ? (
-          search.date &&
-          planning.timeline.boardRevision !== null && (
-            <TabsContent value="timeline">
-              <TaskTimeline
-                state={planning.timeline}
-                anchor={search.date}
-                scale={search.scale}
-                locked={locked}
-                scheduleDisabled={planning.scheduleBlocked}
-                pending={planning.pending}
-                onReschedule={planning.reschedule}
-                onInteracting={planning.setInteracting}
-                onOpen={(id, schedule) => {
-                  setScheduleFocus(schedule ? id : "");
-                  change({ taskId: id });
-                }}
-              />
-            </TabsContent>
-          )
-        ) : (
-          planning.page && (
-            <>
-              <TabsContent value="list">
-                <TaskList
-                  page={planning.page}
-                  onLoadMore={planning.loadMore}
-                  loadingGroups={planning.loadingGroups}
-                />
-              </TabsContent>
-              <TabsContent value="board">
-                <TaskBoard
-                  key={JSON.stringify([
-                    selectedProject,
-                    search.q,
-                    search.status,
-                    search.priority,
-                    search.repository_id,
-                    search.preferred_agent_id,
-                  ])}
-                  page={planning.page}
-                  pending={
-                    planning.pending ||
-                    planning.dirty ||
-                    planning.activeCollection.isError ||
-                    planning.activeCollection.isFetching
-                  }
-                  onMove={planning.move}
-                  onAdd={openNewTask}
-                  onLoadMore={planning.loadMore}
-                  loadingGroups={planning.loadingGroups}
-                  onInteracting={planning.setInteracting}
-                />
-              </TabsContent>
-            </>
-          )
-        )}
+          {sidebarOpen && (
+            <TaskSummary
+              projectId={selectedProject}
+              search={search}
+              locked={locked}
+              onStageChange={(status) => change({ status, taskId: "" })}
+              onClose={() => setSidebarOpen(false)}
+            />
+          )}
+        </div>
       </Tabs>
       {search.taskId && planning.detailQuery.isPending && (
         <p role="status">Loading Task details…</p>

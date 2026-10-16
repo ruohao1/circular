@@ -17,6 +17,7 @@ type runQueueCursor struct {
 	Group     string    `json:"group"`
 	Query     string    `json:"q"`
 	Task      string    `json:"task,omitempty"`
+	Agent     string    `json:"agent,omitempty"`
 	CreatedAt time.Time `json:"created_at"`
 	ID        uuid.UUID `json:"id"`
 }
@@ -62,16 +63,27 @@ func (a *api) runQueue(w http.ResponseWriter, r *http.Request) {
 		}
 		task = &id
 	}
+	var agent *uuid.UUID
+	if raw := q.Get("agent_id"); raw != "" {
+		id, ok := identifier(w, raw, "query", "agent_id")
+		if !ok {
+			return
+		}
+		agent = &id
+	}
 	cursor := runQueueCursor{Version: 1, Project: project.String(), Group: group, Query: search}
 	if task != nil {
 		cursor.Task = task.String()
+	}
+	if agent != nil {
+		cursor.Agent = agent.String()
 	}
 	var afterTime *time.Time
 	var afterID *uuid.UUID
 	if encoded := q.Get("cursor"); encoded != "" {
 		var decoded runQueueCursor
 		raw, err := base64.RawURLEncoding.DecodeString(encoded)
-		if len(encoded) > 2048 || err != nil || json.Unmarshal(raw, &decoded) != nil || decoded.Version != 1 || decoded.Project != cursor.Project || decoded.Group != group || decoded.Query != search || decoded.Task != cursor.Task || decoded.CreatedAt.IsZero() || decoded.ID == uuid.Nil {
+		if len(encoded) > 2048 || err != nil || json.Unmarshal(raw, &decoded) != nil || decoded.Version != 1 || decoded.Project != cursor.Project || decoded.Group != group || decoded.Query != search || decoded.Task != cursor.Task || decoded.Agent != cursor.Agent || decoded.CreatedAt.IsZero() || decoded.ID == uuid.Nil {
 			invalid(w, "query", "cursor", "value_error", "Cursor does not match this Project and filter")
 			return
 		}
@@ -91,6 +103,12 @@ func (a *api) runQueue(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	if agent != nil {
+		var id uuid.UUID
+		if dbError(w, a.pool.QueryRow(r.Context(), "SELECT id FROM agents WHERE id=$1 AND project_id=$2", *agent, project).Scan(&id), "Agent") {
+			return
+		}
+	}
 	rows, err := a.pool.Query(r.Context(), `
  SELECT json_build_object('run',`+projection("RunRead", "r")+`,
    'task_title',t.title,'agent_name',a.name,
@@ -100,11 +118,12 @@ func (a *api) runQueue(w http.ResponseWriter, r *http.Request) {
  LEFT JOIN repositories repo ON repo.id=t.repository_id
  WHERE t.project_id=$1
    AND ($7::uuid IS NULL OR t.id=$7)
+   AND ($8::uuid IS NULL OR r.agent_id=$8)
    AND ($2='all' OR ($2='active' AND r.status IN ('queued','provisioning','running','waiting_for_approval','waiting_for_input','finalizing'))
      OR ($2='failed' AND r.status='failed') OR ($2='finished' AND r.status IN ('succeeded','failed','cancelled')))
    AND ($3='' OR strpos(lower(t.title),lower($3))>0)
    AND ($4::timestamptz IS NULL OR (r.created_at,r.id)<($4,$5::uuid))
- ORDER BY r.created_at DESC,r.id DESC LIMIT $6`, project, group, search, afterTime, afterID, limit+1, task)
+ ORDER BY r.created_at DESC,r.id DESC LIMIT $6`, project, group, search, afterTime, afterID, limit+1, task, agent)
 	if dbError(w, err, "Run queue") {
 		return
 	}

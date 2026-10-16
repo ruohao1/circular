@@ -68,6 +68,7 @@ export function useTaskPlanning(projectId: string, search: TaskPlanningSearch) {
   useEffect(() => setScheduleUndo(undefined), [projectId]);
   const pending = useIsMutating({ mutationKey: ["task-planning-write"] }) > 0;
   const query = {
+    scope: search.scope,
     q: search.q,
     status: search.status || undefined,
     priority: search.priority || undefined,

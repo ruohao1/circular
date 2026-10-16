@@ -1,6 +1,434 @@
 import { test, expect } from "@playwright/test";
 import { A, B, T, dates, fixture } from "./task-fixture";
 
+test("predefined scopes survive layouts and Back without losing filters", async ({
+  page,
+}) => {
+  const state = await fixture(page);
+  const statuses = [
+    "open",
+    "ready",
+    "in_progress",
+    "in_review",
+    "completed",
+    "cancelled",
+  ];
+  state.tasks[0].title = "Scope open";
+  state.tasks[0].priority = "high";
+  for (const status of statuses.slice(1))
+    state.tasks.push({
+      ...state.tasks[0],
+      id: `scope-${status}`,
+      title: `Scope ${status}`,
+      status,
+    });
+  await page.goto(
+    `/tasks?scope=all&status=completed&q=Scope&priority=high&repository_id=${state.repositories[0].id}&preferred_agent_id=${state.agents[0].id}&date=2026-10-16&scale=month`,
+  );
+  await expect(
+    page.getByRole("button", { name: "All Tasks", exact: true }),
+  ).toHaveAttribute("aria-pressed", "true");
+  await expect(
+    page.getByRole("link", { name: "Scope completed", exact: true }),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "Active", exact: true }).click();
+  await expect(page).toHaveURL(/scope=active/);
+  await expect(page).not.toHaveURL(/status=/);
+  for (const layout of ["List", "Kanban", "Gantt"]) {
+    await page.getByRole("tab", { name: layout, exact: true }).click();
+    await expect(
+      page.getByRole("button", { name: "Active", exact: true }),
+    ).toHaveAttribute("aria-pressed", "true");
+    for (const status of statuses) {
+      const task = page.getByRole(layout === "Gantt" ? "button" : "link", {
+        name: `Scope ${status}`,
+        exact: true,
+      });
+      if (["ready", "in_progress", "in_review"].includes(status))
+        await expect(task).toBeVisible();
+      else await expect(task).toHaveCount(0);
+    }
+  }
+  await page.getByRole("button", { name: "Backlog", exact: true }).click();
+  await expect(
+    page.getByRole("button", { name: "Scope open", exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Scope ready", exact: true }),
+  ).toHaveCount(0);
+  await page.getByRole("button", { name: "All Tasks", exact: true }).click();
+  for (const status of statuses)
+    await expect(
+      page.getByRole("button", { name: `Scope ${status}`, exact: true }),
+    ).toBeVisible();
+  await page.goBack();
+  await expect(
+    page.getByRole("button", { name: "Backlog", exact: true }),
+  ).toHaveAttribute("aria-pressed", "true");
+  await expect(
+    page.getByRole("button", { name: "Scope open", exact: true }),
+  ).toBeVisible();
+  expect(Object.fromEntries(new URL(page.url()).searchParams)).toMatchObject({
+    scope: "backlog",
+    view: "timeline",
+    q: "Scope",
+    priority: "high",
+    repository_id: state.repositories[0].id,
+    preferred_agent_id: state.agents[0].id,
+    date: "2026-10-16",
+    scale: "month",
+  });
+  expect(
+    state.urls
+      .filter(
+        (url) => url.includes("task-planning") || url.includes("task-timeline"),
+      )
+      .every((url) => new URL(url, "http://fixture").searchParams.has("scope")),
+  ).toBe(true);
+  expect(state.posts).toHaveLength(0);
+});
+
+test("Back protects an unsaved Task detail before restoring the previous scope", async ({
+  page,
+}) => {
+  const state = await fixture(page);
+  await page.goto("/tasks?scope=all");
+  await page.getByRole("button", { name: "Active", exact: true }).click();
+  await page.getByRole("button", { name: "Backlog", exact: true }).click();
+  await page
+    .getByRole("link", { name: "Plan the console", exact: true })
+    .click();
+  const detail = page.getByRole("dialog", {
+    name: "Task details",
+    exact: true,
+  });
+  await detail
+    .getByLabel("Description", { exact: true })
+    .fill("Unsaved scope draft");
+  let prompted = false;
+  page.once("dialog", async (dialog) => {
+    prompted = true;
+    await dialog.dismiss();
+  });
+  await page.goBack();
+  await expect.poll(() => prompted).toBe(true);
+  await expect(detail.getByLabel("Description", { exact: true })).toHaveValue(
+    "Unsaved scope draft",
+  );
+  await expect(page).toHaveURL(/scope=backlog/);
+  await expect(page).toHaveURL(new RegExp(`taskId=${T}`));
+  page.once("dialog", (dialog) => dialog.accept());
+  await page.goBack();
+  await expect(page).toHaveURL(/scope=backlog/);
+  await expect(page).not.toHaveURL(/taskId=/);
+  await expect(detail).not.toBeVisible();
+  await page.goBack();
+  await expect(page).toHaveURL(/scope=active/);
+  await expect(
+    page.getByRole("button", { name: "Active", exact: true }),
+  ).toHaveAttribute("aria-pressed", "true");
+  expect(state.tasks[0].description).toBe("Keep my instructions");
+  expect(state.posts).toHaveLength(0);
+});
+
+test("Task sidebar uses full filtered totals and keeps them while paging and changing stage", async ({
+  page,
+}, info) => {
+  const state = await fixture(page);
+  state.tasks[0].title = "Matching 0";
+  state.tasks[0].priority = "high";
+  for (let i = 1; i < 57; i++)
+    state.tasks.push({
+      ...state.tasks[0],
+      id: `summary-${i}`,
+      title: `Matching ${i}`,
+      status: i < 54 ? "open" : i < 56 ? "ready" : "cancelled",
+    });
+  state.tasks.push({
+    ...state.tasks[0],
+    id: "excluded-priority",
+    priority: "normal",
+  });
+  state.tasks.push({
+    ...state.tasks[0],
+    id: "excluded-search",
+    title: "Unrelated",
+  });
+  state.tasks.push({
+    ...state.tasks[0],
+    id: "excluded-project",
+    project_id: B,
+  });
+  await page.goto(
+    `/tasks?scope=all&q=Matching&priority=high&repository_id=${state.repositories[0].id}&preferred_agent_id=${state.agents[0].id}`,
+  );
+  const backlog = page.getByRole("region", { name: "Backlog", exact: true });
+  await expect(backlog.getByRole("listitem")).toHaveCount(50);
+  expect(
+    state.urls.some(
+      (url) => new URL(url, "http://fixture").searchParams.get("limit") === "1",
+    ),
+  ).toBe(false);
+  const toggle = page.getByRole("button", {
+    name: "Show Task sidebar",
+    exact: true,
+  });
+  await expect(toggle).toHaveAttribute("aria-expanded", "false");
+  await toggle.click();
+  const summary = page.getByRole("complementary", {
+    name: "Task summary",
+    exact: true,
+  });
+  await expect(summary.getByText("57 Tasks", { exact: true })).toBeVisible();
+  await expect(
+    summary.getByRole("button", { name: "Filter by Backlog", exact: true }),
+  ).toContainText("54");
+  await expect(
+    summary.getByRole("button", { name: "Filter by Ready", exact: true }),
+  ).toContainText("2");
+  await expect(
+    summary.getByRole("button", { name: "Filter by Cancelled", exact: true }),
+  ).toContainText("1");
+  await backlog
+    .getByRole("button", { name: "Load more Backlog Tasks", exact: true })
+    .click();
+  await expect(backlog.getByRole("listitem")).toHaveCount(54);
+  await expect(summary.getByText("57 Tasks", { exact: true })).toBeVisible();
+  await summary
+    .getByRole("button", { name: "Filter by Backlog", exact: true })
+    .click();
+  await expect(page).toHaveURL(/status=open/);
+  await expect(summary.getByText("54 Tasks", { exact: true })).toBeVisible();
+  await expect(
+    summary.getByRole("button", { name: "Filter by Ready", exact: true }),
+  ).toContainText("2");
+  await summary
+    .getByRole("button", { name: "Filter by Ready", exact: true })
+    .click();
+  await expect(page).toHaveURL(/status=ready/);
+  await expect(summary.getByText("2 Tasks", { exact: true })).toBeVisible();
+  await expect(
+    page
+      .getByRole("region", { name: "Ready", exact: true })
+      .getByRole("listitem"),
+  ).toHaveCount(2);
+  await summary
+    .getByRole("button", { name: "Filter by Ready", exact: true })
+    .click();
+  await expect(page).not.toHaveURL(/status=/);
+  await expect(summary.getByText("57 Tasks", { exact: true })).toBeVisible();
+  await page.screenshot({ path: info.outputPath("task-sidebar-desktop.png") });
+  await page
+    .getByRole("button", { name: "Hide Task sidebar", exact: true })
+    .click();
+  await expect(summary).not.toBeVisible();
+  const summaryRequests = state.urls.filter(
+    (url) =>
+      url.includes("task-planning") &&
+      new URL(url, "http://fixture").searchParams.get("limit") === "1",
+  );
+  expect(summaryRequests.length).toBeGreaterThan(0);
+  for (const url of summaryRequests) {
+    const params = new URL(url, "http://fixture").searchParams;
+    expect(params.has("status")).toBe(false);
+    expect(Object.fromEntries(params)).toMatchObject({
+      scope: "all",
+      q: "Matching",
+      priority: "high",
+      repository_id: state.repositories[0].id,
+      preferred_agent_id: state.agents[0].id,
+    });
+  }
+  expect(state.posts).toHaveLength(0);
+});
+
+for (const width of [390, 1024, 1280, 1440]) {
+  test(`Task breadcrumb and summary fit long Project names at ${width}px`, async ({
+    page,
+  }, info) => {
+    const state = await fixture(page);
+    state.projects[0].name =
+      "Very long Project name without a convenient breakpoint abcdefghijklmnopqrstuvwxyz0123456789abcdefghijklmnopqrstuvwxyz";
+    state.tasks[0].title =
+      "Keep this long planning Task title readable when the summary sidebar shares the workspace";
+    await page.setViewportSize({ width, height: 844 });
+    await page.goto("/tasks?scope=all");
+    const breadcrumb = page.getByRole("navigation", {
+      name: "Breadcrumb",
+      exact: true,
+    });
+    await expect(breadcrumb).toBeVisible();
+    await expect(
+      breadcrumb.getByRole("combobox", { name: "Project", exact: true }),
+    ).toContainText(state.projects[0].name);
+    await expect(breadcrumb.getByText("Tasks", { exact: true })).toBeVisible();
+    expect(
+      await page.evaluate(
+        () => document.documentElement.scrollWidth <= innerWidth,
+      ),
+    ).toBe(true);
+    await page
+      .getByRole("button", { name: "Show Task sidebar", exact: true })
+      .click();
+    const summary = page.getByRole(width < 1024 ? "dialog" : "complementary", {
+      name: "Task summary",
+      exact: true,
+    });
+    await expect(summary.getByText("1 Task", { exact: true })).toBeVisible();
+    await expect(
+      summary.getByRole("button", { name: "Filter by Backlog", exact: true }),
+    ).toBeVisible();
+    if (width >= 1024) {
+      const title = page
+        .getByRole("link", { name: state.tasks[0].title, exact: true })
+        .getByText(state.tasks[0].title, { exact: true });
+      await expect(title).toBeVisible();
+      expect((await title.boundingBox())!.width).toBeGreaterThanOrEqual(120);
+    }
+    expect(
+      await page.evaluate(
+        () => document.documentElement.scrollWidth <= innerWidth,
+      ),
+    ).toBe(true);
+    await page.screenshot({
+      path: info.outputPath(`task-workspace-${width}.png`),
+    });
+    if (width < 1024) {
+      await expect(
+        page.getByRole("complementary", { name: "Task summary", exact: true }),
+      ).toHaveCount(0);
+      await summary.getByRole("button", { name: "Close", exact: true }).click();
+    } else
+      await page
+        .getByRole("button", { name: "Hide Task sidebar", exact: true })
+        .click();
+    await expect(summary).not.toBeVisible();
+    await expect(
+      page.getByRole("button", { name: "Show Task sidebar", exact: true }),
+    ).toHaveAttribute("aria-expanded", "false");
+    expect(state.posts).toHaveLength(0);
+  });
+}
+
+for (const width of [390, 1440]) {
+  test(`compact List keeps task and execution metadata distinct at ${width}px`, async ({
+    page,
+  }, info) => {
+    const state = await fixture(page);
+    const title =
+      "Compact planning task with a deliberately long title and an unbroken-reference-abcdefghijklmnopqrstuvwxyz0123456789abcdefghijklmnopqrstuvwxyz0123456789";
+    state.tasks[0].title = title;
+    state.tasks[0].priority = "high";
+    state.tasks[0].planned_start_date = "2026-10-16";
+    state.tasks[0].planned_finish_date = "2026-10-20";
+    state.agents[0].name = "Preferred specialist";
+    state.agents[0].enabled = false;
+    state.active = true;
+    state.latestRun = {
+      id: B,
+      agent_id: "66666666-6666-4666-8666-666666666666",
+      agent_name: "Actual executor",
+      attempt: 3,
+      created_at: dates.created_at,
+      started_at: dates.created_at,
+      finished_at: dates.updated_at,
+      kind: "coding",
+      status: "succeeded",
+    };
+    await page.setViewportSize({ width, height: 1000 });
+    await page.goto(
+      "/tasks?view=list&q=Compact&priority=high&date=2026-10-16&scale=month",
+    );
+    const group = page.getByRole("region", { name: "Backlog", exact: true });
+    const row = group.getByRole("listitem");
+    const link = row.getByRole("link", { name: title, exact: true });
+    await expect(row).toHaveCount(1);
+    await expect(link).toBeVisible();
+    for (const value of [
+      /Backlog/,
+      /High/,
+      /Source/,
+      /Preferred specialist/,
+      /disabled/i,
+      /2026-10-16.*2026-10-20/,
+      /succeeded/i,
+      /Actual executor/,
+      /Attempt 3/i,
+      /1 active Run/,
+    ]) {
+      await expect(link).toHaveAccessibleDescription(value);
+    }
+    await expect(link.getByText("succeeded", { exact: true })).toBeVisible();
+    await expect(link.getByText("1 active", { exact: true })).toBeVisible();
+    if (width === 1440) {
+      await expect(link.getByText(/Preferred specialist/)).toBeVisible();
+      await expect(link.getByText("Disabled", { exact: true })).toBeVisible();
+      const bounds = (await row.boundingBox())!;
+      expect(bounds.height).toBeGreaterThanOrEqual(40);
+      expect(bounds.height).toBeLessThanOrEqual(48);
+    }
+    const rowBounds = (await row.boundingBox())!;
+    expect(rowBounds.height).toBeLessThanOrEqual(64);
+    const linkBounds = (await link.boundingBox())!;
+    expect(Math.abs(rowBounds.width - linkBounds.width)).toBeLessThanOrEqual(2);
+    expect(
+      await page.evaluate(
+        () => document.documentElement.scrollWidth <= innerWidth,
+      ),
+    ).toBe(true);
+    await page.screenshot({
+      path: info.outputPath(`compact-list-${width}.png`),
+    });
+    await link.click();
+    await expect(
+      page.getByRole("dialog").getByLabel("Task title", { exact: true }),
+    ).toHaveValue(title);
+    const url = new URL(page.url());
+    expect(url.searchParams.get("view") ?? "list").toBe("list");
+    expect(Object.fromEntries(url.searchParams)).toMatchObject({
+      q: "Compact",
+      priority: "high",
+      date: "2026-10-16",
+      scale: "month",
+      taskId: T,
+    });
+    expect(state.posts).toHaveLength(0);
+    expect(state.tasks[0].status).toBe("open");
+  });
+}
+
+test("compact List retains server totals while paging a filtered stage", async ({
+  page,
+}) => {
+  const state = await fixture(page);
+  for (let i = 0; i < 54; i++) {
+    state.tasks.push({
+      ...state.tasks[0],
+      id: `compact-${i}`,
+      title: `Compact ${i}`,
+      priority: "high",
+    });
+  }
+  await page.goto("/tasks?view=list&priority=high&q=Compact");
+  const group = page.getByRole("region", { name: "Backlog", exact: true });
+  await expect(group.getByRole("listitem")).toHaveCount(50);
+  await expect(group.getByText("54", { exact: true })).toBeVisible();
+  await group
+    .getByRole("button", { name: "Load more Backlog Tasks", exact: true })
+    .click();
+  await expect(group.getByRole("listitem")).toHaveCount(54);
+  await expect(group.getByText("54", { exact: true })).toBeVisible();
+  expect(
+    state.urls.some(
+      (url) =>
+        new URL(url, "http://fixture").searchParams.has("cursor") &&
+        url.includes("priority=high") &&
+        url.includes("q=Compact"),
+    ),
+  ).toBe(true);
+  expect(state.posts).toHaveLength(0);
+});
+
 for (const width of [390, 1440]) {
   test(`Kanban quick add saves in its column and updates every view at ${width}px`, async ({
     page,
@@ -553,7 +981,7 @@ test("paged and filtered boards preserve scopes and reload stale pages", async (
   expect(
     state.urls.some(
       (u) =>
-        u.includes("cursor=2%3A50") &&
+        new URL(u, "http://fixture").searchParams.has("cursor") &&
         u.includes("priority=high") &&
         u.includes("q=Visible"),
     ),

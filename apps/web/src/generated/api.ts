@@ -5613,6 +5613,8 @@ export interface operations {
     listProjectRunQueue: {
         parameters: {
             query?: {
+                /** @description Filter by the Agent that performed the Run, including disabled Agents. Must belong to this Project. */
+                agent_id?: string;
                 cursor?: string;
                 group?: "all" | "active" | "failed" | "finished";
                 limit?: number;
@@ -5636,7 +5638,7 @@ export interface operations {
                     "application/json": components["schemas"]["RunQueuePage"];
                 };
             };
-            /** @description Project not found */
+            /** @description Project, Task, or Agent not found in the requested Project */
             404: {
                 headers: {
                     [name: string]: unknown;
@@ -5661,6 +5663,8 @@ export interface operations {
                 priority?: components["schemas"]["TaskPriority"];
                 q?: string;
                 repository_id?: string;
+                /** @description Task preset: active includes ready, in_progress, and in_review; backlog includes open; all includes every status, including completed and cancelled. An explicit status intersects the preset. When omitted, returns every status except cancelled unless status is explicitly supplied. Cursors are bound to the scope. */
+                scope?: "active" | "backlog" | "all";
                 status?: components["schemas"]["TaskStatus"];
             };
             header?: never;
@@ -5713,6 +5717,8 @@ export interface operations {
                 priority?: components["schemas"]["TaskPriority"];
                 q?: string;
                 repository_id?: string;
+                /** @description Task preset: active includes ready, in_progress, and in_review; backlog includes open; all includes every status, including completed and cancelled. An explicit status intersects the preset. When omitted, returns every status except cancelled unless status is explicitly supplied. Cursors are bound to the scope. */
+                scope?: "active" | "backlog" | "all";
                 section?: "scheduled" | "unscheduled";
                 status?: components["schemas"]["TaskStatus"];
                 to: string;

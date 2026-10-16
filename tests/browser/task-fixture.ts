@@ -1,4 +1,5 @@
 import type { Page } from "@playwright/test";
+import type { components } from "../../apps/web/src/generated/api";
 
 export const A = "11111111-1111-4111-8111-111111111111",
   B = "22222222-2222-4222-8222-222222222222",
@@ -65,6 +66,7 @@ export async function fixture(page: Page) {
     writeError: 0,
     writeGate: undefined as Promise<void> | undefined,
     active: false,
+    latestRun: null as components["schemas"]["TaskPlanningRun"] | null,
     failRun: false,
     history: false,
     gate: undefined as Promise<void> | undefined,
@@ -119,6 +121,19 @@ export async function fixture(page: Page) {
       state.board++;
       return json(task, 201);
     }
+    const scopeStages =
+      url.searchParams.get("scope") === "active"
+        ? ["ready", "in_progress", "in_review"]
+        : url.searchParams.get("scope") === "backlog"
+          ? ["open"]
+          : [
+              "open",
+              "ready",
+              "in_progress",
+              "in_review",
+              "completed",
+              "cancelled",
+            ];
     if (path.endsWith("/task-timeline")) {
       if (state.timelineError)
         return json({ detail: "Timeline unavailable" }, state.timelineError);
@@ -129,9 +144,8 @@ export async function fixture(page: Page) {
       const filtered = tasks.filter(
         (t) =>
           t.project_id === path.split("/")[2] &&
-          (q.get("status")
-            ? t.status === q.get("status")
-            : t.status !== "cancelled") &&
+          scopeStages.includes(t.status) &&
+          (!q.get("status") || t.status === q.get("status")) &&
           (!q.get("priority") || t.priority === q.get("priority")) &&
           (!q.get("repository_id") ||
             t.repository_id === q.get("repository_id")) &&
@@ -152,6 +166,7 @@ export async function fixture(page: Page) {
         from,
         to,
         q.get("q"),
+        q.get("scope") ?? "all",
         q.get("status"),
         q.get("priority"),
         q.get("repository_id"),
@@ -192,8 +207,8 @@ export async function fixture(page: Page) {
                 repositories.find((r) => r.id === task.repository_id) ?? null,
               preferred_agent:
                 agents.find((a) => a.id === task.preferred_agent_id) ?? null,
-              latest_run: null,
-              run_count: state.active ? 1 : 0,
+              latest_run: state.latestRun,
+              run_count: Number(!!state.latestRun) + Number(state.active),
               active_run_count: state.active ? 1 : 0,
             })),
             next_cursor:
@@ -230,50 +245,74 @@ export async function fixture(page: Page) {
     }
     if (path.endsWith("/task-planning")) {
       if (state.gate) await state.gate;
-      const cursor = url.searchParams.get("cursor");
-      if (cursor && Number(cursor.split(":")[0]) !== state.board)
+      const q = url.searchParams,
+        cursor = q.get("cursor"),
+        status = q.get("status"),
+        limit = Number(q.get("limit") || 50);
+      const scope = JSON.stringify([
+        path,
+        q.get("scope") ?? "all",
+        q.get("q"),
+        q.get("priority"),
+        q.get("repository_id"),
+        q.get("preferred_agent_id"),
+        limit,
+      ]);
+      const after = cursor
+        ? JSON.parse(Buffer.from(cursor, "base64url").toString())
+        : null;
+      if (after && after.board !== state.board)
         return json({ detail: "Task list changed; reload." }, 409);
-      const status = url.searchParams.get("status");
-      const groups = (
-        status
-          ? [status]
-          : ["open", "ready", "in_progress", "in_review", "completed"]
-      ).map((status) => {
-        const items = tasks
-          .filter(
-            (t) =>
-              t.project_id === path.split("/")[2] &&
-              t.status === status &&
-              (!url.searchParams.get("priority") ||
-                t.priority === url.searchParams.get("priority")) &&
-              (!url.searchParams.get("repository_id") ||
-                t.repository_id === url.searchParams.get("repository_id")) &&
-              (!url.searchParams.get("preferred_agent_id") ||
-                t.preferred_agent_id ===
-                  url.searchParams.get("preferred_agent_id")) &&
-              t.title
-                .toLowerCase()
-                .includes((url.searchParams.get("q") ?? "").toLowerCase()),
-          )
-          .map((task) => ({
-            task,
-            repository:
-              repositories.find((r) => r.id === task.repository_id) ?? null,
-            preferred_agent:
-              agents.find((a) => a.id === task.preferred_agent_id) ?? null,
-            latest_run: null,
-            run_count: state.active ? 1 : 0,
-            active_run_count: state.active ? 1 : 0,
-          }));
-        const start = cursor ? Number(cursor.split(":")[1]) : 0;
-        const end = start + Number(url.searchParams.get("limit") || 50);
-        return {
-          status,
-          total: items.length,
-          items: items.slice(start, end),
-          next_cursor: end < items.length ? `${state.board}:${end}` : "",
-        };
-      });
+      if (after && (after.scope !== scope || after.status !== status))
+        return json({ detail: "Invalid cursor" }, 422);
+      const groups = scopeStages
+        .filter((stage) => !status || stage === status)
+        .map((status) => {
+          const items = tasks
+            .filter(
+              (t) =>
+                t.project_id === path.split("/")[2] &&
+                t.status === status &&
+                (!url.searchParams.get("priority") ||
+                  t.priority === url.searchParams.get("priority")) &&
+                (!url.searchParams.get("repository_id") ||
+                  t.repository_id === url.searchParams.get("repository_id")) &&
+                (!url.searchParams.get("preferred_agent_id") ||
+                  t.preferred_agent_id ===
+                    url.searchParams.get("preferred_agent_id")) &&
+                t.title
+                  .toLowerCase()
+                  .includes((url.searchParams.get("q") ?? "").toLowerCase()),
+            )
+            .map((task) => ({
+              task,
+              repository:
+                repositories.find((r) => r.id === task.repository_id) ?? null,
+              preferred_agent:
+                agents.find((a) => a.id === task.preferred_agent_id) ?? null,
+              latest_run: state.latestRun,
+              run_count: Number(!!state.latestRun) + Number(state.active),
+              active_run_count: state.active ? 1 : 0,
+            }));
+          const start = after?.start ?? 0;
+          const end = start + limit;
+          return {
+            status,
+            total: items.length,
+            items: items.slice(start, end),
+            next_cursor:
+              end < items.length
+                ? Buffer.from(
+                    JSON.stringify({
+                      board: state.board,
+                      scope,
+                      status,
+                      start: end,
+                    }),
+                  ).toString("base64url")
+                : "",
+          };
+        });
       return json({ board_revision: state.board, groups });
     }
     if (path.startsWith("/tasks/")) {

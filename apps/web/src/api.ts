@@ -28,6 +28,7 @@ export interface RunQueueQuery {
   cursor?: string;
   limit?: number;
   task_id?: string;
+  agent_id?: string;
 }
 
 export type TaskPriority = components["schemas"]["TaskPriority"];
@@ -45,6 +46,7 @@ export type TaskMove = components["schemas"]["TaskMove"];
 export type TaskPlanningMutation =
   components["schemas"]["TaskPlanningMutation"];
 export interface TaskPlanningQuery {
+  scope?: "active" | "backlog" | "all";
   q?: string;
   status?: Task["status"];
   priority?: TaskPriority;
@@ -294,7 +296,7 @@ export const api = {
     }),
   runQueue: (project: string, values: RunQueueQuery = {}) =>
     request<RunQueuePage>(
-      `/projects/${encodeURIComponent(project)}/run-queue?${new URLSearchParams({ group: values.group ?? "all", q: values.q ?? "", cursor: values.cursor ?? "", limit: String(values.limit ?? 50), ...(values.task_id ? { task_id: values.task_id } : {}) })}`,
+      `/projects/${encodeURIComponent(project)}/run-queue?${new URLSearchParams({ group: values.group ?? "all", q: values.q ?? "", cursor: values.cursor ?? "", limit: String(values.limit ?? 50), ...(values.task_id ? { task_id: values.task_id } : {}), ...(values.agent_id ? { agent_id: values.agent_id } : {}) })}`,
     ),
   runs: (project?: string) =>
     request<Run[]>(

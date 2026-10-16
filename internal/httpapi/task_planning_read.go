@@ -15,6 +15,7 @@ import (
 type taskPlanningFilter struct {
 	Project    string `json:"project"`
 	Query      string `json:"q"`
+	Scope      string `json:"scope,omitempty"`
 	Status     string `json:"status"`
 	Priority   string `json:"priority"`
 	Repository string `json:"repository"`
@@ -55,6 +56,33 @@ const planningRunJoins = `
     FROM runs r JOIN agents ra ON ra.id=r.agent_id WHERE r.task_id=t.id ORDER BY r.attempt DESC LIMIT 1) latest ON true
    CROSS JOIN LATERAL (SELECT count(*) total,count(*) FILTER(WHERE r.status IN ('queued','provisioning','running','waiting_for_approval','waiting_for_input','finalizing')) active FROM runs r WHERE r.task_id=t.id) counts`
 
+func taskPlanningStatuses(scope, status string) ([]string, bool) {
+	statuses := []string{"open", "ready", "in_progress", "in_review", "completed"}
+	switch scope {
+	case "":
+		if status != "" {
+			return []string{status}, true
+		}
+	case "active":
+		statuses = []string{"ready", "in_progress", "in_review"}
+	case "backlog":
+		statuses = []string{"open"}
+	case "all":
+		statuses = append(statuses, "cancelled")
+	default:
+		return nil, false
+	}
+	if status == "" {
+		return statuses, true
+	}
+	for _, candidate := range statuses {
+		if candidate == status {
+			return []string{status}, true
+		}
+	}
+	return []string{}, true
+}
+
 func (a *api) taskPlanning(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
 	project, ok := identifier(w, r.PathValue("project_id"), "path", "project_id")
@@ -62,7 +90,12 @@ func (a *api) taskPlanning(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	q := r.URL.Query()
-	filter := taskPlanningFilter{Project: project.String(), Query: strings.TrimSpace(q.Get("q")), Status: q.Get("status"), Priority: q.Get("priority")}
+	filter := taskPlanningFilter{Project: project.String(), Query: strings.TrimSpace(q.Get("q")), Scope: q.Get("scope"), Status: q.Get("status"), Priority: q.Get("priority")}
+	statuses, validScope := taskPlanningStatuses(filter.Scope, filter.Status)
+	if !validScope {
+		invalid(w, "query", "scope", "value_error", "Scope must be active, backlog, or all")
+		return
+	}
 	if !utf8.ValidString(filter.Query) || utf8.RuneCountInString(filter.Query) > 200 || filter.Status != "" && !postgres.ValidTaskStatus(filter.Status) || filter.Priority != "" && !postgres.ValidTaskPriority(filter.Priority) {
 		invalid(w, "query", "", "value_error", "Invalid search, status, or priority")
 		return
@@ -119,10 +152,6 @@ func (a *api) taskPlanning(w http.ResponseWriter, r *http.Request) {
 	if after != nil && after.Revision != page.BoardRevision {
 		problem(w, 409, "Task list changed; reload all groups before loading more")
 		return
-	}
-	statuses := []string{"open", "ready", "in_progress", "in_review", "completed"}
-	if filter.Status != "" {
-		statuses = []string{filter.Status}
 	}
 	for _, status := range statuses {
 		group := taskPlanningGroup{Status: status, Items: []json.RawMessage{}}

@@ -168,7 +168,7 @@ export function TaskBoard({
             },
           }}
         >
-          <KanbanBoard className="flex min-h-[max(20rem,calc(100svh-15rem))] items-stretch gap-3">
+          <KanbanBoard className="flex min-h-[max(20rem,calc(100svh-10rem))] items-stretch gap-3">
             {page.groups.map((group) => (
               <KanbanColumn
                 key={group.status}
