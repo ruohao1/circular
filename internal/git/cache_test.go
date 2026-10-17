@@ -3,6 +3,7 @@ package git_test
 import (
 	"bytes"
 	"context"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -60,6 +61,45 @@ func localGit(t *testing.T, base string, options ...func(*git.Config)) *git.Loca
 
 func absent(path string) bool { _, err := os.Lstat(path); return os.IsNotExist(err) }
 
+func TestCheckoutRejectsInvalidCloneBeforePublicationAndAllowsRetry(t *testing.T) {
+	base := t.TempDir()
+	source := sourceRepository(t, base)
+	gitCommand(t, source, "symbolic-ref", "HEAD", "refs/heads/missing-default")
+	local, id := localGit(t, base), uuid.New()
+	target := filepath.Join(base, "cache", id.String())
+	path, err := local.Checkout(t.Context(), id, source)
+	var typed *git.Error
+	if !errors.Is(err, git.ErrInvalidCache) || !errors.As(err, &typed) || typed.ID != id || typed.Path != target {
+		t.Fatalf("invalid clone did not return a typed cache error: %v", err)
+	}
+	if strings.Contains(err.Error(), source) || strings.Contains(err.Error(), "missing-default") {
+		t.Fatalf("invalid clone error exposed source details: %v", err)
+	}
+	if path != "" {
+		t.Errorf("invalid clone returned a cache path: %s", path)
+	}
+	if !absent(target) {
+		t.Error("invalid clone published its cache")
+	}
+	entries, err := os.ReadDir(filepath.Dir(target))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range entries {
+		if strings.Contains(entry.Name(), ".clone-") {
+			t.Error("invalid clone left private staging behind")
+		}
+	}
+	gitCommand(t, source, "symbolic-ref", "HEAD", "refs/heads/main")
+	path, err = local.Checkout(t.Context(), id, source)
+	if err != nil || path != target {
+		t.Fatalf("corrected-source retry with the same UUID failed: path=%q err=%v", path, err)
+	}
+	if !bytes.Equal(gitCommand(t, path, "rev-parse", "HEAD"), gitCommand(t, source, "rev-parse", "main")) {
+		t.Fatal("retry did not publish the corrected source commit")
+	}
+}
+
 func TestCheckoutPublishesOneManagedRepositoryAndRefreshesItsBaseRef(t *testing.T) {
 	base := t.TempDir()
 	source := sourceRepository(t, base)
@@ -91,5 +131,26 @@ func TestCheckoutPublishesOneManagedRepositoryAndRefreshesItsBaseRef(t *testing.
 				t.Fatal("published checkout left private staging behind")
 			}
 		}
+	}
+}
+
+func TestCheckoutPreservesPreExistingInvalidCache(t *testing.T) {
+	base := t.TempDir()
+	source := sourceRepository(t, base)
+	local, id := localGit(t, base), uuid.New()
+	target, err := local.Checkout(t.Context(), id, source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gitCommand(t, target, "symbolic-ref", "HEAD", "refs/heads/missing-default")
+	putFile(t, filepath.Join(target, "keep"), "preserve\n")
+	if _, err := local.Checkout(t.Context(), id, source); !errors.Is(err, git.ErrInvalidCache) {
+		t.Fatalf("existing invalid cache was not rejected: %v", err)
+	}
+	if data, err := os.ReadFile(filepath.Join(target, "keep")); err != nil || string(data) != "preserve\n" {
+		t.Fatal("existing invalid cache was removed or replaced")
+	}
+	if ref := string(gitCommand(t, target, "symbolic-ref", "HEAD")); ref != "refs/heads/missing-default" {
+		t.Fatalf("existing invalid cache HEAD was repaired: %s", ref)
 	}
 }

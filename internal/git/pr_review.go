@@ -43,7 +43,7 @@ func (l *Local) PreparePRReview(ctx context.Context, run, repository uuid.UUID, 
 		return v, err
 	}
 	if !exists(target) {
-		if _, err := l.initializeCache(ctx, repository, target, cloneURL, environment); err != nil {
+		if _, err := l.initializeCache(ctx, repository, target, cloneURL, environment, l.validateCacheStructure); err != nil {
 			return v, errors.Join(prreviews.ErrSourceInvalid, err)
 		}
 	}
