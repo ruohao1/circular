@@ -65,16 +65,14 @@ func (l *Local) Checkout(ctx context.Context, id uuid.UUID, cloneURL string) (pa
 		}
 		return target, nil
 	}
-	path, err = l.initializeCache(ctx, id, target, cloneURL, environment)
-	if err != nil {
-		return "", err
-	}
-	return path, l.validateCache(ctx, id, path)
+	return l.initializeCache(ctx, id, target, cloneURL, environment, l.validateCache)
 }
 
-// initializeCache publishes a private clone without refreshing a default branch.
+// initializeCache validates a private clone before publishing it, without
+// refreshing a default branch. Coding requires a valid HEAD; exact-object PR
+// reviews require only the cache structure before loading their captured objects.
 // The caller holds the repository lock and has obtained trusted credentials.
-func (l *Local) initializeCache(ctx context.Context, id uuid.UUID, target, cloneURL string, environment map[string]string) (path string, result error) {
+func (l *Local) initializeCache(ctx context.Context, id uuid.UUID, target, cloneURL string, environment map[string]string, validate func(context.Context, uuid.UUID, string) error) (path string, result error) {
 	staging, err := os.MkdirTemp(l.config.RepositoryCacheRoot, "."+id.String()+".clone-")
 	if err != nil {
 		return "", failure(ErrClone, id, target, -1, nil)
@@ -93,7 +91,7 @@ func (l *Local) initializeCache(ctx context.Context, id uuid.UUID, target, clone
 	if err != nil || code != 0 {
 		return "", failure(ErrClone, id, target, code, err)
 	}
-	if err := l.validateCacheStructure(ctx, id, staging); err != nil {
+	if err := validate(ctx, id, staging); err != nil {
 		return "", failure(ErrInvalidCache, id, target, -1, err)
 	}
 	if err := ctx.Err(); err != nil {
