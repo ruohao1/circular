@@ -4164,6 +4164,185 @@
           "status"
         ],
         "type": "object"
+      },
+      "WorkSessionRead": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "project_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "task_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "run_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "agent_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "client_name": {
+            "type": "string"
+          },
+          "client_version": {
+            "type": "string"
+          },
+          "release_reason": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "external",
+              "native"
+            ]
+          },
+          "claimed_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "heartbeat_sequence": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "outcome": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "succeeded",
+                  "failed",
+                  "cancelled"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "needs_user_resolution": {
+            "type": "boolean"
+          },
+          "contact_state": {
+            "type": "string",
+            "enum": [
+              "queued",
+              "current",
+              "needs_attention",
+              "waiting_for_child",
+              "cleanup_pending",
+              "released"
+            ]
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "last_contact_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "finished_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "released_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "project_id",
+          "task_id",
+          "run_id",
+          "agent_id",
+          "client_name",
+          "client_version",
+          "release_reason",
+          "kind",
+          "claimed_at",
+          "heartbeat_sequence",
+          "outcome",
+          "needs_user_resolution",
+          "contact_state",
+          "started_at",
+          "last_contact_at",
+          "finished_at",
+          "released_at"
+        ]
+      },
+      "TaskOwnershipConflict": {
+        "type": "object",
+        "properties": {
+          "detail": {
+            "type": "string"
+          },
+          "code": {
+            "type": "string",
+            "enum": [
+              "task_owned"
+            ]
+          },
+          "owner": {
+            "$ref": "#/components/schemas/WorkSessionRead"
+          }
+        },
+        "required": [
+          "detail",
+          "code",
+          "owner"
+        ]
       }
     }
   },
@@ -7660,7 +7839,29 @@
             "description": "Successful Response"
           },
           "409": {
-            "description": "The request_key has already been used with different launch parameters."
+            "description": "Task is owned or request key conflicts with previous parameters.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/TaskOwnershipConflict"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "detail": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "detail"
+                      ]
+                    }
+                  ]
+                }
+              }
+            }
           },
           "422": {
             "content": {

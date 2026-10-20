@@ -2,6 +2,7 @@ package httpapi_test
 
 import (
 	"encoding/json"
+	"github.com/google/uuid"
 	"strconv"
 	"strings"
 	"testing"
@@ -18,7 +19,8 @@ func TestCodexAgentRegistrationAndRunPreserveModelConfiguration(t *testing.T) {
 			t.Fatal(agent)
 		}
 		testsupport.AssertJSON(t, agent["backend_config"], config)
-		task := f.create(t, "tasks", map[string]any{"project_id": project["id"], "title": "Use configured Codex agent"})
+		repository := f.create(t, "repositories", map[string]any{"project_id": project["id"], "name": "Source Use configured Codex agent" + uuid.NewString(), "clone_url": "/fixture"})
+		task := f.create(t, "tasks", map[string]any{"project_id": project["id"], "title": "Use configured Codex agent", "repository_id": repository["id"], "description": "Prepared requirements"})
 		run := f.create(t, "runs", map[string]any{"task_id": task["id"], "agent_id": agent["id"]})
 		if run["backend"] != "codex" || run["status"] != "queued" {
 			t.Fatal("Run did not preserve the Codex backend", run)

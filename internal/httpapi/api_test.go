@@ -85,7 +85,8 @@ func (f fixture) run(t *testing.T) map[string]any {
 	t.Helper()
 	project := f.create(t, "projects", map[string]any{"name": "API fixture"})
 	agent := f.create(t, "agents", map[string]any{"name": "Engineer", "project_id": project["id"]})
-	task := f.create(t, "tasks", map[string]any{"title": "Exercise HTTP", "project_id": project["id"]})
+	repository := f.create(t, "repositories", map[string]any{"project_id": project["id"], "name": "Source", "clone_url": "/fixture"})
+	task := f.create(t, "tasks", map[string]any{"title": "Exercise HTTP", "description": "Prepared requirements", "repository_id": repository["id"], "project_id": project["id"]})
 	return f.create(t, "runs", map[string]any{"task_id": task["id"], "agent_id": agent["id"]})
 }
 
@@ -132,6 +133,7 @@ func TestResourceCreationPreservesDefaultsScopeAndExecutionProjection(t *testing
 	if task["status"] != "open" || task["description"] != "" {
 		t.Fatal(task)
 	}
+	f.request(t, "PATCH", "/api/v1/tasks/"+task["id"].(string), `{"expected_revision":1,"description":"Prepared requirements"}`, 200)
 	run := f.create(t, "runs", map[string]any{"task_id": task["id"], "agent_id": agent["id"]})
 	if run["attempt"] != float64(1) || run["status"] != "queued" || run["worker_id"] != nil {
 		t.Fatal(run)
@@ -161,12 +163,13 @@ func TestResourceCreationPreservesDefaultsScopeAndExecutionProjection(t *testing
 		t.Fatal("cross-project Repository accepted")
 	}
 	other := f.create(t, "agents", map[string]any{"project_id": foreign["id"], "name": "Other"})
-	bad, _ = json.Marshal(map[string]any{"task_id": task["id"], "agent_id": other["id"]})
+	unowned := f.create(t, "tasks", map[string]any{"project_id": project["id"], "repository_id": repository["id"], "title": "Unowned", "description": "Prepared requirements"})
+	bad, _ = json.Marshal(map[string]any{"task_id": unowned["id"], "agent_id": other["id"]})
 	f.request(t, "POST", "/api/v1/runs", string(bad), 422)
 	if _, err := f.pool.Exec(t.Context(), "UPDATE agents SET enabled=false WHERE id=$1", agent["id"]); err != nil {
 		t.Fatal(err)
 	}
-	bad, _ = json.Marshal(map[string]any{"task_id": task["id"], "agent_id": agent["id"]})
+	bad, _ = json.Marshal(map[string]any{"task_id": unowned["id"], "agent_id": agent["id"]})
 	f.request(t, "POST", "/api/v1/runs", string(bad), 422)
 }
 
@@ -175,21 +178,18 @@ func TestConcurrentAttemptsAndCancellationAreAtomicAndReplayable(t *testing.T) {
 	first := f.run(t)
 	payload, _ := json.Marshal(map[string]any{"task_id": first["task_id"], "agent_id": first["agent_id"]})
 	var wg sync.WaitGroup
-	attempts := make(chan int, 4)
 	for range 4 {
 		wg.Go(func() {
-			run := decode(t, f.request(t, "POST", "/api/v1/runs", string(payload), 201))
-			attempts <- int(run["attempt"].(float64))
+			conflict := decode(t, f.request(t, "POST", "/api/v1/runs", string(payload), 409))
+			if conflict["code"] != "task_owned" || conflict["owner"].(map[string]any)["run_id"] != first["id"] {
+				t.Error("conflicting launch hid owner", conflict)
+			}
 		})
 	}
 	wg.Wait()
-	close(attempts)
-	seen := map[int]bool{}
-	for n := range attempts {
-		seen[n] = true
-	}
-	if len(seen) != 4 || seen[1] || !seen[5] {
-		t.Fatal(seen)
+	var count int
+	if err := f.pool.QueryRow(t.Context(), `SELECT count(*) FROM runs`).Scan(&count); err != nil || count != 1 {
+		t.Fatal("conflicting attempts escaped", count, err)
 	}
 	id := first["id"].(string)
 	for range 2 {

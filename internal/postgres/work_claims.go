@@ -151,6 +151,30 @@ func moveClaimedTask(ctx context.Context, tx pgx.Tx, task planningTask) error {
 	return err
 }
 
+func claimNativeWork(ctx context.Context, tx pgx.Tx, task planningTask, runID uuid.UUID, now time.Time) (WorkSessionView, error) {
+	prerequisites, err := eligibleWorkTask(ctx, tx, task, "open", "ready")
+	if err != nil {
+		return WorkSessionView{}, err
+	}
+	digest, err := workDigest([]uuid.UUID{task.id, runID})
+	if err != nil {
+		return WorkSessionView{}, err
+	}
+	id := uuid.New()
+	_, err = tx.Exec(ctx, `INSERT INTO work_sessions(id,project_id,task_id,kind,run_id,admission_digest,client_name,admitted_revision,admitted_prerequisites,claimed_at)
+		VALUES($1,$2,$3,'native',$4,$5,'Circular',$6,$7,$8)`, id, task.project, task.id, runID, digest, task.revision, prerequisites, now)
+	if err != nil {
+		return WorkSessionView{}, err
+	}
+	if _, err = tx.Exec(ctx, `INSERT INTO work_session_receipts(id,session_id,operation_id,kind,input_digest,actor,at) VALUES($1,$2,$2,'claimed',$3,'system',$4)`, uuid.New(), id, digest, now); err != nil {
+		return WorkSessionView{}, err
+	}
+	if err = moveClaimedTask(ctx, tx, task); err != nil {
+		return WorkSessionView{}, err
+	}
+	return InspectWorkSession(ctx, tx, id, now)
+}
+
 func HeartbeatWork(ctx context.Context, tx pgx.Tx, credential WorkCredential, sequence int64, now time.Time) (WorkSessionView, error) {
 	if sequence < 1 || sequence > maxPlanningRevision {
 		return WorkSessionView{}, ErrWorkInput

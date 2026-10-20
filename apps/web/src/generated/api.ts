@@ -2122,6 +2122,12 @@ export interface components {
             placement: "start" | "end" | "before" | "after" | "up" | "down";
             status: components["schemas"]["TaskStatus"];
         };
+        TaskOwnershipConflict: {
+            /** @enum {string} */
+            code: "task_owned";
+            detail: string;
+            owner: components["schemas"]["WorkSessionRead"];
+        };
         TaskPlanningAgent: {
             backend: string;
             enabled: boolean;
@@ -2357,6 +2363,32 @@ export interface components {
         WebhookSettingsUpdate: {
             public_origin: string;
             signing_secret?: string;
+        };
+        WorkSessionRead: {
+            agent_id: string | null;
+            /** Format: date-time */
+            claimed_at: string;
+            client_name: string;
+            client_version: string;
+            /** @enum {string} */
+            contact_state: "queued" | "current" | "needs_attention" | "waiting_for_child" | "cleanup_pending" | "released";
+            finished_at: string | null;
+            heartbeat_sequence: number;
+            /** Format: uuid */
+            id: string;
+            /** @enum {string} */
+            kind: "external" | "native";
+            last_contact_at: string | null;
+            needs_user_resolution: boolean;
+            outcome: ("succeeded" | "failed" | "cancelled") | null;
+            /** Format: uuid */
+            project_id: string;
+            release_reason: string;
+            released_at: string | null;
+            run_id: string | null;
+            started_at: string | null;
+            /** Format: uuid */
+            task_id: string;
         };
         /** WorkspaceRead */
         WorkspaceRead: {
@@ -5900,12 +5932,16 @@ export interface operations {
                     "application/json": components["schemas"]["RunRead"];
                 };
             };
-            /** @description The request_key has already been used with different launch parameters. */
+            /** @description Task is owned or request key conflicts with previous parameters. */
             409: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["TaskOwnershipConflict"] | {
+                        detail: string;
+                    };
+                };
             };
             /** @description Validation Error */
             422: {
