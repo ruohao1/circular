@@ -90,9 +90,22 @@ func planningUUID(w http.ResponseWriter, fields map[string]json.RawMessage, name
 }
 func decodeTaskPlanningUpdate(w http.ResponseWriter, r *http.Request) (int64, postgres.TaskPlanningPatch, bool) {
 	var p postgres.TaskPlanningPatch
-	fields, ok := planningBody(w, r, "expected_revision", "expected_board_revision", "title", "description", "priority", "repository_id", "preferred_agent_id", "planned_start_date", "planned_finish_date")
+	fields, ok := planningBody(w, r, "expected_revision", "expected_board_revision", "title", "description", "priority", "repository_id", "preferred_agent_id", "planned_start_date", "planned_finish_date", "prerequisite_task_ids")
 	if !ok {
 		return 0, p, false
+	}
+	if raw, present := fields["prerequisite_task_ids"]; present {
+		p.PrerequisitesSet = true
+		if bytes.Equal(raw, []byte("null")) || json.Unmarshal(raw, &p.PrerequisiteTaskIDs) != nil {
+			invalid(w, "body", "prerequisite_task_ids", "value_error", "An array of Task UUIDs is required")
+			return 0, p, false
+		}
+		for _, id := range p.PrerequisiteTaskIDs {
+			if id == uuid.Nil {
+				invalid(w, "body", "prerequisite_task_ids", "value_error", "Nonzero Task UUIDs are required")
+				return 0, p, false
+			}
+		}
 	}
 	_, p.PlannedStartSet = fields["planned_start_date"]
 	_, p.PlannedFinishSet = fields["planned_finish_date"]

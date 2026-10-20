@@ -22,6 +22,8 @@ type TaskPlanningPatch struct {
 	ExpectedBoardRevision               *int64
 	PlannedStartSet, PlannedFinishSet   bool
 	PlannedStartDate, PlannedFinishDate *string
+	PrerequisitesSet                    bool
+	PrerequisiteTaskIDs                 []uuid.UUID
 }
 type TaskMoveInput struct {
 	ExpectedRevision, ExpectedBoardRevision int64
@@ -36,6 +38,8 @@ type TaskPlanningResult struct {
 type TaskEditCapabilities struct {
 	ContentEditable, RepositoryEditable     bool
 	ContentLockReason, RepositoryLockReason *string
+	DependenciesEditable                    bool
+	DependenciesLockReason                  *string
 }
 
 const maxPlanningRevision int64 = 9007199254740991
@@ -50,28 +54,37 @@ func ValidTaskStatus(status string) bool {
 // Capability reads are non-locking. Mutation callers recheck under the Task lock
 // also used by CreateRun, so a queued Run and an instruction edit cannot race.
 func TaskPlanningCapabilities(ctx context.Context, tx pgx.Tx, taskID uuid.UUID) (TaskEditCapabilities, error) {
-	var source, active, hasRuns bool
+	var source, active, hasRuns, owned, hasWork bool
 	err := tx.QueryRow(ctx, `SELECT
   (t.external_refs->'linear'->>'issue_id' IS NOT NULL OR COALESCE(t.external_refs->'circular'->>'kind','')='repository-discovery'
    OR EXISTS(SELECT 1 FROM runs r JOIN external_session_runs s ON s.run_id=r.id WHERE r.task_id=t.id)
    OR EXISTS(SELECT 1 FROM runs r JOIN external_requests q ON q.run_id=r.id WHERE r.task_id=t.id)),
   EXISTS(SELECT 1 FROM runs r WHERE r.task_id=t.id AND r.status IN ('queued','provisioning','running','waiting_for_approval','waiting_for_input','finalizing')),
-  EXISTS(SELECT 1 FROM runs r WHERE r.task_id=t.id)
-  FROM tasks t WHERE t.id=$1`, taskID).Scan(&source, &active, &hasRuns)
+  EXISTS(SELECT 1 FROM runs r WHERE r.task_id=t.id),
+  EXISTS(SELECT 1 FROM work_sessions s WHERE s.task_id=t.id AND s.released_at IS NULL),
+  EXISTS(SELECT 1 FROM work_sessions s WHERE s.task_id=t.id)
+  FROM tasks t WHERE t.id=$1`, taskID).Scan(&source, &active, &hasRuns, &owned, &hasWork)
 	if err != nil {
 		return TaskEditCapabilities{}, err
 	}
-	out := TaskEditCapabilities{ContentEditable: !source && !active, RepositoryEditable: !source && !hasRuns}
+	out := TaskEditCapabilities{ContentEditable: !source && !active && !owned, RepositoryEditable: !source && !hasRuns && !hasWork, DependenciesEditable: !owned}
 	reason := func(s string) *string { return &s }
+	if owned {
+		out.DependenciesLockReason = reason("active_work")
+	}
 	if source {
 		out.ContentLockReason = reason("source_managed")
 		out.RepositoryLockReason = reason("source_managed")
 	} else {
-		if active {
+		if owned {
+			out.ContentLockReason = reason("active_work")
+		} else if active {
 			out.ContentLockReason = reason("active_run")
 		}
 		if hasRuns {
 			out.RepositoryLockReason = reason("has_runs")
+		} else if hasWork {
+			out.RepositoryLockReason = reason("has_work_sessions")
 		}
 	}
 	return out, nil
@@ -165,7 +178,13 @@ func UpdateTaskPlanning(ctx context.Context, tx pgx.Tx, taskID uuid.UUID, expect
 			return out, fmt.Errorf("%w: preferred Agent is disabled", ErrTaskPlanningInput)
 		}
 	}
-	if !changedText && !changedRepo && !changedAgent && !changedDates && (patch.Priority == nil || *patch.Priority == t.priority) {
+	changedDependencies := false
+	if patch.PrerequisitesSet {
+		if changedDependencies, err = replaceTaskPrerequisites(ctx, tx, t, patch.PrerequisiteTaskIDs); err != nil {
+			return out, err
+		}
+	}
+	if !changedText && !changedRepo && !changedAgent && !changedDates && !changedDependencies && (patch.Priority == nil || *patch.Priority == t.priority) {
 		return out, nil
 	}
 	if patch.Title != nil {

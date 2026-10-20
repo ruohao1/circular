@@ -83,6 +83,7 @@ describe("canonical drop intents", () => {
       id,
       project_id: "p",
       repository_id: null,
+      parent_task_id: null,
       title: id,
       status,
       priority: "none",

@@ -233,6 +233,13 @@ func (a *api) create(w http.ResponseWriter, r *http.Request, table, schema strin
 		values["enabled"] = true
 	}
 	if table == "tasks" {
+		if values["parent_task_id"] != nil {
+			var parent uuid.UUID
+			err = tx.QueryRow(ctx, `SELECT id FROM tasks WHERE id=$1 AND project_id=$2`, values["parent_task_id"], values["project_id"]).Scan(&parent)
+			if dbError(w, err, "parent Task") {
+				return
+			}
+		}
 		if values["preferred_agent_id"] != nil {
 			var project uuid.UUID
 			var enabled bool

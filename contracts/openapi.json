@@ -2575,6 +2575,18 @@
               }
             ],
             "description": "Optional planned calendar date in years 0001\u20139999. Finish is inclusive."
+          },
+          "parent_task_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Immutable parent Task in the same Project, set at creation."
           }
         },
         "required": [
@@ -2681,6 +2693,18 @@
               }
             ],
             "description": "Optional planned calendar date in years 0001\u20139999. Finish is inclusive."
+          },
+          "parent_task_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Immutable parent Task in the same Project, set at creation."
           }
         },
         "required": [
@@ -2694,7 +2718,8 @@
           "preferred_agent_id",
           "revision",
           "planned_start_date",
-          "planned_finish_date"
+          "planned_finish_date",
+          "parent_task_id"
         ],
         "title": "TaskRead",
         "type": "object"
@@ -3490,6 +3515,18 @@
               }
             ],
             "description": "Optional planned calendar date in years 0001\u20139999. Finish is inclusive."
+          },
+          "parent_task_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Immutable parent Task in the same Project, set at creation."
           }
         },
         "required": [
@@ -3504,7 +3541,8 @@
           "created_at",
           "updated_at",
           "planned_start_date",
-          "planned_finish_date"
+          "planned_finish_date",
+          "parent_task_id"
         ]
       },
       "TaskPlanningRepository": {
@@ -3763,7 +3801,8 @@
                 "type": "string",
                 "enum": [
                   "source_managed",
-                  "active_run"
+                  "active_run",
+                  "active_work"
                 ]
               },
               {
@@ -3777,7 +3816,32 @@
                 "type": "string",
                 "enum": [
                   "source_managed",
-                  "has_runs"
+                  "has_runs",
+                  "has_work_sessions"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "prerequisite_task_ids": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "uniqueItems": true
+          },
+          "dependencies_editable": {
+            "type": "boolean"
+          },
+          "dependencies_lock_reason": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "active_work"
                 ]
               },
               {
@@ -3794,7 +3858,10 @@
           "content_editable",
           "repository_editable",
           "content_lock_reason",
-          "repository_lock_reason"
+          "repository_lock_reason",
+          "prerequisite_task_ids",
+          "dependencies_editable",
+          "dependencies_lock_reason"
         ]
       },
       "TaskPlanningUpdate": {
@@ -3870,6 +3937,14 @@
             "minimum": 1,
             "maximum": 9007199254740991,
             "description": "Required whenever a planned date field is present; checked whenever supplied."
+          },
+          "prerequisite_task_ids": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "uniqueItems": true
           }
         },
         "required": [

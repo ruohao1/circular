@@ -2085,6 +2085,8 @@ export interface components {
             external_refs?: {
                 [key: string]: unknown;
             };
+            /** @description Immutable parent Task in the same Project, set at creation. */
+            parent_task_id?: string | null;
             /** @description Optional planned calendar date in years 0001–9999. Finish is inclusive. */
             planned_finish_date?: string | null;
             /** @description Optional planned calendar date in years 0001–9999. Finish is inclusive. */
@@ -2130,11 +2132,14 @@ export interface components {
         TaskPlanningDetail: {
             board_revision: number;
             content_editable: boolean;
-            content_lock_reason: ("source_managed" | "active_run") | null;
+            content_lock_reason: ("source_managed" | "active_run" | "active_work") | null;
+            dependencies_editable: boolean;
+            dependencies_lock_reason: "active_work" | null;
             preferred_agent: components["schemas"]["TaskPlanningAgent"] | null;
+            prerequisite_task_ids: string[];
             repository: components["schemas"]["TaskPlanningRepository"] | null;
             repository_editable: boolean;
-            repository_lock_reason: ("source_managed" | "has_runs") | null;
+            repository_lock_reason: ("source_managed" | "has_runs" | "has_work_sessions") | null;
             task: components["schemas"]["TaskRead"];
         };
         TaskPlanningGroup: {
@@ -2202,6 +2207,8 @@ export interface components {
              * Format: uuid
              */
             id: string;
+            /** @description Immutable parent Task in the same Project, set at creation. */
+            parent_task_id: string | null;
             /** @description Optional planned calendar date in years 0001–9999. Finish is inclusive. */
             planned_finish_date: string | null;
             /** @description Optional planned calendar date in years 0001–9999. Finish is inclusive. */
@@ -2235,6 +2242,7 @@ export interface components {
             /** @description Optional planned calendar date in years 0001–9999. Finish is inclusive. */
             planned_start_date?: string | null;
             preferred_agent_id?: string | null;
+            prerequisite_task_ids?: string[];
             priority?: components["schemas"]["TaskPriority"];
             repository_id?: string | null;
             title?: string;
@@ -2262,6 +2270,8 @@ export interface components {
              * Format: uuid
              */
             id: string;
+            /** @description Immutable parent Task in the same Project, set at creation. */
+            parent_task_id: string | null;
             /** @description Optional planned calendar date in years 0001–9999. Finish is inclusive. */
             planned_finish_date: string | null;
             /** @description Optional planned calendar date in years 0001–9999. Finish is inclusive. */

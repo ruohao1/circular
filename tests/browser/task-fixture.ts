@@ -48,6 +48,7 @@ export async function fixture(page: Page) {
       priority: "normal",
       preferred_agent_id: agents[0].id as string | null,
       revision: 1,
+      parent_task_id: null as string | null,
       planned_start_date: null as string | null,
       planned_finish_date: null as string | null,
       external_refs: {} as Record<string, unknown>,
@@ -113,6 +114,7 @@ export async function fixture(page: Page) {
         repository_id: body.repository_id ?? null,
         preferred_agent_id: body.preferred_agent_id ?? null,
         status: body.status ?? "open",
+        parent_task_id: body.parent_task_id ?? null,
         planned_start_date: body.planned_start_date ?? null,
         planned_finish_date: body.planned_finish_date ?? null,
         revision: 1,
@@ -355,6 +357,9 @@ export async function fixture(page: Page) {
           preferred_agent:
             agents.find((a) => a.id === task.preferred_agent_id) ?? null,
           board_revision: state.board,
+          prerequisite_task_ids: [],
+          dependencies_editable: !state.active,
+          dependencies_lock_reason: state.active ? "active_work" : null,
           content_editable: !managed && !state.active,
           repository_editable: !managed && !state.active,
           content_lock_reason: managed

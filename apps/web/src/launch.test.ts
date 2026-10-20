@@ -55,6 +55,7 @@ describe("Task to Run launcher", () => {
           status: "open",
           priority: body.priority ?? "none",
           preferred_agent_id: body.preferred_agent_id ?? null,
+          parent_task_id: body.parent_task_id ?? null,
           revision: 1,
           planned_start_date: null,
           planned_finish_date: null,
