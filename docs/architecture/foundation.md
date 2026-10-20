@@ -40,6 +40,64 @@ resume cursor. Writes spanning a Run-owned resource and its Event lock the ownin
 first, then the resource row. The storage implementation reuses that Run lock for event
 sequence allocation so Workspace and Artifact writes share one deterministic lock order.
 
+## Task ownership
+
+A Work session owns a Task independently of its preferred Agent or a Run's worker
+lease. PostgreSQL permits one unreleased session per Task, shared by external
+coding clients and Circular coding Runs. PR review Runs are exempt. New work
+requires a nonblank title and description, a Repository in the same Project, and
+completed prerequisites. External claims require Ready; explicit native launches
+allow Open or Ready. Admission records the Task/prerequisite revisions and moves
+the Task to In progress atomically. Reporting an outcome or releasing ownership
+does not mark the Task Done or change its planned dates.
+
+Prerequisites are same-Project, directed Task links; edits reject duplicates,
+self-links, missing references and cycles. A parent link is separate, immutable,
+and does not imply a prerequisite. Active ownership protects instructions,
+Repository selection and prerequisites. Ownership history fixes the Repository
+even after release. Independent planning metadata remains editable.
+
+External clients supply a session UUID and a random 256-bit secret before
+claiming. Only the secret digest is persisted. Keep the original secret securely
+for reconnects; it is never returned in Task, Run, session or conflict projections.
+Client name/version is display metadata, not authenticated identity or approval.
+The credential permits reports for that session only; user release/reassignment
+is a separate privileged service operation.
+
+External clients should report contact every 30 seconds with a monotonically
+increasing sequence. Duplicate or lower sequences do not renew contact; accepted
+contact never moves backward when the server clock changes. At 120 seconds
+without contact the session needs attention, but still owns its Task. Heartbeats
+show recent contact, not coding progress. Terminal external reports release the
+claim; explicit release or atomic external reassignment fences subsequent reports
+from the old credential. Revocation cannot stop an external process editing files.
+The user must arrange that process's handoff separately.
+
+Session IDs and operation IDs make uncertain responses replayable. Exact retries
+return the stored receipt and current session view; changed payloads conflict.
+Claim, outcome, release, reassignment and cancellation requests retain audit
+receipts. Native launch keys still replay their original Run after completion; a
+new key requires an eligible, unowned Task.
+
+Native sessions record worker acquisition/renewal as contact and the Run's actual
+first start time. Outcomes precede release: normal ownership ends only after the
+Workspace is released and the worker lease is cleared. Cleanup heartbeats do not
+extend coding contact. Expired leases show attention immediately; recovery sets a
+durable hold that survives cleanup and requires explicit user release. Native
+administrative release cancels active work and reports pending cleanup rather
+than granting a replacement prematurely.
+
+Admission and planning edits lock Project then Task. Native lifecycle hooks use
+Run then session, without planning locks; native administrative release takes
+Project, Task, Run, then session. Linear launch preserves provider/grant/route
+locks before taking Project, then Agent/Repository. An owner conflict leaves the
+request waiting for explicit restart; invalid preparation requires approval.
+
+These lifecycle services live in `internal/postgres`. This foundation adds parent
+and prerequisite fields to existing planning API/MCP tools and safe native launch
+conflicts; external claim/heartbeat/finish MCP tools, completion policy, status
+sync and ownership visualizations are separate follow-ups.
+
 ## Isolation seam
 
 The intended execution chain is Run → container → Git worktree → backend. The
@@ -99,14 +157,16 @@ new Task and Run, frozen input and an isolated worktree hydrated from the raw
 checkpoint. Git attributes cannot rewrite these bytes. Child patches use the
 checkpoint commit, while the parent's final patch uses its original base.
 
-The parent waits without a claim in `waiting_for_input`; its Workspace is
-`suspended` and retained. Terminal child status alone is insufficient: only after
-child cleanup and claim release can the queue atomically claim parent invocation
+The parent waits without a worker lease in `waiting_for_input`; its Task ownership
+and `suspended` Workspace are retained. The child Task has its immutable parent
+link and its own Work session. Waiting does not fabricate parent contact.
+Terminal child status alone is insufficient: only after
+child cleanup and worker-lease release can the queue atomically claim parent invocation
 2. The invocation fence rejects stale workers. A fresh backend invocation uses
 frozen parent input and verified read-only context containing progress, child
 status, report and patch. Native CLI sessions are not resumed, and child patches
 are never applied by the platform. The same Run and attempt emit `run.continued`
-instead of another `run.started`.
+instead of another `run.started`; it reuses the original Work session/start time.
 
 Parent cancellation locks the parent before its child, stops unfinished child work
 and prevents continuation. Independent child failure or cancellation remains an

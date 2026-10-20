@@ -22,6 +22,14 @@ go run ./cmd/circular-migrate
 docker build -f infra/fake-agent-workload.Dockerfile -t circular-runner:dev .
 ```
 
+Revision 0019 adds Task ownership and requires existing coding work to be drained
+before upgrading. Prevent new launches, finish or cancel every coding Run, let the
+old workers finish Workspace/lease cleanup, then stop all writers before running
+the new migrator. Start only the new API/worker binaries afterward; do not mix
+versions. The [production upgrade procedure](../../infra/production/README.md#task-ownership-upgrade-revision-0019)
+includes the diagnostic query and exact rejection message. Do not clear leases or
+delete workspaces merely to make a migration pass.
+
 ## Start the services
 
 Run each command in its own terminal:
@@ -43,6 +51,20 @@ not a service health check.
 For containers instead of separate processes, use the
 [README setup instructions](../../README.md). Configure real model execution
 using the [Codex backend guide](codex-backend.md).
+
+## Preparing coding work
+
+Title-only Tasks remain valid drafts. To launch a new coding Run, supply a
+description and Repository, complete its prerequisites, and place it in Open or
+Ready. A successful launch moves it to In progress and claims ownership until
+normal cleanup completes. A second launch key cannot bypass that owner. Reuse the
+original key after an uncertain response to recover the existing Run.
+
+Recovery leaves an attention hold even after cleanup; explicit user release and
+preparation for a new attempt are required. The internal external-session service
+uses a separate session secret and 30/120-second contact policy described in
+[Task ownership](../architecture/foundation.md#task-ownership). This revision does
+not expose new external lifecycle MCP tools.
 
 ## Verification
 

@@ -519,6 +519,9 @@ test("configure resources in setup, recover from errors, and launch the first Ru
     await page
       .getByLabel("Task title", { exact: true })
       .fill("First Run from setup");
+    await page
+      .getByLabel("Description", { exact: true })
+      .fill("Verify the configured Repository and Agent with a complete Run.");
     await page.getByRole("button", { name: "Start Run", exact: true }).click();
     await expect(page).toHaveURL(/\/runs\/[0-9a-f-]+$/);
     await expect(page.locator(".heading-actions .status")).toHaveText(
