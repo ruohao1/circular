@@ -98,6 +98,9 @@ for (const scenario of ["success", "cancel", "failure"] as const) {
       await page
         .getByLabel("Task title")
         .fill(`Isolated execution · ${scenario}`);
+      await page
+        .getByLabel("Description", { exact: true })
+        .fill("Exercise the isolated worker lifecycle and retain its output.");
       await expect(
         page.getByRole("button", { name: "Start Run" }),
       ).toBeEnabled();

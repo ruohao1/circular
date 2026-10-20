@@ -54,6 +54,7 @@ type taskCreate struct {
 	Description      string `json:"description,omitempty" jsonschema:"Detailed requirements and acceptance criteria"`
 	Priority         string `json:"priority,omitempty" jsonschema:"Planning priority: none, low, normal, high, urgent. Does not schedule execution"`
 	PreferredAgentID string `json:"preferred_agent_id,omitempty" jsonschema:"Optional default Agent for future explicit launches; same Project and enabled"`
+	ParentTaskID     string `json:"parent_task_id,omitempty" jsonschema:"Optional parent Task in the same Project; immutable after creation"`
 }
 
 type discoveryCreate struct {
@@ -64,7 +65,7 @@ type discoveryCreate struct {
 type runCreate struct {
 	TaskID     string `json:"task_id"`
 	AgentID    string `json:"agent_id" jsonschema:"An enabled Agent from the Task's project"`
-	RequestKey string `json:"request_key" jsonschema:"Unique key for this launch intent, 1–200 characters, such as task-id:first-pass. Reuse unchanged on retries/reconnects. A new key deliberately creates another attempt"`
+	RequestKey string `json:"request_key" jsonschema:"Unique key for this launch intent, 1–200 characters, such as task-id:first-pass. Reuse unchanged on retries/reconnects. New keys still require an unowned, prepared Task"`
 }
 
 type proposalCreate struct {
@@ -145,8 +146,12 @@ func (c *client) addMutations(server *mcp.Server) {
 			if err := textField("title", input.Title, 500); err != nil {
 				return nil, err
 			}
-			if input.Priority != "" || input.PreferredAgentID != "" {
-				if err := c.requireTaskPlanning(ctx); err != nil {
+			if input.Priority != "" || input.PreferredAgentID != "" || input.ParentTaskID != "" {
+				var required []string
+				if input.ParentTaskID != "" {
+					required = append(required, "parent_task_id")
+				}
+				if err := c.requireTaskPlanning(ctx, required...); err != nil {
 					return nil, err
 				}
 			}
@@ -167,7 +172,7 @@ func (c *client) addMutations(server *mcp.Server) {
 			}
 			return result, nil
 		})
-	add(server, "start_run", "Queue a Task for an enabled Agent in the same project. This starts actual execution and can consume the configured model subscription/API quota. Supply a stable request_key for this launch intent; retries with the same Task, Agent and key return the original Run, even after it finishes. A different key starts another attempt. Inspect get_run for progress; this tool does not wait for completion.", false, false, true,
+	add(server, "start_run", "Queue an unowned Task in Open or Ready for an enabled Agent in the same project. Requires title, description, Repository and completed prerequisites. This starts actual execution and can consume the configured model subscription/API quota. Supply a stable request_key for this launch intent; retries with the same Task, Agent and key return the original Run, even after it finishes. A new key cannot bypass ownership or preparation checks. Inspect get_run for progress; this tool does not wait for completion.", false, false, true,
 		func(ctx context.Context, input runCreate) (object, error) {
 			input.RequestKey = strings.TrimSpace(input.RequestKey)
 			if err := textField("request_key", input.RequestKey, 200); err != nil {

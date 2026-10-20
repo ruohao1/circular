@@ -233,6 +233,13 @@ func (a *api) create(w http.ResponseWriter, r *http.Request, table, schema strin
 		values["enabled"] = true
 	}
 	if table == "tasks" {
+		if values["parent_task_id"] != nil {
+			var parent uuid.UUID
+			err = tx.QueryRow(ctx, `SELECT id FROM tasks WHERE id=$1 AND project_id=$2`, values["parent_task_id"], values["project_id"]).Scan(&parent)
+			if dbError(w, err, "parent Task") {
+				return
+			}
+		}
 		if values["preferred_agent_id"] != nil {
 			var project uuid.UUID
 			var enabled bool
@@ -305,6 +312,16 @@ func (a *api) createRun(w http.ResponseWriter, r *http.Request) {
 	refs, _ := json.Marshal(values["external_refs"])
 	key, _ := values["request_key"].(string)
 	launch, err := postgres.CreateRun(ctx, tx, postgres.RunLaunchInput{TaskID: uuid.MustParse(values["task_id"].(string)), AgentID: uuid.MustParse(values["agent_id"].(string)), RequestKey: key, ExternalRefs: refs})
+	var ownership *postgres.WorkOwnershipConflict
+	if errors.As(err, &ownership) {
+		respond(w, 409, map[string]any{"detail": ownership.Error(), "code": "task_owned", "owner": ownership.Owner})
+		return
+	}
+	var ineligible *postgres.WorkIneligibleError
+	if errors.As(err, &ineligible) {
+		problem(w, 422, ineligible.Error())
+		return
+	}
 	if errors.Is(err, postgres.ErrRunLaunchConflict) {
 		problem(w, 409, err.Error())
 		return

@@ -31,8 +31,12 @@ func (r *RunResources) RenewLease() error {
 	if err := r.guard(); err != nil {
 		return err
 	}
-	_, err := r.tx.Exec(r.ctx, `UPDATE runs SET lease_expires_at=$2,updated_at=CURRENT_TIMESTAMP WHERE id=$1`, r.id, time.Now().UTC().Add(LeaseDuration))
-	return err
+	now := time.Now().UTC()
+	_, err := r.tx.Exec(r.ctx, `UPDATE runs SET lease_expires_at=$2,updated_at=CURRENT_TIMESTAMP WHERE id=$1`, r.id, now.Add(LeaseDuration))
+	if err != nil {
+		return err
+	}
+	return contactNativeWork(r.ctx, r.tx, r.id, now)
 }
 
 // ProvisioningContext binds the claimed attempt to its Task, Agent and
@@ -232,11 +236,17 @@ func (r *RunResources) executionTransition(target runstate.Status, message *stri
 	if err := runstate.Validate(r.status, target); err != nil {
 		return ErrResourceState
 	}
-	_, err := r.tx.Exec(r.ctx, `UPDATE runs SET status=$2,error=$3,
+	var finished *time.Time
+	err := r.tx.QueryRow(r.ctx, `UPDATE runs SET status=$2,error=$3,
 		finished_at=CASE WHEN $4 THEN clock_timestamp() ELSE finished_at END,
-		updated_at=CURRENT_TIMESTAMP WHERE id=$1`, r.id, target, message, target.Terminal())
+		updated_at=CURRENT_TIMESTAMP WHERE id=$1 RETURNING finished_at`, r.id, target, message, target.Terminal()).Scan(&finished)
 	if err == nil {
 		r.status = target
+		if target.Terminal() {
+			if err = finishNativeWork(r.ctx, r.tx, r.id, target, *finished); err != nil {
+				return err
+			}
+		}
 		err = settleDelegation(r.ctx, r.tx, r.id, target)
 	}
 	return err
@@ -253,5 +263,8 @@ func (r *RunResources) ReleaseClaim() error {
 		return ErrResourceState
 	}
 	_, err = r.tx.Exec(r.ctx, `UPDATE runs SET worker_id=NULL,lease_expires_at=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=$1`, r.id)
-	return err
+	if err != nil {
+		return err
+	}
+	return releaseNativeWorkAfterCleanup(r.ctx, r.tx, r.id, time.Now().UTC())
 }

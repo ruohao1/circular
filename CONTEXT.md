@@ -19,6 +19,20 @@ _Avoid_: Bot, worker, run
 A durable unit of engineering work that may be attempted more than once.
 _Avoid_: Job
 
+**Subtask**:
+A Task linked to a parent Task, with its own ownership and outcome. Finishing a subtask does not finish its parent.
+
+**Task dependency**:
+A prerequisite Task that must be completed before a dependent Task can be claimed for new work. A parent relationship alone is not a dependency.
+
+**Work session**:
+One tracked attempt to work on a Task, performed by an external coding client or a Circular-managed Run. It records contact and outcome without treating contact as proof of progress.
+_Avoid_: Agent, worker lease
+
+**Task claim**:
+The exclusive ownership of a Task by one Work session. Lost contact does not transfer or release that ownership.
+_Avoid_: Assignment, preferred Agent, worker lease
+
 **Run**:
 One concrete execution attempt of a task by an agent using a selected backend.
 _Avoid_: Agent, job

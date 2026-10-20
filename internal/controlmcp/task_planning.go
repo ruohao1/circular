@@ -61,8 +61,9 @@ func (c *client) addTaskPlanningTools(server *mcp.Server) {
 	nullableDate := object{"anyOf": []any{object{"type": "string", "format": "date", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"}, object{"type": "null"}}}
 	update["planned_start_date"], update["planned_finish_date"] = nullableDate, nullableDate
 	update["expected_board_revision"] = revision
+	update["prerequisite_task_ids"] = object{"type": "array", "items": id, "uniqueItems": true}
 	move := object{"task_id": id, "expected_revision": revision, "expected_board_revision": revision, "status": object{"type": "string", "enum": []string{"open", "ready", "in_progress", "in_review", "completed", "cancelled"}}, "placement": object{"type": "string", "enum": []string{"start", "end", "before", "after", "up", "down"}}, "anchor_task_id": id}
-	c.addTaskPlanningMutation(server, "update_task", "Update local Task fields using expected_revision. Planned start/finish are optional YYYY-MM-DD calendar dates, years 0001–9999; finish is inclusive. Supplying either date, including null, also requires expected_board_revision from get_task_planning. Omitted fields stay unchanged; null clears a date, Repository or preferred Agent. Partial schedules are Unscheduled. Source-managed content and active Run instructions are protected. Does not execute work. On conflict reload before a new edit.", http.MethodPatch, "", update, []string{"task_id", "expected_revision"})
+	c.addTaskPlanningMutation(server, "update_task", "Update local Task fields using expected_revision. Planned start/finish are optional YYYY-MM-DD calendar dates, years 0001–9999; finish is inclusive. Supplying either date, including null, also requires expected_board_revision from get_task_planning. Omitted fields stay unchanged; null clears a date, Repository or preferred Agent. prerequisite_task_ids replaces same-Project prerequisites; [] clears them, null is invalid. Partial schedules are Unscheduled. Source-managed content and instructions/dependencies of owned Tasks are protected. Does not execute work. On conflict reload before a new edit.", http.MethodPatch, "", update, []string{"task_id", "expected_revision"})
 	c.addTaskPlanningMutation(server, "move_task", "Move a Task using its current revision and board revision. before/after require anchor_task_id; other placements forbid it. up/down use full saved order in the current stage. Stages are manual: Done/cancelled never starts or cancels Runs. On conflict reload before a new intent.", http.MethodPost, "/move", move, []string{"task_id", "expected_revision", "expected_board_revision", "status", "placement"})
 }
 
@@ -110,7 +111,7 @@ func (c *client) addTaskPlanningMutation(server *mcp.Server, name, description, 
 
 // Creation on an older server silently ignores unknown fields. Check support
 // before sending new planning options, so a saved preference cannot disappear.
-func (c *client) requireTaskPlanning(ctx context.Context) error {
+func (c *client) requireTaskPlanning(ctx context.Context, requiredCreateFields ...string) error {
 	data, err := c.request(ctx, http.MethodGet, c.origin+"/openapi.json", nil)
 	if err != nil {
 		return err
@@ -123,8 +124,13 @@ func (c *client) requireTaskPlanning(ctx context.Context) error {
 			} `json:"schemas"`
 		} `json:"components"`
 	}
-	if json.Unmarshal(data, &contract) != nil || len(contract.Components.Schemas["TaskCreate"].Properties["priority"]) == 0 || len(contract.Components.Schemas["TaskCreate"].Properties["preferred_agent_id"]) == 0 || len(contract.Paths["/api/v1/tasks/{task_id}/planning"]) == 0 || len(contract.Paths["/api/v1/tasks/{task_id}/move"]) == 0 {
+	if json.Unmarshal(data, &contract) != nil || len(contract.Paths["/api/v1/tasks/{task_id}/planning"]) == 0 || len(contract.Paths["/api/v1/tasks/{task_id}/move"]) == 0 {
 		return fmt.Errorf("upgrade Circular's API and migrations before using task planning options")
+	}
+	for _, field := range append([]string{"priority", "preferred_agent_id"}, requiredCreateFields...) {
+		if len(contract.Components.Schemas["TaskCreate"].Properties[field]) == 0 {
+			return fmt.Errorf("upgrade Circular's API and migrations before using task planning option %s", field)
+		}
 	}
 	return nil
 }

@@ -113,12 +113,20 @@ func TestDelegationCancelRaces(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if _, err = pool.Exec(t.Context(), `UPDATE runs SET status='running' WHERE id=$1`, snapshot.SourceRunID); err != nil {
+		tx, err := pool.Begin(t.Context())
+		if err != nil {
 			t.Fatal(err)
 		}
-		tx, _ := pool.Begin(t.Context())
 		defer tx.Rollback(t.Context())
-		if err = postgres.CancelRun(t.Context(), tx, snapshot.SourceRunID, "api"); err != nil {
+		var agent uuid.UUID
+		if err = tx.QueryRow(t.Context(), `SELECT agent_id FROM runs WHERE id=$1`, snapshot.SourceRunID).Scan(&agent); err != nil {
+			t.Fatal(err)
+		}
+		launched, err := postgres.CreateRun(t.Context(), tx, postgres.RunLaunchInput{TaskID: snapshot.TaskID, AgentID: agent})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err = postgres.CancelRun(t.Context(), tx, launched.RunID, "api"); err != nil {
 			t.Fatal(err)
 		}
 		if err = tx.Commit(t.Context()); err != nil {

@@ -230,8 +230,12 @@ func (a *api) taskPlanningDetail(w http.ResponseWriter, r *http.Request) {
 	if dbError(w, err, "Task") {
 		return
 	}
+	prerequisites, err := postgres.TaskPrerequisites(r.Context(), tx, id)
+	if dbError(w, err, "Task prerequisites") {
+		return
+	}
 	if dbError(w, tx.Commit(r.Context()), "Task") {
 		return
 	}
-	respond(w, 200, map[string]any{"task": task, "repository": repository, "preferred_agent": agent, "board_revision": revision, "content_editable": caps.ContentEditable, "repository_editable": caps.RepositoryEditable, "content_lock_reason": caps.ContentLockReason, "repository_lock_reason": caps.RepositoryLockReason})
+	respond(w, 200, map[string]any{"task": task, "repository": repository, "preferred_agent": agent, "board_revision": revision, "content_editable": caps.ContentEditable, "repository_editable": caps.RepositoryEditable, "content_lock_reason": caps.ContentLockReason, "repository_lock_reason": caps.RepositoryLockReason, "prerequisite_task_ids": prerequisites, "dependencies_editable": caps.DependenciesEditable, "dependencies_lock_reason": caps.DependenciesLockReason})
 }

@@ -39,18 +39,31 @@ func queueFixture(t *testing.T, f fixture, title string, repository bool) (strin
 	t.Helper()
 	project := f.create(t, "projects", map[string]any{"name": "Queue project"})["id"].(string)
 	agent := f.create(t, "agents", map[string]any{"project_id": project, "name": "Queue engineer"})["id"].(string)
-	input := map[string]any{"project_id": project, "title": title}
+	input := map[string]any{"project_id": project, "title": title, "description": "Prepared requirements"}
 	if repository {
 		input["repository_id"] = f.create(t, "repositories", map[string]any{"project_id": project, "name": "Queue source", "clone_url": "/fixture"})["id"]
 	}
 	task := f.create(t, "tasks", input)["id"].(string)
 	return project, agent, task
 }
+
+// Read-only history tests deliberately seed legacy Runs without admitting execution.
+func (f fixture) historyRun(t *testing.T, task, agent, status string) map[string]any {
+	t.Helper()
+	id := uuid.NewString()
+	_, err := f.pool.Exec(t.Context(), `INSERT INTO runs(id,task_id,agent_id,backend,status,attempt,external_refs)
+ SELECT $1,$2,$3,(SELECT backend FROM agents WHERE id=$3),$4,COALESCE(MAX(attempt),0)+1,'{}' FROM runs WHERE task_id=$2`, id, task, agent, status)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return decode(t, f.request(t, "GET", "/api/v1/runs/"+id, "", 200))
+}
+
 func TestRunQueueProjectSummaries(t *testing.T) {
 	f := setup(t)
 	project, agent, task := queueFixture(t, f, "Implement search", true)
-	first := f.create(t, "runs", map[string]any{"task_id": task, "agent_id": agent})
-	second := f.create(t, "runs", map[string]any{"task_id": task, "agent_id": agent})
+	first := f.historyRun(t, task, agent, "queued")
+	second := f.historyRun(t, task, agent, "queued")
 	f.run(t)
 	page := readQueue(t, f, project, "")
 	if len(page.Items) != 2 {
@@ -69,7 +82,7 @@ func TestRunQueueProjectSummaries(t *testing.T) {
 		}
 	}
 	p, a, task2 := queueFixture(t, f, "No source", false)
-	f.create(t, "runs", map[string]any{"task_id": task2, "agent_id": a})
+	f.historyRun(t, task2, a, "queued")
 	if readQueue(t, f, p, "").Items[0].Repository != nil {
 		t.Fatal("missing Repository must be null")
 	}
@@ -82,7 +95,7 @@ func TestRunQueueGroupsAndLiteralSearch(t *testing.T) {
 	f := setup(t)
 	project, agent, task := queueFixture(t, f, "Fix_% Token", false)
 	for _, status := range []string{"queued", "provisioning", "running", "waiting_for_approval", "waiting_for_input", "finalizing", "succeeded", "failed", "cancelled"} {
-		run := f.create(t, "runs", map[string]any{"task_id": task, "agent_id": agent})
+		run := f.historyRun(t, task, agent, "queued")
 		if _, err := f.pool.Exec(t.Context(), "UPDATE runs SET status=$1 WHERE id=$2", status, run["id"]); err != nil {
 			t.Fatal(err)
 		}
@@ -101,7 +114,7 @@ func TestRunQueuePagination(t *testing.T) {
 	project, agent, task := queueFixture(t, f, "Paging", false)
 	ids := []string{}
 	for range 3 {
-		run := f.create(t, "runs", map[string]any{"task_id": task, "agent_id": agent})
+		run := f.historyRun(t, task, agent, "queued")
 		ids = append(ids, run["id"].(string))
 	}
 	if _, err := f.pool.Exec(t.Context(), "UPDATE runs SET created_at='2026-10-03T10:00:00Z' WHERE task_id=$1", task); err != nil {
@@ -119,7 +132,7 @@ func TestRunQueuePagination(t *testing.T) {
 			t.Fatalf("wrong cursor on page %d", i)
 		}
 	}
-	newer := f.create(t, "runs", map[string]any{"task_id": task, "agent_id": agent})
+	newer := f.historyRun(t, task, agent, "queued")
 	if _, err := f.pool.Exec(t.Context(), "UPDATE runs SET created_at='2026-10-04T10:00:00Z' WHERE id=$1", newer["id"]); err != nil {
 		t.Fatal(err)
 	}
@@ -131,7 +144,7 @@ func TestRunQueueCursorScopeAndMissingProject(t *testing.T) {
 	f := setup(t)
 	project, agent, task := queueFixture(t, f, "Scope", false)
 	for range 2 {
-		f.create(t, "runs", map[string]any{"task_id": task, "agent_id": agent})
+		f.historyRun(t, task, agent, "queued")
 	}
 	cursor := url.QueryEscape(readQueue(t, f, project, "limit=1").NextCursor)
 	other, _, _ := queueFixture(t, f, "Other", false)
@@ -162,13 +175,13 @@ func TestRunQueueAgentFilter(t *testing.T) {
 	}
 	want := map[string]bool{}
 	for _, item := range []struct{ task, status string }{{task, "succeeded"}, {task, "failed"}, {otherTask, "queued"}} {
-		run := f.create(t, "runs", map[string]any{"task_id": item.task, "agent_id": agent})
+		run := f.historyRun(t, item.task, agent, "queued")
 		want[run["id"].(string)] = true
 		if _, err := f.pool.Exec(t.Context(), "UPDATE runs SET status=$1 WHERE id=$2", item.status, run["id"]); err != nil {
 			t.Fatal(err)
 		}
 	}
-	f.create(t, "runs", map[string]any{"task_id": task, "agent_id": otherAgent})
+	f.historyRun(t, task, otherAgent, "queued")
 	if _, err := f.pool.Exec(t.Context(), "UPDATE agents SET enabled=false WHERE id=$1", agent); err != nil {
 		t.Fatal(err)
 	}
@@ -200,7 +213,7 @@ func TestRunQueueAgentScopeAndCursor(t *testing.T) {
 	other := f.create(t, "agents", map[string]any{"project_id": project, "name": "Empty Agent"})["id"].(string)
 	_, foreign, _ := queueFixture(t, f, "Foreign", false)
 	for range 2 {
-		f.create(t, "runs", map[string]any{"task_id": task, "agent_id": agent})
+		f.historyRun(t, task, agent, "queued")
 	}
 	base := "/api/v1/projects/" + project + "/run-queue?"
 	for _, id := range []string{foreign, uuid.NewString()} {

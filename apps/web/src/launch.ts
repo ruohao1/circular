@@ -74,13 +74,14 @@ export async function launchTask(selection: LaunchSelection, client = api) {
   const { project, repository, agent, title, description } = selection;
   if (
     !title.trim() ||
+    !description.trim() ||
     Array.from(title.trim()).length > 500 ||
     !agent.enabled ||
     repository.project_id !== project.id ||
     agent.project_id !== project.id
   ) {
     throw new Error(
-      "Choose a repository and an enabled agent in this project, and enter a task title.",
+      "Choose a repository and an enabled agent in this project, and enter a task title and description.",
     );
   }
   const task = await client.createTask(

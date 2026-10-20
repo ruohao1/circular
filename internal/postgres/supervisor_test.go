@@ -84,12 +84,8 @@ func newSupervisorFixture(t *testing.T, options map[string]any) supervisorFixtur
 	}
 	fixtureGit(t, source, "add", ".")
 	fixtureGit(t, source, "commit", "--message=initial")
-	repository := uuid.New()
-	if _, err := pool.Exec(t.Context(), `INSERT INTO repositories (id,project_id,name,clone_url,default_branch,external_refs)
-		SELECT $1,tasks.project_id,'supervisor fixture',$3,'main','{}' FROM tasks JOIN runs ON runs.task_id=tasks.id WHERE runs.id=$2`, repository, id, source); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := pool.Exec(t.Context(), `UPDATE tasks SET repository_id=$2 WHERE id=(SELECT task_id FROM runs WHERE id=$1)`, id, repository); err != nil {
+	if _, err := pool.Exec(t.Context(), `UPDATE repositories SET name='supervisor fixture',clone_url=$2
+		WHERE id=(SELECT t.repository_id FROM tasks t JOIN runs r ON r.task_id=t.id WHERE r.id=$1)`, id, source); err != nil {
 		t.Fatal(err)
 	}
 	dir := filepath.Join(base, "docker")
@@ -131,7 +127,7 @@ func TestSupervisorCompletesAnIsolatedRunAndRetainsReplayAfterCleanup(t *testing
 	}
 	s.AssertTypes(t, "workspace.provisioning", "workspace.provisioning", "workspace.ready", "run.started", "agent.message.delta", "agent.message.delta", "agent.message.completed", "usage.updated", "artifact.created", "git.diff.updated", "run.completed", "artifact.created", "workspace.released")
 	testsupport.AssertJSON(t, s.Events[6].Data, map[string]any{"invocation": 1, "content": "Fake container workload completed: Execute fixture"})
-	testsupport.AssertJSON(t, s.Events[7].Data, map[string]any{"invocation": 1, "input_tokens": 2, "output_tokens": 6})
+	testsupport.AssertJSON(t, s.Events[7].Data, map[string]any{"invocation": 1, "input_tokens": 4, "output_tokens": 6})
 	for _, event := range s.Events[4:8] {
 		if event.Raw["run_id"] != f.id.String() {
 			t.Fatal(event)

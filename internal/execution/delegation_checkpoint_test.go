@@ -32,11 +32,27 @@ func TestDelegationCheckpointRoundTrip(t *testing.T) {
 	command("commit", "-m", "base")
 	pool := testsupport.Database(t)
 	snap := testsupport.SeedPRReviewSource(t, pool, uuid.Nil)
-	id := snap.SourceRunID
 	if _, err := pool.Exec(t.Context(), `UPDATE repositories SET clone_url=$2,default_branch='main' WHERE id=$1`, snap.RepositoryID, source); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := pool.Exec(t.Context(), `UPDATE runs SET kind='coding',status='provisioning',worker_id='checkpoint-owner',lease_expires_at=now()+interval '5 minutes' WHERE id=$1`, id); err != nil {
+	tx, err := pool.Begin(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback(t.Context())
+	var agent uuid.UUID
+	if err = tx.QueryRow(t.Context(), `SELECT agent_id FROM runs WHERE id=$1`, snap.SourceRunID).Scan(&agent); err != nil {
+		t.Fatal(err)
+	}
+	run, err := postgres.CreateRun(t.Context(), tx, postgres.RunLaunchInput{TaskID: snap.TaskID, AgentID: agent})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = tx.Commit(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	id := run.RunID
+	if claim, err := postgres.NewQueue(pool).Acquire(t.Context(), "checkpoint-owner"); err != nil || claim == nil || claim.RunID != id {
 		t.Fatal(err)
 	}
 	store, err := postgres.NewResources(pool, "checkpoint-owner")

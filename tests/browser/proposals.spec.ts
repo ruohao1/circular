@@ -94,6 +94,7 @@ test("render a discovery report and review, edit, create and dismiss its agents"
       project_id: project.id,
       repository_id: repository.id,
       title: "Understand the repository",
+      description: "Inspect the source and propose an appropriate coding Agent.",
     });
     const run = await post("runs", { task_id: task.id, agent_id: agent.id });
     await expect

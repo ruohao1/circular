@@ -55,6 +55,7 @@ describe("Task to Run launcher", () => {
           status: "open",
           priority: body.priority ?? "none",
           preferred_agent_id: body.preferred_agent_id ?? null,
+          parent_task_id: body.parent_task_id ?? null,
           revision: 1,
           planned_start_date: null,
           planned_finish_date: null,
@@ -87,6 +88,7 @@ describe("Task to Run launcher", () => {
       }),
     ).rejects.toThrow();
     await expect(launchTask({ ...selection, title: " " })).rejects.toThrow();
+    await expect(launchTask({ ...selection, description: " \n " })).rejects.toThrow();
     expect(request).not.toHaveBeenCalled();
     request.mockRestore();
   });

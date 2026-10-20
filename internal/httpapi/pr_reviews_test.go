@@ -27,7 +27,8 @@ func TestPRReviewHTTPDefaultsAndCannotForgePurpose(t *testing.T) {
 		t.Fatal("automatic by default")
 	}
 	agent := f.create(t, "agents", map[string]any{"project_id": project["id"], "name": "Coder"})
-	task := f.create(t, "tasks", map[string]any{"project_id": project["id"], "title": "Source task"})
+	repository := f.create(t, "repositories", map[string]any{"project_id": project["id"], "name": "Source Source task" + uuid.NewString(), "clone_url": "/fixture"})
+	task := f.create(t, "tasks", map[string]any{"project_id": project["id"], "title": "Source task", "repository_id": repository["id"], "description": "Prepared requirements"})
 	run := f.create(t, "runs", map[string]any{"task_id": task["id"], "agent_id": agent["id"], "kind": "pr_review"})
 	if run["kind"] != "coding" {
 		t.Fatal("forged review purpose")

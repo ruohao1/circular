@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/ruohao1/circular/internal/postgres"
 	"github.com/ruohao1/circular/internal/testsupport"
@@ -20,7 +21,7 @@ func database(t *testing.T) *pgxpool.Pool { t.Helper(); return testsupport.Datab
 func seed(t *testing.T, pool *pgxpool.Pool, count int) []uuid.UUID {
 	t.Helper()
 	ctx := t.Context()
-	project, agent := uuid.New(), uuid.New()
+	project, agent, repository := uuid.New(), uuid.New(), uuid.New()
 	_, err := pool.Exec(ctx, `INSERT INTO projects (id, name) VALUES ($1, 'Go worker parity')`, project)
 	if err != nil {
 		t.Fatal(err)
@@ -31,23 +32,29 @@ func seed(t *testing.T, pool *pgxpool.Pool, count int) []uuid.UUID {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if _, err := pool.Exec(ctx, `INSERT INTO repositories(id,project_id,name,clone_url,default_branch,external_refs) VALUES($1,$2,'Prepared fixture','/fixture','main','{}')`, repository, project); err != nil {
+		t.Fatal(err)
+	}
 	ids := make([]uuid.UUID, 0, count)
 	for i := range count {
-		task, run := uuid.New(), uuid.New()
+		task := uuid.New()
 		_, err := pool.Exec(ctx, `INSERT INTO tasks
-			(id, project_id, title, description, status, external_refs)
-			VALUES ($1, $2, 'Execute fixture', '', 'open', '{}')`, task, project)
+			(id, project_id, repository_id, title, description, status, external_refs)
+			VALUES ($1, $2, $3, 'Execute fixture', 'Prepared requirements', 'open', '{}')`, task, project, repository)
 		if err != nil {
 			t.Fatal(err)
 		}
-		_, err = pool.Exec(ctx, `INSERT INTO runs
-			(id, task_id, agent_id, backend, status, attempt, external_refs, created_at)
-			VALUES ($1, $2, $3, 'fake', 'queued', 1, '{}', $4)`, run, task, agent,
-			time.Date(2000, 1, 1, 0, 0, i, 0, time.UTC))
+		launched, err := workTx(t, pool, func(tx pgx.Tx) (postgres.RunLaunchResult, error) {
+			out, err := postgres.CreateRun(ctx, tx, postgres.RunLaunchInput{TaskID: task, AgentID: agent})
+			if err == nil {
+				_, err = tx.Exec(ctx, `UPDATE runs SET created_at=$2 WHERE id=$1`, out.RunID, time.Date(2000, 1, 1, 0, 0, i, 0, time.UTC))
+			}
+			return out, err
+		})
 		if err != nil {
 			t.Fatal(err)
 		}
-		ids = append(ids, run)
+		ids = append(ids, launched.RunID)
 	}
 	return ids
 }

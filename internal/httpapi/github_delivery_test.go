@@ -25,7 +25,8 @@ func TestGitHubDeliveryHTTPGuardsAndProjectOptIn(t *testing.T) {
 	f.request(t, "POST", settingsPath, `{"enabled":"true"}`, 422)
 	f.request(t, "GET", "/api/v1/projects/"+uuid.NewString()+"/integrations/github/run-delivery", "", 404)
 	agent := f.create(t, "agents", map[string]any{"project_id": project["id"], "name": "Fixture"})
-	task := f.create(t, "tasks", map[string]any{"project_id": project["id"], "title": "Not ready to publish"})
+	repository := f.create(t, "repositories", map[string]any{"project_id": project["id"], "name": "Source Not ready to publish" + uuid.NewString(), "clone_url": "/fixture"})
+	task := f.create(t, "tasks", map[string]any{"project_id": project["id"], "title": "Not ready to publish", "repository_id": repository["id"], "description": "Prepared requirements"})
 	run := f.create(t, "runs", map[string]any{"task_id": task["id"], "agent_id": agent["id"]})
 	path := "/api/v1/runs/" + run["id"].(string) + "/github-delivery"
 	var delivery map[string]any

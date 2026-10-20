@@ -1,6 +1,17 @@
 import { test, expect } from "@playwright/test";
 import { A, B, T, dates, fixture } from "./task-fixture";
 
+test("Task detail explains external ownership and fixed work history", async ({ page }) => {
+  const state = await fixture(page);
+  state.externalWork = true;
+  await page.goto(`/tasks?taskId=${T}`);
+  const dialog = page.getByRole("dialog");
+  await expect(dialog.getByText("Instructions are locked while this Task has an owner.")).toBeVisible();
+  await expect(dialog.getByText("Repository is fixed after work has been claimed.")).toBeVisible();
+  await expect(dialog.getByLabel("Task title", { exact: true })).toHaveAttribute("readonly", "");
+  await expect(dialog.getByRole("combobox", { name: "Repository", exact: true })).toBeDisabled();
+});
+
 test("predefined scopes survive layouts and Back without losing filters", async ({
   page,
 }) => {

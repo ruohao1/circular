@@ -50,5 +50,8 @@ func cancelOneRun(ctx context.Context, tx pgx.Tx, id uuid.UUID, source string, p
 	if e != nil {
 		return e
 	}
+	if e = finishNativeWork(ctx, tx, id, runstate.Cancelled, now); e != nil {
+		return e
+	}
 	return settleDelegation(ctx, tx, id, runstate.Cancelled)
 }

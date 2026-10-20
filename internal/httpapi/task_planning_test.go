@@ -38,8 +38,8 @@ func TestTaskPlanningGroupedRead(t *testing.T) {
 	for i := range 54 {
 		f.create(t, "tasks", map[string]any{"project_id": project, "title": fmt.Sprint("Task ", i)})
 	}
-	f.create(t, "runs", map[string]any{"task_id": task, "agent_id": agent})
-	finished := f.create(t, "runs", map[string]any{"task_id": task, "agent_id": agent})
+	f.historyRun(t, task, agent, "queued")
+	finished := f.historyRun(t, task, agent, "queued")
 	if _, e := f.pool.Exec(t.Context(), `UPDATE runs SET status='succeeded' WHERE id=$1`, finished["id"]); e != nil {
 		t.Fatal(e)
 	}
@@ -225,10 +225,12 @@ func TestTaskPlanningUpdateAndMoveHTTP(t *testing.T) {
 	if e := json.Unmarshal(f.request(t, "GET", "/api/v1/tasks?project_id="+project, "", 200), &legacy); e != nil || len(legacy) != 1 {
 		t.Fatal(legacy, e)
 	}
+	restored := decode(t, f.request(t, "PATCH", path, fmt.Sprintf(`{"expected_revision":4,"repository_id":%q}`, detail["task"].(map[string]any)["repository_id"]), 200))
+	f.request(t, "POST", path+"/move", fmt.Sprintf(`{"expected_revision":5,"expected_board_revision":%v,"status":"ready","placement":"end"}`, restored["board_revision"]), 200)
 	f.create(t, "runs", map[string]any{"task_id": task, "agent_id": agent})
-	f.request(t, "PATCH", path, `{"expected_revision":4,"description":"changed while active"}`, 409)
+	f.request(t, "PATCH", path, `{"expected_revision":7,"description":"changed while active"}`, 409)
 	detail = decode(t, f.request(t, "GET", path+"/planning", "", 200))
-	if detail["content_editable"] != false || detail["content_lock_reason"] != "active_run" || detail["repository_lock_reason"] != "has_runs" {
+	if detail["content_editable"] != false || detail["content_lock_reason"] != "active_work" || detail["repository_lock_reason"] != "has_runs" {
 		t.Fatal(detail)
 	}
 	f.request(t, "GET", "/api/v1/tasks/"+uuid.NewString()+"/planning", "", 404)
@@ -238,9 +240,9 @@ func TestRunQueueTaskFilterCompatibility(t *testing.T) {
 	project, agent, task := queueFixture(t, f, "First", false)
 	other := f.create(t, "tasks", map[string]any{"project_id": project, "title": "Other"})["id"].(string)
 	for range 3 {
-		f.create(t, "runs", map[string]any{"task_id": task, "agent_id": agent})
+		f.historyRun(t, task, agent, "queued")
 	}
-	f.create(t, "runs", map[string]any{"task_id": other, "agent_id": agent})
+	f.historyRun(t, other, agent, "queued")
 	page := readQueue(t, f, project, "task_id="+task+"&limit=2")
 	if len(page.Items) != 2 || page.NextCursor == "" {
 		t.Fatal(page)

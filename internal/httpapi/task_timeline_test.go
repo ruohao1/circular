@@ -40,7 +40,7 @@ func TestTaskTimelineWindowAndUnscheduled(t *testing.T) {
 	if _, err := f.pool.Exec(t.Context(), `UPDATE tasks SET planned_start_date='0001-01-01',planned_finish_date='9999-12-31' WHERE id=$1`, task); err != nil {
 		t.Fatal(err)
 	}
-	f.create(t, "runs", map[string]any{"task_id": task, "agent_id": agent})
+	f.historyRun(t, task, agent, "queued")
 	dates := [][3]string{{"Start boundary", "2026-10-01", "2026-10-01"}, {"Finish boundary", "2026-10-31", "2026-10-31"}, {"Before", "2026-09-01", "2026-09-30"}, {"After", "2026-11-01", "2026-11-02"}, {"Start only", "2027-01-01", ""}, {"Finish only", "", "2025-01-01"}, {"Neither", "", ""}, {"Cancelled", "2026-10-02", "2026-10-03"}}
 	for _, row := range dates {
 		id := f.create(t, "tasks", map[string]any{"project_id": project, "title": row[0]})["id"]

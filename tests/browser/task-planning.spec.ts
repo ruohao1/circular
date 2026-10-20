@@ -130,7 +130,7 @@ test("save, edit, reload and launch the same Task through the real API", async (
     const saved = await (await request.get(`${base}/tasks/${id}`)).json();
     expect(saved).toMatchObject({
       id,
-      status: "open",
+      status: "in_progress",
       priority: "high",
       description: "Keep a durable plan.",
       planned_start_date: "2099-01-01",

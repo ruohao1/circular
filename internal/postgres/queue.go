@@ -63,7 +63,9 @@ func (q *Queue) Acquire(ctx context.Context, workerID string) (*worker.Claim, er
 	if claim == nil {
 		var id string
 		err := tx.QueryRow(ctx, `SELECT id::text FROM runs
-			WHERE status = 'queued' ORDER BY created_at, id
+			WHERE status = 'queued' AND (kind='pr_review' OR EXISTS(
+				SELECT 1 FROM work_sessions s WHERE s.run_id=runs.id AND s.task_id=runs.task_id AND s.released_at IS NULL))
+			ORDER BY created_at, id
 			FOR UPDATE SKIP LOCKED LIMIT 1`).Scan(&id)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, nil
@@ -83,6 +85,12 @@ func (q *Queue) Acquire(ctx context.Context, workerID string) (*worker.Claim, er
 		}
 		claim = &worker.Claim{RunID: runID, Invocation: 1}
 	}
+	if err := requireNativeWork(ctx, tx, claim.RunID); err != nil {
+		return nil, err
+	}
+	if err := contactNativeWork(ctx, tx, claim.RunID, now); err != nil {
+		return nil, err
+	}
 	if err := tx.Commit(ctx); err != nil {
 		// A lost commit acknowledgement must never start an executor. The
 		// possibly committed claim remains eligible for expired-owner recovery.
@@ -97,6 +105,7 @@ func recoverExpired(ctx context.Context, tx pgx.Tx, owner string, now time.Time)
 	var attempts, invocation int
 	err := tx.QueryRow(ctx, `SELECT id::text, status, recovery_attempts, invocation FROM runs
 		WHERE status <> 'queued' AND worker_id IS NOT NULL AND recovery_attempts < $3
+		AND (kind='pr_review' OR EXISTS(SELECT 1 FROM work_sessions s WHERE s.run_id=runs.id AND s.task_id=runs.task_id AND s.released_at IS NULL))
 		AND (lease_expires_at <= $1 OR (lease_expires_at IS NULL AND claimed_at < $2))
 		ORDER BY claimed_at, id FOR UPDATE SKIP LOCKED LIMIT 1`,
 		now, now.Add(-LeaseDuration), MaxRecoveries).Scan(&id, &status, &attempts, &invocation)
@@ -117,6 +126,9 @@ func recoverExpired(ctx context.Context, tx pgx.Tx, owner string, now time.Time)
 		recovery_attempts = recovery_attempts + 1, updated_at = CURRENT_TIMESTAMP
 		WHERE id = $1`, runID, owner, now.Add(LeaseDuration))
 	if err != nil {
+		return nil, err
+	}
+	if err := markNativeWorkRecovery(ctx, tx, runID, now); err != nil {
 		return nil, err
 	}
 	if !status.Terminal() {
@@ -184,6 +196,9 @@ func failRun(ctx context.Context, tx pgx.Tx, id uuid.UUID, current runstate.Stat
 		SELECT $1, $2, COALESCE(MAX(sequence), 0) + 1, 'run.failed', $3, ($4::jsonb || jsonb_build_object('invocation',(SELECT invocation FROM runs WHERE id=$2)))::json, NULL, $5
 		FROM events WHERE run_id = $2`, uuid.New(), id, source, payload, now)
 	if err != nil {
+		return err
+	}
+	if err = finishNativeWork(ctx, tx, id, runstate.Failed, now); err != nil {
 		return err
 	}
 	return settleDelegation(ctx, tx, id, runstate.Failed)

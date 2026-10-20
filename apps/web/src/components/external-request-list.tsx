@@ -11,7 +11,7 @@ export const requestStatus = (status: string) =>
     needs_routing: "Needs a route",
     awaiting_approval: "Approval required",
     ready: "Ready",
-    waiting_for_active_run: "Waiting for another run",
+    waiting_for_active_run: "Waiting for task owner",
     queued: "Queued",
     running: "Running",
     succeeded: "Succeeded",

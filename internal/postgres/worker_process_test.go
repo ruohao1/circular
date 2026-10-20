@@ -551,10 +551,27 @@ func TestRealWorkersKeepCancellationAndContainerAuthorityRunScoped(t *testing.T)
 	if _, err := f.pool.Exec(t.Context(), `UPDATE agents SET backend_config='{"delay_ms":3000}' WHERE id=(SELECT agent_id FROM runs WHERE id=$1)`, f.id); err != nil {
 		t.Fatal(err)
 	}
-	second := uuid.New()
-	if _, err := f.pool.Exec(t.Context(), `INSERT INTO runs(id,task_id,agent_id,backend,status,attempt,external_refs) SELECT $2,task_id,agent_id,backend,'queued',2,'{}' FROM runs WHERE id=$1`, f.id, second); err != nil {
+	secondTask := uuid.New()
+	tx, err := f.pool.Begin(t.Context())
+	if err != nil {
 		t.Fatal(err)
 	}
+	defer tx.Rollback(t.Context())
+	if _, err = tx.Exec(t.Context(), `INSERT INTO tasks(id,project_id,repository_id,title,description,status,external_refs) SELECT $2,t.project_id,t.repository_id,'Independent work',t.description,'open','{}' FROM tasks t JOIN runs r ON r.task_id=t.id WHERE r.id=$1`, f.id, secondTask); err != nil {
+		t.Fatal(err)
+	}
+	var agent uuid.UUID
+	if err = tx.QueryRow(t.Context(), `SELECT agent_id FROM runs WHERE id=$1`, f.id).Scan(&agent); err != nil {
+		t.Fatal(err)
+	}
+	launched, err := postgres.CreateRun(t.Context(), tx, postgres.RunLaunchInput{TaskID: secondTask, AgentID: agent})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = tx.Commit(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	second := launched.RunID
 	for _, id := range []uuid.UUID{f.id, second} {
 		compensateContainer(t, f, id)
 	}

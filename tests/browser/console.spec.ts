@@ -409,6 +409,9 @@ test("launcher retains drafts by Project and partial launch retries the saved Ta
   await expect(page.getByLabel("Task title", { exact: true })).toHaveValue(
     "Draft A",
   );
+  await expect(page.getByRole("button", { name: "Start Run", exact: true })).toBeDisabled();
+  await expect(page.getByRole("button", { name: "Save Task", exact: true })).toBeEnabled();
+  await page.getByLabel("Description", { exact: true }).fill("Keep this task after a launch failure.");
   state.failLaunch = true;
   await page.getByRole("button", { name: "Start Run", exact: true }).click();
   await expect(
@@ -582,6 +585,7 @@ test("launcher prevents dismissal during a pending launch", async ({
   await page.goto("/");
   await page.getByRole("button", { name: "New Task", exact: true }).click();
   await page.getByLabel("Task title", { exact: true }).fill("One attempt");
+  await page.getByLabel("Description", { exact: true }).fill("Complete exactly once.");
   await page.getByRole("button", { name: "Start Run", exact: true }).click();
   await expect.poll(() => state.runPosts.length).toBe(1);
   await expect(

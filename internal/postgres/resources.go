@@ -101,6 +101,9 @@ func (s *Resources) WithRun(ctx context.Context, id uuid.UUID, action func(*RunR
 	if !run.status.Valid() {
 		return ErrResourceState
 	}
+	if err := requireNativeWork(ctx, tx, id); err != nil {
+		return err
+	}
 	if err := action(run); err != nil {
 		return err
 	}

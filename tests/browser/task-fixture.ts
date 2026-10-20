@@ -48,6 +48,7 @@ export async function fixture(page: Page) {
       priority: "normal",
       preferred_agent_id: agents[0].id as string | null,
       revision: 1,
+      parent_task_id: null as string | null,
       planned_start_date: null as string | null,
       planned_finish_date: null as string | null,
       external_refs: {} as Record<string, unknown>,
@@ -66,6 +67,7 @@ export async function fixture(page: Page) {
     writeError: 0,
     writeGate: undefined as Promise<void> | undefined,
     active: false,
+    externalWork: false,
     latestRun: null as components["schemas"]["TaskPlanningRun"] | null,
     failRun: false,
     history: false,
@@ -113,6 +115,7 @@ export async function fixture(page: Page) {
         repository_id: body.repository_id ?? null,
         preferred_agent_id: body.preferred_agent_id ?? null,
         status: body.status ?? "open",
+        parent_task_id: body.parent_task_id ?? null,
         planned_start_date: body.planned_start_date ?? null,
         planned_finish_date: body.planned_finish_date ?? null,
         revision: 1,
@@ -355,18 +358,24 @@ export async function fixture(page: Page) {
           preferred_agent:
             agents.find((a) => a.id === task.preferred_agent_id) ?? null,
           board_revision: state.board,
-          content_editable: !managed && !state.active,
-          repository_editable: !managed && !state.active,
+          prerequisite_task_ids: [],
+          dependencies_editable: !state.active && !state.externalWork,
+          dependencies_lock_reason:
+            state.active || state.externalWork ? "active_work" : null,
+          content_editable: !managed && !state.active && !state.externalWork,
+          repository_editable: !managed && !state.active && !state.externalWork,
           content_lock_reason: managed
             ? "source_managed"
-            : state.active
-              ? "active_run"
+            : state.active || state.externalWork
+              ? "active_work"
               : null,
           repository_lock_reason: managed
             ? "source_managed"
             : state.active
               ? "has_runs"
-              : null,
+              : state.externalWork
+                ? "has_work_sessions"
+                : null,
         });
       }
       return json(task);

@@ -1,14 +1,19 @@
 package integrations_test
 
 import (
+	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/ruohao1/circular/internal/integrations"
 	"github.com/ruohao1/circular/internal/postgres"
 	"github.com/ruohao1/circular/internal/testsupport"
+	"strings"
 	"sync"
 	"testing"
+	"time"
 )
 
 func preparedRequest(t *testing.T) (fixture, integrations.RequestRoute, integrations.ExternalRequestDetail) {
@@ -25,6 +30,192 @@ func preparedRequest(t *testing.T) (fixture, integrations.RequestRoute, integrat
 		t.Fatal(e)
 	}
 	return f, saved, request
+}
+
+func requestTask(t *testing.T, f fixture, route integrations.RequestRoute, request integrations.ExternalRequestDetail) uuid.UUID {
+	t.Helper()
+	id := uuid.New()
+	_, err := f.pool.Exec(t.Context(), `INSERT INTO tasks(id,project_id,repository_id,title,description,status,external_refs)
+		SELECT $1,$2,$3,title,prompt,'ready',jsonb_build_object('linear',jsonb_build_object('issue_id',issue_id,'account_id',source->>'organization_id'))
+		FROM external_requests WHERE id=$4`, id, f.project, route.RepositoryID, request.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return id
+}
+
+func requestWorkTx(t *testing.T, f fixture, action func(pgx.Tx) error) {
+	t.Helper()
+	tx, err := f.pool.Begin(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback(t.Context())
+	if err = action(tx); err != nil {
+		t.Fatal(err)
+	}
+	if err = tx.Commit(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestExternalRequestWaitsForTaskOwner(t *testing.T) {
+	for _, kind := range []string{"external", "native-cleanup"} {
+		t.Run(kind, func(t *testing.T) {
+			f, route, request := preparedRequest(t)
+			task := requestTask(t, f, route, request)
+			var session, run uuid.UUID
+			var resources *postgres.Resources
+			requestWorkTx(t, f, func(tx pgx.Tx) error {
+				if kind == "external" {
+					result, err := postgres.ClaimExternalWork(t.Context(), tx, postgres.ExternalWorkClaim{SessionID: uuid.New(), TaskID: task, ExpectedRevision: 1, ClientName: "Codex", Secret: bytes.Repeat([]byte{42}, 32)}, time.Now())
+					session = result.Session.ID
+					return err
+				}
+				result, err := postgres.CreateRun(t.Context(), tx, postgres.RunLaunchInput{TaskID: task, AgentID: uuid.MustParse(route.AgentID)})
+				run = result.RunID
+				return err
+			})
+			if kind == "native-cleanup" {
+				if _, err := postgres.NewQueue(f.pool).Acquire(t.Context(), "native-owner"); err != nil {
+					t.Fatal(err)
+				}
+				resources, _ = postgres.NewResources(f.pool, "native-owner")
+				if err := resources.WithRun(t.Context(), run, func(r *postgres.RunResources) error { return r.RecordFailure("Needs cleanup", nil) }); err != nil {
+					t.Fatal(err)
+				}
+				if err := f.pool.QueryRow(t.Context(), `SELECT id FROM work_sessions WHERE run_id=$1`, run).Scan(&session); err != nil {
+					t.Fatal(err)
+				}
+			}
+			result, err := f.service.StartExternalRequest(t.Context(), request.ID, request.InputFingerprint)
+			if err != nil || result.Status != "waiting_for_active_run" || result.RunID != "" || !strings.Contains(result.Reason, session.String()) || !strings.Contains(result.Reason, "/tasks?taskId="+task.String()) {
+				t.Fatal(result, err)
+			}
+			var runs int
+			want := 0
+			if kind == "native-cleanup" {
+				want = 1
+			}
+			if err = f.pool.QueryRow(t.Context(), `SELECT count(*) FROM runs`).Scan(&runs); err != nil || runs != want {
+				t.Fatal("owner bypassed", runs, err)
+			}
+			if resources != nil {
+				if err = resources.WithRun(t.Context(), run, func(r *postgres.RunResources) error { return r.ReleaseClaim() }); err != nil {
+					t.Fatal(err)
+				}
+			} else {
+				requestWorkTx(t, f, func(tx pgx.Tx) error {
+					_, err := postgres.ReleaseTaskWork(t.Context(), tx, postgres.WorkAdminInput{TaskID: task, ExpectedSessionID: session, OperationID: uuid.New(), Reason: "Hand back task"}, time.Now())
+					return err
+				})
+			}
+			if worked, err := f.service.ProcessExternalRequest(t.Context()); err != nil || worked {
+				t.Fatal("release automatically restarted request", worked, err)
+			}
+		})
+	}
+}
+
+func TestExternalRequestIneligibleNeedsPreparation(t *testing.T) {
+	for _, mode := range []string{"description", "prerequisite"} {
+		t.Run(mode, func(t *testing.T) {
+			f, route, request := preparedRequest(t)
+			task := requestTask(t, f, route, request)
+			route.Mode = "automatic"
+			if _, err := f.service.SaveRequestRoute(t.Context(), route); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := f.pool.Exec(t.Context(), `UPDATE external_requests SET status='ready' WHERE id=$1`, request.ID); err != nil {
+				t.Fatal(err)
+			}
+			if mode == "description" {
+				if _, err := f.pool.Exec(t.Context(), `UPDATE tasks SET description=' ' WHERE id=$1`, task); err != nil {
+					t.Fatal(err)
+				}
+			} else {
+				blocker := uuid.New()
+				if _, err := f.pool.Exec(t.Context(), `INSERT INTO tasks(id,project_id,title,description,status,external_refs) VALUES($1,$2,'Blocker','Finish first','open','{}')`, blocker, f.project); err != nil {
+					t.Fatal(err)
+				}
+				if _, err := f.pool.Exec(t.Context(), `INSERT INTO task_dependencies(project_id,task_id,prerequisite_task_id) VALUES($1,$2,$3)`, f.project, task, blocker); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if worked, err := f.service.ProcessExternalRequest(t.Context()); err != nil || !worked {
+				t.Fatal(worked, err)
+			}
+			got, err := f.service.ExternalRequest(t.Context(), request.ID)
+			if err != nil || got.Status != "awaiting_approval" || !strings.Contains(got.Reason, "/tasks?taskId="+task.String()) {
+				t.Fatal(got, err)
+			}
+			var runs int
+			if err = f.pool.QueryRow(t.Context(), `SELECT count(*) FROM runs`).Scan(&runs); err != nil || runs != 0 {
+				t.Fatal(runs, err)
+			}
+		})
+	}
+}
+
+func TestExternalRequestLaunchLockOrder(t *testing.T) {
+	for _, competing := range []string{"delegation", "configuration"} {
+		t.Run(competing, func(t *testing.T) {
+			f, route, request := preparedRequest(t)
+			ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+			defer cancel()
+			tx, err := f.pool.Begin(ctx)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer tx.Rollback(t.Context())
+			var pid int
+			if err = tx.QueryRow(ctx, `SELECT pg_backend_pid()`).Scan(&pid); err != nil {
+				t.Fatal(err)
+			}
+			query, id := `SELECT id FROM projects WHERE id=$1 FOR NO KEY UPDATE`, f.project
+			if competing == "configuration" {
+				query, id = `SELECT id FROM agents WHERE id=$1 FOR UPDATE`, route.AgentID
+			}
+			if _, err = tx.Exec(ctx, query, id); err != nil {
+				t.Fatal(err)
+			}
+			done := make(chan error, 1)
+			go func() {
+				_, err := f.service.StartExternalRequest(ctx, request.ID, request.InputFingerprint)
+				done <- err
+			}()
+			for {
+				var blocked bool
+				if err = f.pool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM pg_stat_activity WHERE $1=ANY(pg_blocking_pids(pid)))`, pid).Scan(&blocked); err != nil {
+					t.Fatal(err)
+				}
+				if blocked {
+					break
+				}
+				select {
+				case <-ctx.Done():
+					t.Fatal("launch did not reach lock barrier")
+				case <-time.After(5 * time.Millisecond):
+				}
+			}
+			if competing == "delegation" {
+				// Delegation admission and its policy writer both take Project before Agent.
+				err = postgres.SetDelegationTargets(ctx, tx, uuid.MustParse(route.AgentID), nil)
+			} else {
+				_, err = tx.Exec(ctx, `UPDATE agents SET instructions='New instructions' WHERE id=$1`, route.AgentID)
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err = tx.Commit(ctx); err != nil {
+				t.Fatal(err)
+			}
+			err = <-done
+			if competing == "configuration" && !errors.Is(err, integrations.ErrRequestConflict) || competing == "delegation" && err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
 }
 func TestExternalRequestLaunchAtomicConcurrentAndSnapshot(t *testing.T) {
 	f, route, request := preparedRequest(t)

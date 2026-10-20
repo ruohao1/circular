@@ -2085,6 +2085,8 @@ export interface components {
             external_refs?: {
                 [key: string]: unknown;
             };
+            /** @description Immutable parent Task in the same Project, set at creation. */
+            parent_task_id?: string | null;
             /** @description Optional planned calendar date in years 0001–9999. Finish is inclusive. */
             planned_finish_date?: string | null;
             /** @description Optional planned calendar date in years 0001–9999. Finish is inclusive. */
@@ -2120,6 +2122,12 @@ export interface components {
             placement: "start" | "end" | "before" | "after" | "up" | "down";
             status: components["schemas"]["TaskStatus"];
         };
+        TaskOwnershipConflict: {
+            /** @enum {string} */
+            code: "task_owned";
+            detail: string;
+            owner: components["schemas"]["WorkSessionRead"];
+        };
         TaskPlanningAgent: {
             backend: string;
             enabled: boolean;
@@ -2130,11 +2138,14 @@ export interface components {
         TaskPlanningDetail: {
             board_revision: number;
             content_editable: boolean;
-            content_lock_reason: ("source_managed" | "active_run") | null;
+            content_lock_reason: ("source_managed" | "active_run" | "active_work") | null;
+            dependencies_editable: boolean;
+            dependencies_lock_reason: "active_work" | null;
             preferred_agent: components["schemas"]["TaskPlanningAgent"] | null;
+            prerequisite_task_ids: string[];
             repository: components["schemas"]["TaskPlanningRepository"] | null;
             repository_editable: boolean;
-            repository_lock_reason: ("source_managed" | "has_runs") | null;
+            repository_lock_reason: ("source_managed" | "has_runs" | "has_work_sessions") | null;
             task: components["schemas"]["TaskRead"];
         };
         TaskPlanningGroup: {
@@ -2202,6 +2213,8 @@ export interface components {
              * Format: uuid
              */
             id: string;
+            /** @description Immutable parent Task in the same Project, set at creation. */
+            parent_task_id: string | null;
             /** @description Optional planned calendar date in years 0001–9999. Finish is inclusive. */
             planned_finish_date: string | null;
             /** @description Optional planned calendar date in years 0001–9999. Finish is inclusive. */
@@ -2235,6 +2248,7 @@ export interface components {
             /** @description Optional planned calendar date in years 0001–9999. Finish is inclusive. */
             planned_start_date?: string | null;
             preferred_agent_id?: string | null;
+            prerequisite_task_ids?: string[];
             priority?: components["schemas"]["TaskPriority"];
             repository_id?: string | null;
             title?: string;
@@ -2262,6 +2276,8 @@ export interface components {
              * Format: uuid
              */
             id: string;
+            /** @description Immutable parent Task in the same Project, set at creation. */
+            parent_task_id: string | null;
             /** @description Optional planned calendar date in years 0001–9999. Finish is inclusive. */
             planned_finish_date: string | null;
             /** @description Optional planned calendar date in years 0001–9999. Finish is inclusive. */
@@ -2347,6 +2363,32 @@ export interface components {
         WebhookSettingsUpdate: {
             public_origin: string;
             signing_secret?: string;
+        };
+        WorkSessionRead: {
+            agent_id: string | null;
+            /** Format: date-time */
+            claimed_at: string;
+            client_name: string;
+            client_version: string;
+            /** @enum {string} */
+            contact_state: "queued" | "current" | "needs_attention" | "waiting_for_child" | "cleanup_pending" | "released";
+            finished_at: string | null;
+            heartbeat_sequence: number;
+            /** Format: uuid */
+            id: string;
+            /** @enum {string} */
+            kind: "external" | "native";
+            last_contact_at: string | null;
+            needs_user_resolution: boolean;
+            outcome: ("succeeded" | "failed" | "cancelled") | null;
+            /** Format: uuid */
+            project_id: string;
+            release_reason: string;
+            released_at: string | null;
+            run_id: string | null;
+            started_at: string | null;
+            /** Format: uuid */
+            task_id: string;
         };
         /** WorkspaceRead */
         WorkspaceRead: {
@@ -5890,12 +5932,16 @@ export interface operations {
                     "application/json": components["schemas"]["RunRead"];
                 };
             };
-            /** @description The request_key has already been used with different launch parameters. */
+            /** @description Task is owned or request key conflicts with previous parameters. */
             409: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["TaskOwnershipConflict"] | {
+                        detail: string;
+                    };
+                };
             };
             /** @description Validation Error */
             422: {
