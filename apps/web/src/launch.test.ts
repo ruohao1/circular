@@ -88,6 +88,7 @@ describe("Task to Run launcher", () => {
       }),
     ).rejects.toThrow();
     await expect(launchTask({ ...selection, title: " " })).rejects.toThrow();
+    await expect(launchTask({ ...selection, description: " \n " })).rejects.toThrow();
     expect(request).not.toHaveBeenCalled();
     request.mockRestore();
   });

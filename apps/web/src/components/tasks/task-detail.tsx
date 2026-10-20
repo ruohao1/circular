@@ -111,9 +111,11 @@ export function TaskDetail(p: TaskDetailProps) {
   const locked =
     detail.content_lock_reason === "source_managed"
       ? "Content is managed by its source."
-      : detail.content_lock_reason === "active_run"
-        ? "Instructions are locked while a Run is active."
-        : undefined;
+      : detail.content_lock_reason === "active_work"
+        ? "Instructions are locked while this Task has an owner."
+        : detail.content_lock_reason === "active_run"
+          ? "Instructions are locked while a Run is active."
+          : undefined;
   const valid =
     !scheduleError(draft.planned_start_date, draft.planned_finish_date) &&
     !!draft.title.trim() &&
@@ -275,6 +277,11 @@ export function TaskDetail(p: TaskDetailProps) {
             {detail.repository_lock_reason === "has_runs" && (
               <p className="text-xs text-muted-foreground">
                 Repository is fixed after the first Run.
+              </p>
+            )}
+            {detail.repository_lock_reason === "has_work_sessions" && (
+              <p className="text-xs text-muted-foreground">
+                Repository is fixed after work has been claimed.
               </p>
             )}
             <TaskScheduleFields draft={draft} onChange={p.onDraftChange} />

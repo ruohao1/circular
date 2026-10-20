@@ -116,6 +116,10 @@ func (s *Service) startExternalRequest(ctx context.Context, id, fingerprint stri
 		return out, ErrRequestUnavailable
 	}
 	// Locks cover mutable execution settings until the immutable snapshot commits.
+	// Planning and delegation take Project before Agent/Repository.
+	if e = tx.QueryRow(ctx, `SELECT id FROM projects WHERE id=$1 FOR NO KEY UPDATE`, in.ProjectID).Scan(&locked); e != nil {
+		return out, e
+	}
 	if e = tx.QueryRow(ctx, `SELECT id FROM agents WHERE id=$1 FOR SHARE`, in.AgentID).Scan(&locked); e != nil {
 		return out, e
 	}
@@ -163,7 +167,26 @@ func (s *Service) startExternalRequest(ctx context.Context, id, fingerprint stri
 	}
 	result, e := postgres.CreateRun(ctx, tx, postgres.RunLaunchInput{TaskID: uuid.MustParse(taskID), AgentID: uuid.MustParse(in.AgentID), RequestKey: "linear-session:" + out.SessionID, ExternalRefs: json.RawMessage(`{}`)})
 	if e != nil {
-		return out, e
+		var owned *postgres.WorkOwnershipConflict
+		var ineligible *postgres.WorkIneligibleError
+		switch {
+		case errors.As(e, &owned):
+			out.Status = "waiting_for_active_run"
+			out.Reason = owned.Error() + ". Review " + s.config.WebURL + "/tasks?taskId=" + taskID + " and start this request explicitly after ownership is released."
+		case errors.As(e, &ineligible):
+			out.Status = "awaiting_approval"
+			out.Reason = ineligible.Error() + ". Prepare " + s.config.WebURL + "/tasks?taskId=" + taskID + " before starting."
+		default:
+			return out, e
+		}
+		e = tx.QueryRow(ctx, `UPDATE external_requests q SET status=$2,reason=$3,updated_at=now() WHERE id=$1 RETURNING to_jsonb(q)`, id, out.Status, out.Reason).Scan(&existing)
+		if e != nil {
+			return out, e
+		}
+		if e = json.Unmarshal(existing, &out); e != nil {
+			return out, e
+		}
+		return out, tx.Commit(ctx)
 	}
 	snapshot, hash, e := postgres.SealExternalInput(in)
 	if e != nil {

@@ -187,6 +187,7 @@ export function TaskLauncherProvider({ children }: { children: ReactNode }) {
   const canLaunch =
     !importedRefreshing &&
     !!draft &&
+    !!draft.description.trim() &&
     (!importedId || !!draft.agentInitialized) &&
     !!project &&
     (!!draft.partial ||

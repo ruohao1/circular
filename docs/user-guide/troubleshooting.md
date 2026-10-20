@@ -208,7 +208,7 @@ If GitHub reports a configuration or access problem, use **Provider webhook sett
 | Needs a route                                 | Open **Requests → Unrouted requests**, choose the destination project and configure a matching route. Preparing the request requires approval.    |
 | Approval required                             | Review the instructions, agent and model, then select **Start reviewed request**.                                                                 |
 | Settings changed                              | Refresh the preview and review the current selection before starting.                                                                             |
-| Waiting for another run                       | Follow the active run. After it finishes, start this waiting request explicitly.                                                                  |
+| Waiting for task owner                        | Follow the linked Task or Run. Resolve its ownership and prepare the Task, then start this waiting request explicitly.                            |
 | Access needed                                 | Reconnect the app or restore repository access. Revoked access stops linked work and disables routes; re-enable only after checking the settings. |
 | Delivery needs attention                      | Repair Linear access from the request’s settings link. Coding results remain available in Circular.                                               |
 | Checking the original activity receipt        | Wait for reconciliation. Circular is checking the existing update and will not post a second copy blindly.                                        |

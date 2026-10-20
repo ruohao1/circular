@@ -230,7 +230,7 @@ export function TaskLauncherDialog(p: TaskLauncherDialogProps) {
               <Label htmlFor="description">
                 Description{" "}
                 <span className="font-normal text-muted-foreground">
-                  (optional)
+                  {planningOnly ? "(optional)" : "(required to start)"}
                 </span>
               </Label>
               <Textarea

@@ -67,6 +67,7 @@ export async function fixture(page: Page) {
     writeError: 0,
     writeGate: undefined as Promise<void> | undefined,
     active: false,
+    externalWork: false,
     latestRun: null as components["schemas"]["TaskPlanningRun"] | null,
     failRun: false,
     history: false,
@@ -358,20 +359,23 @@ export async function fixture(page: Page) {
             agents.find((a) => a.id === task.preferred_agent_id) ?? null,
           board_revision: state.board,
           prerequisite_task_ids: [],
-          dependencies_editable: !state.active,
-          dependencies_lock_reason: state.active ? "active_work" : null,
-          content_editable: !managed && !state.active,
-          repository_editable: !managed && !state.active,
+          dependencies_editable: !state.active && !state.externalWork,
+          dependencies_lock_reason:
+            state.active || state.externalWork ? "active_work" : null,
+          content_editable: !managed && !state.active && !state.externalWork,
+          repository_editable: !managed && !state.active && !state.externalWork,
           content_lock_reason: managed
             ? "source_managed"
-            : state.active
-              ? "active_run"
+            : state.active || state.externalWork
+              ? "active_work"
               : null,
           repository_lock_reason: managed
             ? "source_managed"
             : state.active
               ? "has_runs"
-              : null,
+              : state.externalWork
+                ? "has_work_sessions"
+                : null,
         });
       }
       return json(task);
