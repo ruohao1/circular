@@ -6,7 +6,7 @@ Issue: [ISQ-472](https://linear.app/isqrd/issue/ISQ-472)
 
 Branch: `feat/isq-472-task-ownership`
 
-Status: Written spec approved on 2026-10-20. Implementation plan requires its own review.
+Status: Design and Native implementation plan approved on 2026-10-20. Implementation, verification and final review are recorded in the accompanying plan.
 
 ## Intent and scope
 

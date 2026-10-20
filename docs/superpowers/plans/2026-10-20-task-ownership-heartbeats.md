@@ -384,5 +384,28 @@ Provider import upserts do not overwrite existing instructions. Provider locks
 precede Project/Task and Agent/Repository locks; native resource hooks never
 acquire planning locks.
 
-The final whole-branch review and implementation PR are pending. No merge,
-production upgrade or live model/provider call is part of this verification.
+## Final independent review
+
+The independent whole-branch review of `a40613f..86556b3` found no Critical,
+Important or Minor issues and returned **Ready to merge**. It checked all five
+Review Focus cases and the connected admission/configuration/cleanup lock paths.
+No implementation fix was required. The reviewer used the supplied verification
+evidence and did not repeat the full suite or perform production operations.
+
+The review set aside four explicit delivery boundaries. Each remains intentional:
+
+- External lifecycle HTTP/MCP and client skills remain ISQ-474/476 because this
+  issue delivers the service foundation. Cost if this boundary is too narrow:
+  external clients cannot use claims until those follow-ups ship.
+- Completion policy and Linear status sync remain ISQ-473/478 because ownership
+  outcomes do not choose planning completion. Cost if this boundary is too
+  narrow: completion/status changes remain manual until those follow-ups ship.
+- Ownership presentation and operator controls remain ISQ-477. Existing lock
+  explanations change here; there is no new ownership screen. Cost if this
+  boundary is too narrow: recovery holds have no console release control yet.
+- The existing private control boundary remains in place, matching the user's
+  private-app requirement. No public lifecycle endpoint is added. Cost if this
+  boundary changes: public control access requires separate authentication.
+
+Deferred minors: none. The implementation PR is pending. No merge, production
+upgrade or live model/provider call is part of this verification.
