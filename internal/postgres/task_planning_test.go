@@ -109,6 +109,30 @@ func (f planningFixture) order(t *testing.T, status string, want []string) {
 }
 func strptr(s string) *string { return &s }
 
+func TestTaskPlanningWorkOwnershipLocks(t *testing.T) {
+	f := planningSeed(t)
+	id := f.task(t, "External", "ready", "{}")
+	if _, err := claimWork(t, f, externalClaim(id)); err != nil {
+		t.Fatal(err)
+	}
+	for _, patch := range []postgres.TaskPlanningPatch{{Title: strptr("Edit")}, {Description: strptr("Edit")}, {RepositorySet: true}} {
+		if _, err := f.patch(t, id, 2, patch); !errors.Is(err, postgres.ErrTaskPlanningConflict) {
+			t.Fatal("current external owner did not protect inputs", err)
+		}
+	}
+	caps, err := workTx(t, f.p, func(tx pgx.Tx) (postgres.TaskEditCapabilities, error) {
+		return postgres.TaskPlanningCapabilities(t.Context(), tx, id)
+	})
+	if err != nil || caps.ContentEditable || caps.RepositoryEditable || caps.DependenciesEditable ||
+		caps.ContentLockReason == nil || *caps.ContentLockReason != "active_work" ||
+		caps.RepositoryLockReason == nil || *caps.RepositoryLockReason != "has_work_sessions" {
+		t.Fatal(caps, err)
+	}
+	if _, err = f.patch(t, id, 2, postgres.TaskPlanningPatch{Priority: strptr("urgent"), PreferredAgentSet: true, PreferredAgentID: &f.agent}); err != nil {
+		t.Fatal("ownership blocked independent planning", err)
+	}
+}
+
 func TestTaskPlanningCreationAndReplay(t *testing.T) {
 	f := planningSeed(t)
 	a := f.task(t, "Imported", "open", `{"linear":{"issue_id":"one"}}`)
