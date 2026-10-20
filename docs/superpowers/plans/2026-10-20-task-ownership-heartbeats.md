@@ -338,7 +338,7 @@ gains native support without changing its signature.
 
 - [x] **Step 2: Document operator and client limits.** Describe one-owner semantics, session-secret handling, explicit release, retry receipts, 30/120-second contact behavior, native recovery holds, and external revocation's inability to stop file edits. Document the exact migration diagnostic and the sequence: block launches, finish/cancel coding work, verify cleanup, stop writers, migrate, start only new binaries. Explain that historical Runs remain historical and no old contact is fabricated. No production rollout is performed by this task.
 - [x] **Step 3: Review against the spec.** Check every acceptance item and the five Review Focus cases has passing evidence. Audit all `CreateRun`/`INSERT INTO runs`, terminal Run writes, and planning mutations for bypasses. Review credential projections and transaction order, including integration callers' pre-existing locks. Keep failures or unverified environments visible in the PR; do not call a skipped check passed.
-- [ ] **Step 4: Commit and hand off the implementation PR.** Commit documentation/verified fixture changes as `docs: explain task ownership and upgrade requirements`. Request the selected execution workflow's whole-branch review, address material findings, and include this plan/spec in the implementation PR. No automatic merge or deployment is implied.
+- [x] **Step 4: Commit and hand off the implementation PR.** Commit documentation/verified fixture changes as `docs: explain task ownership and upgrade requirements`. Request the selected execution workflow's whole-branch review, address material findings, and include this plan/spec in the implementation PR. No automatic merge or deployment is implied.
 
 ## Execution results
 
@@ -407,5 +407,5 @@ The review set aside four explicit delivery boundaries. Each remains intentional
   private-app requirement. No public lifecycle endpoint is added. Cost if this
   boundary changes: public control access requires separate authentication.
 
-Deferred minors: none. The implementation PR is pending. No merge, production
-upgrade or live model/provider call is part of this verification.
+Deferred minors: none. Delivered as [implementation PR #8](https://github.com/ruohao1/circular/pull/8), with this plan and the approved spec. No merge,
+production upgrade or live model/provider call was performed.
