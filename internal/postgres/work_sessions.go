@@ -99,27 +99,37 @@ func authenticateWork(s workSessionRow, c WorkCredential) error {
 func readWorkSession(ctx context.Context, tx pgx.Tx, id uuid.UUID, lock bool, now time.Time) (workSessionRow, error) {
 	var row workSessionRow
 	v := &row.view
+	var runStatus string
+	var worker *string
+	var expires, claimed *time.Time
+	var waiting bool
 	query := `SELECT s.id,s.project_id,s.task_id,s.kind,s.run_id,r.agent_id,s.client_name,s.client_version,
 		s.claimed_at,s.started_at,s.last_contact_at,s.finished_at,s.released_at,s.heartbeat_sequence,s.outcome,
-		s.release_reason,s.needs_user_resolution,s.secret_digest,s.admission_digest
+		s.release_reason,s.needs_user_resolution,s.secret_digest,s.admission_digest,
+		COALESCE(r.status,''),r.worker_id,r.lease_expires_at,r.claimed_at,
+		EXISTS(SELECT 1 FROM delegations d WHERE d.parent_run_id=r.id AND d.request_key IS NOT NULL AND d.status='waiting')
 		FROM work_sessions s LEFT JOIN runs r ON r.id=s.run_id WHERE s.id=$1`
 	if lock {
 		query += ` FOR UPDATE OF s`
 	}
 	err := tx.QueryRow(ctx, query, id).Scan(&v.ID, &v.ProjectID, &v.TaskID, &v.Kind, &v.RunID, &v.AgentID, &v.ClientName, &v.ClientVersion,
 		&v.ClaimedAt, &v.StartedAt, &v.LastContactAt, &v.FinishedAt, &v.ReleasedAt, &v.HeartbeatSequence, &v.Outcome,
-		&v.ReleaseReason, &v.NeedsUserResolution, &row.secretDigest, &row.admissionDigest)
+		&v.ReleaseReason, &v.NeedsUserResolution, &row.secretDigest, &row.admissionDigest,
+		&runStatus, &worker, &expires, &claimed, &waiting)
 	if err != nil {
 		return row, err
 	}
 	v.ContactState = "queued"
+	expired := v.Kind == "native" && worker != nil && (expires != nil && !expires.After(now) || expires == nil && (claimed == nil || !claimed.Add(LeaseDuration).After(now)))
 	switch {
 	case v.ReleasedAt != nil:
 		v.ContactState = "released"
-	case v.NeedsUserResolution:
+	case v.NeedsUserResolution || expired:
 		v.ContactState = "needs_attention"
 	case v.Outcome != nil:
 		v.ContactState = "cleanup_pending"
+	case runStatus == "waiting_for_input" && worker == nil && waiting:
+		v.ContactState = "waiting_for_child"
 	case v.LastContactAt != nil:
 		v.ContactState = "current"
 		if v.Kind == "external" && !now.Before(v.LastContactAt.Add(120*time.Second)) {

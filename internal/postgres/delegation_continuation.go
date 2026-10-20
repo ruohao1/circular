@@ -32,6 +32,7 @@ func claimOrphanedDelegation(ctx context.Context, tx pgx.Tx, owner string, now t
 	var status runstate.Status
 	err := tx.QueryRow(ctx, `SELECT p.id,p.invocation,p.status FROM runs p JOIN workspaces w ON w.run_id=p.id
 		WHERE p.status IN ('succeeded','failed','cancelled') AND p.worker_id IS NULL AND p.recovery_attempts<$1
+		AND EXISTS(SELECT 1 FROM work_sessions s WHERE s.run_id=p.id AND s.task_id=p.task_id AND s.released_at IS NULL)
 		AND w.status<>'released' AND EXISTS(SELECT 1 FROM delegations d WHERE d.parent_run_id=p.id AND d.request_key IS NOT NULL)
 		ORDER BY p.created_at,p.id FOR UPDATE OF p SKIP LOCKED LIMIT 1`, MaxRecoveries).Scan(&id, &invocation, &status)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -58,6 +59,7 @@ func claimContinuation(ctx context.Context, tx pgx.Tx, owner string, now time.Ti
 		FROM runs p JOIN delegations d ON d.parent_run_id=p.id AND d.request_key IS NOT NULL
 		JOIN runs c ON c.id=d.child_run_id LEFT JOIN workspaces w ON w.run_id=c.id
 		WHERE p.status='waiting_for_input' AND p.invocation=1 AND p.worker_id IS NULL AND d.status='waiting'
+		AND EXISTS(SELECT 1 FROM work_sessions s WHERE s.run_id=p.id AND s.task_id=p.task_id AND s.released_at IS NULL)
 		AND c.status IN ('succeeded','failed','cancelled') AND c.worker_id IS NULL AND (w.id IS NULL OR w.status='released')
 		ORDER BY p.created_at,p.id FOR UPDATE OF p SKIP LOCKED LIMIT 1`).Scan(&id, &delegation, &result.ChildRunID, &result.Status, &result.Error)
 	if errors.Is(err, pgx.ErrNoRows) {

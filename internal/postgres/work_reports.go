@@ -80,6 +80,12 @@ func workChangeResult(ctx context.Context, tx pgx.Tx, receipt WorkReceipt, now t
 	if err != nil {
 		return out, err
 	}
+	if out.Session.Kind == "native" && out.Session.ReleasedAt == nil {
+		out.PendingCleanup, err = nativeCleanupPending(ctx, tx, *out.Session.RunID)
+		if err != nil {
+			return out, err
+		}
+	}
 	if receipt.ReplacementSessionID != nil {
 		replacement, err := InspectWorkSession(ctx, tx, *receipt.ReplacementSessionID, now)
 		if err != nil {
@@ -175,7 +181,7 @@ func ReleaseTaskWork(ctx context.Context, tx pgx.Tx, in WorkAdminInput, now time
 		return WorkChangeResult{}, ErrWorkRevoked
 	}
 	if row.view.Kind != "external" {
-		return WorkChangeResult{}, ErrWorkInput
+		return releaseNativeTaskWork(ctx, tx, in, row, digest, now)
 	}
 	at := workTime(now, row.view)
 	if _, err = tx.Exec(ctx, `UPDATE work_sessions SET released_at=$2,release_reason=$3 WHERE id=$1`, row.view.ID, at, in.Reason); err != nil {

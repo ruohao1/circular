@@ -83,11 +83,14 @@ func (r *RunResources) MarkRunning() (Workspace, error) {
 	if err := r.workspaceStatus(w, "ready", "worker"); err != nil {
 		return Workspace{}, err
 	}
-	_, err = r.tx.Exec(r.ctx, `UPDATE runs SET status='running',started_at=COALESCE(started_at,clock_timestamp()),error=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=$1`, r.id)
+	err = r.tx.QueryRow(r.ctx, `UPDATE runs SET status='running',started_at=COALESCE(started_at,clock_timestamp()),error=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=$1 RETURNING started_at`, r.id).Scan(&r.startedAt)
 	if err != nil {
 		return Workspace{}, err
 	}
 	r.status = runstate.Running
+	if err = startNativeWork(r.ctx, r.tx, r.id, *r.startedAt); err != nil {
+		return Workspace{}, err
+	}
 	if err := r.event("run.started", "worker", map[string]any{"backend": r.backend}); err != nil {
 		return Workspace{}, err
 	}
