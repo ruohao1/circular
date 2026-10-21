@@ -54,7 +54,7 @@ func (p *ProviderFixture) serveReview(w http.ResponseWriter, r *http.Request) bo
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if p.reviewPR == nil {
-		return false
+		return p.CompletionChecksEnabled.Load() && serveCompletionFixture(w, r, prreviews.PRIdentity{RepositoryName: "fixture/private-source"})
 	}
 	f := p.reviewPR
 	v := f.Identity

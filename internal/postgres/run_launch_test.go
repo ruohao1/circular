@@ -54,9 +54,6 @@ func TestNativeLaunchReplayPrecedesEligibility(t *testing.T) {
 	if _, err = f.p.Exec(t.Context(), `UPDATE agents SET enabled=false WHERE id=$1`, f.agent); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = f.move(t, task, "completed", "end", nil); err != nil {
-		t.Fatal(err)
-	}
 	retry, err := nativeLaunch(t, f, task, "first")
 	if err != nil || retry.RunID != first.RunID || retry.Created {
 		t.Fatal(retry, err)
@@ -70,6 +67,9 @@ func TestNativeLaunchReplayPrecedesEligibility(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, err = f.p.Exec(t.Context(), `UPDATE work_sessions SET outcome='succeeded',finished_at=now(),released_at=now(),release_reason='completed fixture' WHERE run_id=$1`, first.RunID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = f.move(t, task, "cancelled", "end", nil); err != nil {
 		t.Fatal(err)
 	}
 	retry, err = nativeLaunch(t, f, task, "first")

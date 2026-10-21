@@ -1,15 +1,25 @@
 import { test, expect } from "@playwright/test";
 import { A, B, T, dates, fixture } from "./task-fixture";
 
-test("Task detail explains external ownership and fixed work history", async ({ page }) => {
+test("Task detail explains external ownership and fixed work history", async ({
+  page,
+}) => {
   const state = await fixture(page);
   state.externalWork = true;
   await page.goto(`/tasks?taskId=${T}`);
   const dialog = page.getByRole("dialog");
-  await expect(dialog.getByText("Instructions are locked while this Task has an owner.")).toBeVisible();
-  await expect(dialog.getByText("Repository is fixed after work has been claimed.")).toBeVisible();
-  await expect(dialog.getByLabel("Task title", { exact: true })).toHaveAttribute("readonly", "");
-  await expect(dialog.getByRole("combobox", { name: "Repository", exact: true })).toBeDisabled();
+  await expect(
+    dialog.getByText("Instructions are locked while this Task has an owner."),
+  ).toBeVisible();
+  await expect(
+    dialog.getByText("Repository is fixed after work has been claimed."),
+  ).toBeVisible();
+  await expect(
+    dialog.getByLabel("Task title", { exact: true }),
+  ).toHaveAttribute("readonly", "");
+  await expect(
+    dialog.getByRole("combobox", { name: "Repository", exact: true }),
+  ).toBeDisabled();
 });
 
 test("predefined scopes survive layouts and Back without losing filters", async ({
@@ -658,6 +668,10 @@ test("Saved Task launch requires explicit replacement for a disabled preferred A
   page,
 }) => {
   const state = await fixture(page);
+  state.tasks[0].completion_policy = {
+    mode: "direct_completion",
+    requirements: [],
+  };
   state.agents[0].enabled = false;
   state.agents.push({
     ...state.agents[0],
@@ -1241,6 +1255,10 @@ for (const explicit of [false, true])
     page,
   }) => {
     const state = await fixture(page);
+    state.tasks[0].completion_policy = {
+      mode: "direct_completion",
+      requirements: [],
+    };
     state.tasks[0].repository_id = null;
     state.agents.push(
       { ...state.agents[0], id: B, name: "New preference" },

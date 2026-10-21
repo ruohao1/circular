@@ -3,6 +3,7 @@ WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
 COPY internal/prreviews ./internal/prreviews
+COPY internal/completion ./internal/completion
 COPY internal/codexconfig ./internal/codexconfig
 COPY internal/runstate ./internal/runstate
 COPY cmd/circular-review-fixture-workload ./cmd/circular-review-fixture-workload

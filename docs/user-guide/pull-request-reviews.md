@@ -7,6 +7,11 @@ Circular includes a **PR reviewer** agent for each project. You can choose its m
 
 ## Review a pull request
 
+For a Task using **Review required**, open **Tasks → Task details → Task completion**.
+After the coding result is accepted, bind its PR number if necessary, then select
+**Review PR**. This also works for tracked external coding work; no Circular coding
+Run is needed. The reviewer runs independently and keeps its own report.
+
 1. Open a completed coding run with a published pull request.
 2. Select **Review PR**, check the reviewer, model, reasoning level, and commit, then select **Start review**.
 3. Open the reviewer run to follow progress and read its findings.
@@ -30,6 +35,42 @@ The reviewer can use Git to verify the captured commit, check the source status,
 | **Freshness unavailable**   | Circular cannot currently verify whether the PR still matches. Use **Refresh PR status** after checking the GitHub connection.         |
 
 A completed run and a published comment are separate states. You can read findings in Circular while GitHub or Linear publication is waiting or needs attention. An assessment is not a guarantee that the changes are defect-free.
+
+## Task completion requirements
+
+Before starting work, save the Task and choose its completion policy and keyed
+requirements in **Task completion**. The first work claim freezes them. To change
+a frozen contract, plan a new Task; reopening does not relax its requirements.
+
+- **Direct completion:** a successful coding result with evidence for every
+  requirement moves the Task to Done after ownership and cleanup are released.
+- **Review required:** the same accepted result moves the Task to Review. It
+  additionally needs a PR in the connected Repository, the selected CI jobs, and
+  a current independent review. A successful Run or the agent's final text alone
+  does not complete the Task.
+
+In **Setup → Repositories → Required completion checks**, select and save the
+required GitHub Actions jobs before starting review-required work. Existing
+Tasks keep their frozen selection. Circular suggests its three CI jobs only for
+the Circular repository; suggestions still need an explicit save.
+
+**Ready to merge** means the server verified the latest selected CI attempts and
+a complete retained independent review of the current base and head, without
+medium, high or critical findings. Low findings remain visible as advice. This
+readiness is separate from the planning stage **Ready**. Starting a newer review
+replaces the earlier review for this decision, even while the newer one is queued.
+
+Publish the PR manually from its successful Run, or bind an existing PR by number.
+Automatic draft publishing skips policy-managed work. A review-required Task
+still needs a PR when the coding Run has no changes.
+
+Merge the PR in GitHub, refresh completion evidence, then explicitly **Move to
+Done**. Circular verifies the merge against the tested tree; it never merges or
+moves review-required work to Done automatically. Uncertain revision proof,
+missing permissions, stale checks or changed commits keep completion blocked.
+Use the displayed setup, refresh, binding and review controls to resolve the
+blockers. The final Done request refreshes evidence and rechecks the current
+attempt; it cannot finish work superseded by another agent.
 
 ## Review new changes or try again
 

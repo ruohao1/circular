@@ -107,7 +107,7 @@ func TestControlMCPWorkflowUsesPublicAPIAndPreservesRunIntent(t *testing.T) {
 	}
 	client := connect(t, config)
 	listed, err := client.ListTools(t.Context(), nil)
-	if err != nil || len(listed.Tools) != 46 {
+	if err != nil || len(listed.Tools) != 52 {
 		t.Fatal("missing tool surface", err, listed)
 	}
 	project := call(t, client, "create_project", object{"name": "MCP project"})["project"].(object)
@@ -139,6 +139,13 @@ func TestControlMCPWorkflowUsesPublicAPIAndPreservesRunIntent(t *testing.T) {
 		t.Fatal("missing discovery Agent", discovery)
 	}
 	task := call(t, client, "create_task", object{"project_id": projectID, "repository_id": repo["id"], "title": "Exercise MCP", "description": "Verify control without a model call"})["task"].(object)
+	policyRequest := httptest.NewRequest(http.MethodPut, "/api/v1/tasks/"+task["id"].(string)+"/completion-policy", strings.NewReader(`{"expected_revision":1,"policy":{"mode":"direct_completion","requirements":[]}}`))
+	policyRequest.Header.Set("Content-Type", "application/json")
+	policyResponse := httptest.NewRecorder()
+	handler.ServeHTTP(policyResponse, policyRequest)
+	if policyResponse.Code != http.StatusOK {
+		t.Fatal("completion policy setup failed", policyResponse.Code, policyResponse.Body.String())
+	}
 	if call(t, client, "get_task", object{"task_id": task["id"]})["task"].(object)["description"] != task["description"] {
 		t.Fatal("task lost description")
 	}
@@ -258,7 +265,7 @@ func TestReadOnlyAndInvalidInputsNeverReachMutationEndpoints(t *testing.T) {
 	defer api.Close()
 	client := connect(t, controlmcp.Config{APIURL: api.URL, ReadOnly: true})
 	list, err := client.ListTools(t.Context(), nil)
-	if err != nil || len(list.Tools) != 24 {
+	if err != nil || len(list.Tools) != 27 {
 		t.Fatal(err, list)
 	}
 	for _, tool := range list.Tools {

@@ -279,7 +279,7 @@ func assertCodexSubscriptionBoundary(t *testing.T, f supervisorFixture, snapshot
 	if err := json.Unmarshal(input, &request); err != nil {
 		t.Fatal(err)
 	}
-	if request["auth_mode"] != "chatgpt" || len(request) != 4 || request["model"] != "gpt-fixture-codex" {
+	if request["auth_mode"] != "chatgpt" || len(request) != 5 || request["model"] != "gpt-fixture-codex" || request["completion_contract"] == nil {
 		t.Fatalf("subscription invocation changed: %+v", request)
 	}
 	if _, exists := request["api_key"]; exists {

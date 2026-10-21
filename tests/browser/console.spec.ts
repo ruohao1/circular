@@ -37,6 +37,12 @@ async function fixture(page: Page) {
     id: TASK,
     project_id: B,
     repository_id: repos[1].id,
+    completion_policy: {
+      mode: "direct_completion",
+      requirements: [
+        { key: "discovery_report", description: "Document the repository" },
+      ],
+    },
     title: "Imported Task",
     description: "Keep imported instructions.",
     status: "open",
@@ -208,6 +214,13 @@ async function fixture(page: Page) {
         },
       ]);
     }
+    if (path === `/tasks/${TASK}/completion`)
+      return json({
+        policy: imported.completion_policy,
+        contract: null,
+        owner_active: false,
+        revision: 1,
+      });
     if (path === `/tasks/${TASK}`) {
       if (state.importGate) await state.importGate;
       return json(imported);
@@ -260,8 +273,7 @@ for (const width of [390, 1440]) {
     page,
   }, testInfo) => {
     const state = await taskFixture(page);
-    const longName =
-      "A very long Project name with a detailed workspace label";
+    const longName = "A very long Project name with a detailed workspace label";
     state.projects[0].name = longName;
     await page.setViewportSize({ width, height: 900 });
     await page.goto("/tasks");
@@ -387,7 +399,7 @@ test("Project context survives navigation and storage failure", async ({
   ).toContainText("Project B");
 });
 
-test("launcher retains drafts by Project and partial launch retries the saved Task", async ({
+test("launcher retains drafts by Project and saves the Task once", async ({
   page,
 }) => {
   const state = await fixture(page);
@@ -409,25 +421,37 @@ test("launcher retains drafts by Project and partial launch retries the saved Ta
   await expect(page.getByLabel("Task title", { exact: true })).toHaveValue(
     "Draft A",
   );
-  await expect(page.getByRole("button", { name: "Start Run", exact: true })).toBeDisabled();
-  await expect(page.getByRole("button", { name: "Save Task", exact: true })).toBeEnabled();
-  await page.getByLabel("Description", { exact: true }).fill("Keep this task after a launch failure.");
-  state.failLaunch = true;
-  await page.getByRole("button", { name: "Start Run", exact: true }).click();
   await expect(
-    page.getByText(/Task created, but its Run could not start/),
-  ).toBeVisible();
-  await page.getByRole("button", { name: "Close", exact: true }).click();
-  await open.click();
+    page.getByRole("button", { name: "Start Run", exact: true }),
+  ).toHaveCount(0);
+  await expect(
+    page.getByRole("button", { name: "Save Task", exact: true }),
+  ).toBeEnabled();
   await page
-    .getByRole("button", { name: "Retry starting Run", exact: true })
-    .click();
-  await expect(page).toHaveURL(new RegExp(`/runs/${RUN}$`));
+    .getByLabel("Description", { exact: true })
+    .fill("Keep this task before launch.");
+  await page.getByRole("button", { name: "Save Task", exact: true }).click();
+  await expect(page).toHaveURL(new RegExp(`/tasks\\?taskId=${TASK}`));
   expect(state.taskPosts).toHaveLength(1);
+  expect(state.runPosts).toHaveLength(0);
+});
+
+test("a failed saved Task launch retries the same Task", async ({ page }) => {
+  const state = await fixture(page);
+  state.failLaunch = true;
+  await page.goto(`/?taskId=${TASK}`);
+  await page.getByRole("button", { name: "Start Run", exact: true }).click();
+  await expect(page.getByRole("dialog").getByRole("alert")).toContainText(
+    "Worker unavailable",
+  );
+  await page.getByRole("button", { name: "Start Run", exact: true }).click();
+  await expect(page).toHaveURL(new RegExp(`/runs/${RUN}$`));
+  expect(state.taskPosts).toHaveLength(0);
   expect(state.runPosts).toHaveLength(2);
+  expect(state.runPosts[0]).toEqual(state.runPosts[1]);
   expect(state.runPosts[1]).toEqual({
     task_id: TASK,
-    agent_id: state.agents[0].id,
+    agent_id: state.agents[1].id,
   });
 });
 
@@ -455,7 +479,7 @@ test("imported and discovery links open the launcher", async ({ page }) => {
   await page.goto("/?taskId=missing");
   await expect(page.getByText(/Task not found/)).toBeVisible();
   await expect(
-    page.getByRole("button", { name: "Start Run", exact: true }),
+    page.getByRole("button", { name: "Save Task", exact: true }),
   ).toBeDisabled();
 });
 
@@ -582,10 +606,7 @@ test("launcher prevents dismissal during a pending launch", async ({
   state.launchGate = new Promise<void>((resolve) => {
     release = resolve;
   });
-  await page.goto("/");
-  await page.getByRole("button", { name: "New Task", exact: true }).click();
-  await page.getByLabel("Task title", { exact: true }).fill("One attempt");
-  await page.getByLabel("Description", { exact: true }).fill("Complete exactly once.");
+  await page.goto(`/?taskId=${TASK}`);
   await page.getByRole("button", { name: "Start Run", exact: true }).click();
   await expect.poll(() => state.runPosts.length).toBe(1);
   await expect(

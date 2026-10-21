@@ -51,6 +51,10 @@ func legacyDatabase(t *testing.T, revision int) *pgxpool.Pool {
 func TestReviewLegacyUpgradeKeepsSnapshot(t *testing.T) {
 	pool := legacyDatabase(t, 20)
 	snapshot := testsupport.SeedPRReviewSource(t, pool, uuid.Nil)
+	var deliveryBefore, deliveryAfter []byte
+	if err := pool.QueryRow(t.Context(), `SELECT to_jsonb(d) FROM github_run_deliveries d WHERE run_id=$1`, snapshot.SourceRunID).Scan(&deliveryBefore); err != nil {
+		t.Fatal(err)
+	}
 	raw, err := json.Marshal(snapshot)
 	if err != nil {
 		t.Fatal(err)
@@ -72,6 +76,9 @@ func TestReviewLegacyUpgradeKeepsSnapshot(t *testing.T) {
 	}
 	if err = migrate.Up(t.Context(), pool); err != nil {
 		t.Fatal(err)
+	}
+	if err := pool.QueryRow(t.Context(), `SELECT to_jsonb(d) FROM github_run_deliveries d WHERE run_id=$1`, snapshot.SourceRunID).Scan(&deliveryAfter); err != nil || string(deliveryBefore) != string(deliveryAfter) {
+		t.Fatal("retained delivery changed", err)
 	}
 	var saved prreviews.LaunchSnapshot
 	var native *uuid.UUID

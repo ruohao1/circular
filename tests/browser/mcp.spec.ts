@@ -79,7 +79,7 @@ test("connect to bundled MCP with one command and real assistant activity", asyn
   );
 
   const tools = await discoverTools(request, url, "Circular browser check");
-  expect(tools).toHaveLength(46);
+  expect(tools).toHaveLength(52);
   expect(tools).toContain("get_delegation_targets");
   expect(tools).toContain("set_delegation_targets");
   expect(tools).toEqual(
@@ -93,6 +93,12 @@ test("connect to bundled MCP with one command and real assistant activity", asyn
       "start_run",
       "launch_pr_review",
       "retry_pr_review_publication",
+      "get_task_completion",
+      "refresh_task_completion",
+      "bind_task_pull_request",
+      "prepare_task_pr_review",
+      "list_task_pr_reviews",
+      "launch_task_pr_review",
     ]),
   );
   await page.getByRole("button", { name: "Refresh", exact: true }).click();
@@ -132,7 +138,13 @@ test("connect to bundled MCP with one command and real assistant activity", asyn
     `${url}/read-only`,
     "Circular read-only check",
   );
-  expect(readOnlyTools).toHaveLength(24);
+  expect(readOnlyTools).toHaveLength(27);
+  expect(readOnlyTools).toContain("get_task_completion");
+  expect(readOnlyTools).toContain("prepare_task_pr_review");
+  expect(readOnlyTools).toContain("list_task_pr_reviews");
+  expect(readOnlyTools).not.toContain("refresh_task_completion");
+  expect(readOnlyTools).not.toContain("bind_task_pull_request");
+  expect(readOnlyTools).not.toContain("launch_task_pr_review");
   expect(readOnlyTools).toContain("get_delegation_targets");
   expect(readOnlyTools).not.toContain("set_delegation_targets");
   expect(readOnlyTools).toContain("list_task_planning");

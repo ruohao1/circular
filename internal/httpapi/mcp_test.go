@@ -118,6 +118,7 @@ func TestBundledMCPMutationsShareAPIStateAndReadOnlyCannotWrite(t *testing.T) {
 	agent := mcpCall(t, full, "create_agent", map[string]any{"project_id": project["id"], "name": "Simulated engineer", "instructions": "Test the workflow", "backend": "fake"})["agent"].(map[string]any)
 	repository := (fixture{server: server}).create(t, "repositories", map[string]any{"project_id": project["id"], "name": "Source", "clone_url": "/fixture"})
 	task := mcpCall(t, full, "create_task", map[string]any{"project_id": project["id"], "title": "Test HTTP launch", "description": "Prepared requirements", "repository_id": repository["id"]})["task"].(map[string]any)
+	(fixture{server: server}).request(t, "PUT", "/api/v1/tasks/"+task["id"].(string)+"/completion-policy", `{"expected_revision":1,"policy":{"mode":"direct_completion","requirements":[]}}`, 200)
 	launch := map[string]any{"task_id": task["id"], "agent_id": agent["id"], "request_key": "http-connection-test"}
 	run := mcpCall(t, full, "start_run", launch)["run"].(map[string]any)
 	retry := mcpCall(t, full, "start_run", launch)["run"].(map[string]any)

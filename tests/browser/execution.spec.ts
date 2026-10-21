@@ -3,6 +3,7 @@ import { execFileSync } from "node:child_process";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
+import { chooseDirectCompletion } from "./fixtures/plan-completion";
 
 const compose = process.env.CIRCULAR_E2E_COMPOSE === "1";
 const base = `http://127.0.0.1:${compose ? "8000" : "18000"}/api/v1`;
@@ -54,6 +55,7 @@ for (const scenario of ["success", "cancel", "failure"] as const) {
         backend_config: {
           delay_ms: scenario === "cancel" ? 3000 : 600,
           failure: scenario === "failure" ? "after_first_event" : "none",
+          completion_report: { result: "Lifecycle verified", evidence: [] },
         },
       });
       await page.goto("/");
@@ -102,14 +104,21 @@ for (const scenario of ["success", "cancel", "failure"] as const) {
         .getByLabel("Description", { exact: true })
         .fill("Exercise the isolated worker lifecycle and retain its output.");
       await expect(
-        page.getByRole("button", { name: "Start Run" }),
+        page.getByRole("button", { name: "Save Task", exact: true }),
       ).toBeEnabled();
       if (scenario === "success")
         await page.screenshot({
           path: testInfo.outputPath("launcher.png"),
           fullPage: true,
         });
-      await page.getByRole("button", { name: "Start Run" }).click();
+      await page
+        .getByRole("button", { name: "Save Task", exact: true })
+        .click();
+      await chooseDirectCompletion(page);
+      await page.getByRole("link", { name: "Start Run", exact: true }).click();
+      await page
+        .getByRole("button", { name: "Start Run", exact: true })
+        .click();
       await expect(page).toHaveURL(/\/runs\/[0-9a-f-]+$/);
       const runId = page.url().split("/").at(-1)!;
       if (scenario === "cancel") {

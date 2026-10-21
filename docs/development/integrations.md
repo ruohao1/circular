@@ -55,6 +55,52 @@ the hook is inactive; the browser registration and OAuth callbacks still use
 the configured local API URL. If retrying a rejected manifest, return to
 **Setup → Integrations** and start **Connect GitHub** again to submit fresh settings.
 
+## Completion evidence
+
+Review-required completion uses a GitHub App installation with Repository
+**Metadata**, **Contents**, **Pull requests**, **Actions** and **Checks** read
+access. Existing apps must approve added Actions/Checks permissions. Completion
+verification never falls back to a human OAuth token. Draft publication retains
+its separate write permissions and manual authorization.
+
+Configure required jobs explicitly through
+`PUT /api/v1/repositories/{id}/completion-checks`, with `expected_revision` and
+the exact discovered `workflow_id`, `workflow_path`, `app_id` and job `name` from
+the matching GET. Only GitHub Actions jobs are supported initially; ambiguous
+names, third-party check producers and unsupported revision proofs block.
+For `ruohao1/circular`, select these jobs from `.github/workflows/ci.yml`:
+`Go / PostgreSQL / Docker`, `Frontend / contracts`, and
+`Browser / local and Compose`. Discover installation-specific numeric IDs;
+do not copy IDs from another environment. Save the selection explicitly.
+
+The first claim freezes the policy, keyed evidence requirements and Repository
+check configuration. The current completion session is distinct from active
+ownership. Reopening or cancelling clears the current completion pointer while
+retaining history. A new review intent supersedes older evidence immediately.
+Refreshes fence the current session, binding, contract, review and provider
+identity before recording their result. Provider I/O happens outside planning
+transactions; a final move to Done refreshes and rechecks inside the guarded
+transition.
+
+Checks bind workflow ID, producer app ID, job name, newest run and attempt, and
+tested commit. The verified tested tree must include the current base and head.
+Only completed/success jobs count; pending, skipped, missing, ambiguous or
+inaccessible jobs block. Observations expire after 60 seconds. Provider reads
+are bounded to 4 MiB per response and 20 pages of 100 entries; capped or incomplete
+results block instead of reusing earlier success. Filtered Actions searches at
+their 1,000-result cap are also rejected.
+
+Merged completion compares GitHub's merged tree against the accepted pre-merge
+tested tree and verifies the supported normal, squash or rebase ancestry. Missing
+proof remains a blocker. The retained independent review must cover the current
+base/head completely and have no medium-or-higher findings. Coding reports,
+review comments and delivered PR receipts alone never authorize Done.
+
+Policy-managed native Runs are excluded from the automatic draft-publication
+trigger. Manual publication and historical queued deliveries use the existing
+recovery path. No refresh automatically merges a PR or completes review-required
+work.
+
 ## Server configuration
 
 Use the existing ignored `.env` file for local Compose configuration. Add these

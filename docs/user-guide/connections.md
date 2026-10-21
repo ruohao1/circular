@@ -74,8 +74,9 @@ tab. See [troubleshooting](/docs/troubleshooting#repository-creation-needs-atten
 
 ### Automatically open draft pull requests
 
-Under GitHub, turn on **Automatically open draft pull requests** to publish
-changes after future successful runs in the selected project. This starts off.
+Under GitHub, **Automatically open draft pull requests** controls legacy work
+without a frozen completion contract. It starts off. New policy-managed Tasks
+require explicit **Create draft pull request** on the successful Run instead.
 Circular publishes each run's captured changes to a dedicated branch and opens
 a draft pull request for your review. It never merges the pull request
 automatically. Runs without changes do not create pull requests.

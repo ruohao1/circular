@@ -135,6 +135,7 @@ func TestResourceCreationPreservesDefaultsScopeAndExecutionProjection(t *testing
 		t.Fatal(task)
 	}
 	f.request(t, "PATCH", "/api/v1/tasks/"+task["id"].(string), `{"expected_revision":1,"description":"Prepared requirements"}`, 200)
+	f.request(t, "PUT", "/api/v1/tasks/"+task["id"].(string)+"/completion-policy", `{"expected_revision":2,"policy":{"mode":"direct_completion","requirements":[]}}`, 200)
 	run := f.create(t, "runs", map[string]any{"task_id": task["id"], "agent_id": agent["id"]})
 	if run["attempt"] != float64(1) || run["status"] != "queued" || run["worker_id"] != nil {
 		t.Fatal(run)

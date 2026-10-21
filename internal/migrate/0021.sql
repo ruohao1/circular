@@ -79,3 +79,20 @@ BEGIN
     END IF;
     RETURN NEW;
 END $$;
+
+-- Frozen completion contracts require an explicit publication request. Existing deliveries remain recoverable.
+CREATE OR REPLACE FUNCTION queue_github_run_delivery() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+    IF EXISTS(SELECT 1 FROM delegations WHERE child_run_id=NEW.id AND request_key IS NOT NULL) THEN RETURN NEW; END IF;
+    IF NEW.kind <> 'coding' THEN RETURN NEW; END IF;
+    IF NEW.status=OLD.status OR NEW.status<>'succeeded' THEN RETURN NEW; END IF;
+    INSERT INTO github_run_deliveries(run_id,project_id,repository_id,github_repository_id,installation_id,repository_name,base_branch,branch,title,automatic)
+    SELECT NEW.id,t.project_id,repo.id,repo.external_refs->'github'->>'repository_id',
+        repo.external_refs->'github'->>'installation_id',repo.name,repo.default_branch,'circular/run/'||NEW.id::text,t.title,true
+    FROM tasks t JOIN repositories repo ON repo.id=t.repository_id AND repo.project_id=t.project_id
+    JOIN github_run_delivery_settings settings ON settings.project_id=t.project_id AND settings.enabled
+    WHERE t.id=NEW.task_id AND t.completion_contract IS NULL AND repo.external_refs->'github'->>'repository_id' ~ '^[1-9][0-9]*$'
+        AND repo.external_refs->'github'->>'installation_id' ~ '^[1-9][0-9]*$'
+    ON CONFLICT(run_id) DO NOTHING;
+    RETURN NEW;
+END $$;

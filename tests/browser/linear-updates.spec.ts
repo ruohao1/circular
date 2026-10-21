@@ -8,6 +8,7 @@ import { execFileSync } from "node:child_process";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { chooseDirectCompletion } from "./fixtures/plan-completion";
 
 const base = "http://127.0.0.1:18000/api/v1";
 const provider = "http://127.0.0.1:18001";
@@ -93,7 +94,10 @@ test("publish imported run progress and results only after opting in", async ({
       project_id: project.id,
       name: "Linear fixture engineer",
       backend: "fake",
-      backend_config: { delay_ms: 3000 },
+      backend_config: {
+        delay_ms: 3000,
+        completion_report: { result: "Imported work verified", evidence: [] },
+      },
     });
     await connectLinear(page, request, project);
     const settings = page.getByRole("region", {
@@ -121,6 +125,7 @@ test("publish imported run progress and results only after opting in", async ({
       .getByRole("button", { name: "Import TST-1", exact: true })
       .click();
     await expect(page).toHaveURL(/taskId=[0-9a-f-]+$/);
+    await chooseDirectCompletion(page);
     await page.getByRole("button", { name: "Start Run", exact: true }).click();
     await expect(page).toHaveURL(/\/runs\/[0-9a-f-]+$/);
     const runId = page.url().split("/").at(-1)!;

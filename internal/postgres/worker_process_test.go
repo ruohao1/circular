@@ -143,7 +143,8 @@ func TestDelegationFullWorkerLifecycle(t *testing.T) {
 				t.Fatal(runs, tasks, invocations, attempt, unreleased)
 			}
 			var distinctWorkspaces, parentDeliveries, childDeliveries int
-			if err = f.pool.QueryRow(t.Context(), `SELECT (SELECT count(DISTINCT worktree_path) FROM workspaces),(SELECT count(*) FROM github_run_deliveries WHERE run_id=$1),(SELECT count(*) FROM github_run_deliveries WHERE run_id=$2)`, f.id, child).Scan(&distinctWorkspaces, &parentDeliveries, &childDeliveries); err != nil || distinctWorkspaces != 2 || parentDeliveries != 1 || childDeliveries != 0 {
+			// Both frozen contracts require explicit publication, including the resumed parent.
+			if err = f.pool.QueryRow(t.Context(), `SELECT (SELECT count(DISTINCT worktree_path) FROM workspaces),(SELECT count(*) FROM github_run_deliveries WHERE run_id=$1),(SELECT count(*) FROM github_run_deliveries WHERE run_id=$2)`, f.id, child).Scan(&distinctWorkspaces, &parentDeliveries, &childDeliveries); err != nil || distinctWorkspaces != 2 || parentDeliveries != 0 || childDeliveries != 0 {
 				t.Fatal("workspace or publication identity", distinctWorkspaces, parentDeliveries, childDeliveries, err)
 			}
 			var overlap bool
