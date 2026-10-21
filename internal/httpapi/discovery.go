@@ -43,7 +43,8 @@ func (a *api) createDiscoveryTask(w http.ResponseWriter, r *http.Request) {
 	task, err := insert(ctx, tx, "tasks", "TaskRead", map[string]any{
 		"project_id": project, "repository_id": values["repository_id"],
 		"title": "Understand " + name, "description": agents.DiscoveryTaskDescription,
-		"status": "open", "external_refs": map[string]any{"circular": map[string]any{"kind": agents.DiscoveryPreset, "agent_id": id}},
+		"completion_policy": map[string]any{"mode": "direct_completion", "requirements": []map[string]string{{"key": "discovery_report", "description": "Summarize the repository and proposed agent roles"}}},
+		"status":            "open", "external_refs": map[string]any{"circular": map[string]any{"kind": agents.DiscoveryPreset, "agent_id": id}},
 	})
 	if dbError(w, err, "discovery task") {
 		return

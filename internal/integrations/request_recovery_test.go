@@ -51,6 +51,11 @@ func readyRequestsAcrossProjects(t *testing.T) (fixture, integrations.RequestRou
 		if err != nil || r.Status != "ready" {
 			t.Fatal("fixture did not produce automatic request", r.Status, err)
 		}
+		selected := route
+		if id == second {
+			selected = other
+		}
+		requestTask(t, f, selected, r)
 	}
 	return f, route, first, second
 }

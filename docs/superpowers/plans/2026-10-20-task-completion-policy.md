@@ -10,7 +10,7 @@
 
 **Spec:** [Task completion policy design](../specs/2026-10-20-task-completion-policy-design.md).
 
-**State:** Planning only, based on merged PR #8 (`ea18ddd`). The proposed Done-after-verified-merge default still needs user review. This plan does not authorize deployment.
+**State:** Approved 2026-10-21 for native implementation and one final independent whole-branch review, based on merged PR #8 (`ea18ddd`). Review-required Tasks reach Done only after a verified merge. This plan does not authorize deployment or merging the implementation PR.
 
 ## Global constraints
 
@@ -73,7 +73,7 @@ Stable blocker codes include `policy_required`, `checks_unconfigured`, `report_r
 
 **Interfaces:** Produce `completion.ValidatePolicy(Policy) error`, `completion.ValidateReport(Policy, Report) error`, `completion.SealContract(Policy, CheckConfig) (Contract, error)`. Produce `postgres.SetTaskCompletionPolicy(ctx context.Context, tx pgx.Tx, taskID uuid.UUID, expectedRevision int64, policy completion.Policy) error`, `postgres.SetRepositoryChecks(ctx context.Context, tx pgx.Tx, repositoryID uuid.UUID, expectedRevision int64, config completion.CheckConfig) (completion.CheckConfig, error)`. Existing `CreateRun` and `ClaimExternalWork` signatures stay intact.
 
-- [ ] **1. Write failing policy, migration, and admission cases.** Use these assertions in the new table-driven tests:
+- [x] **1. Write failing policy, migration, and admission cases.** Use these assertions in the new table-driven tests:
 
   ```go
   // TestCompletionPolicyBounds
@@ -90,10 +90,10 @@ Stable blocker codes include `policy_required`, `checks_unconfigured`, `report_r
   // live owner/unsafe cleanup => upgrade rejected; legacy completed Task unchanged.
   ```
 
-- [ ] **2. Verify RED.** Run `go test ./internal/completion ./internal/migrate ./internal/postgres -run 'Completion(Policy|Report|Admission|Upgrade)' -count=1`. Expect missing implementation or failing assertions, with DB tests actually executing.
-- [ ] **3. Implement the contract and migration.** Add nullable policy/frozen contract/current-completion-session fields, versioned Repository check settings, and completion report/reconciliation storage with scoped FKs. Freeze in the existing atomic admission transaction, before inserting a session; preserve exact legacy command replay before new eligibility checks. Enforce frozen-contract immutability in Go and DB constraints/triggers. Do not backfill invented policies/evidence.
-- [ ] **4. Preserve launch callers.** Discovery explicitly saves its displayed direct/report preset. Delegation saves the spec's direct/handoff child preset before admission, preserving parent locks and continuation. Linear requests needing policy stay in an actionable waiting state instead of silently choosing one or retrying forever as generic failures. Add explicit policies/check fixtures to existing launch tests; tests about unset policy remain unset.
-- [ ] **5. Verify GREEN and commit.** Run the RED command plus `go test ./internal/postgres ./internal/httpapi ./internal/integrations -run 'Launch|Claim|Delegation|Discovery|Request' -count=1`; all pass with no new skips. Commit `feat: freeze task completion contracts`.
+- [x] **2. Verify RED.** Run `go test ./internal/completion ./internal/migrate ./internal/postgres -run 'Completion(Policy|Report|Admission|Upgrade)' -count=1`. Expect missing implementation or failing assertions, with DB tests actually executing.
+- [x] **3. Implement the contract and migration.** Add nullable policy/frozen contract/current-completion-session fields, versioned Repository check settings, and completion report/reconciliation storage with scoped FKs. Freeze in the existing atomic admission transaction, before inserting a session; preserve exact legacy command replay before new eligibility checks. Enforce frozen-contract immutability in Go and DB constraints/triggers. Do not backfill invented policies/evidence.
+- [x] **4. Preserve launch callers.** Discovery explicitly saves its displayed direct/report preset. Delegation saves the spec's direct/handoff child preset before admission, preserving parent locks and continuation. Linear requests needing policy stay in an actionable waiting state instead of silently choosing one or retrying forever as generic failures. Add explicit policies/check fixtures to existing launch tests; tests about unset policy remain unset.
+- [x] **5. Verify GREEN and commit.** Run the RED command plus `go test ./internal/postgres ./internal/httpapi ./internal/integrations -run 'Launch|Claim|Delegation|Discovery|Request' -count=1`; all pass with no new skips. Commit `feat: freeze task completion contracts`.
 
 ### Task 2: Apply reports through one guarded transition path
 

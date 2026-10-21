@@ -145,7 +145,7 @@ func (s *Resources) SuspendForDelegation(ctx context.Context, parentID uuid.UUID
 	}
 	record = delegations.Record{ID: uuid.New(), ParentRunID: parentID, TargetAgentID: request.AgentID, RequestKey: request.RequestKey, Status: "waiting"}
 	childTask := uuid.New()
-	if _, err = tx.Exec(ctx, `INSERT INTO tasks(id,project_id,repository_id,title,description,status,external_refs,parent_task_id) VALUES($1,$2,$3,$4,$5,'open','{}',$6)`, childTask, project, input.RepositoryID, request.Objective.Title, request.Objective.Description, task); err != nil {
+	if _, err = tx.Exec(ctx, `INSERT INTO tasks(id,project_id,repository_id,title,description,status,external_refs,parent_task_id,completion_policy) VALUES($1,$2,$3,$4,$5,'open','{}',$6,'{"mode":"direct_completion","requirements":[{"key":"handoff","description":"Describe the child result and evidence the parent needs to continue"}]}')`, childTask, project, input.RepositoryID, request.Objective.Title, request.Objective.Description, task); err != nil {
 		return record, err
 	}
 	child, err := CreateRun(ctx, tx, RunLaunchInput{TaskID: childTask, AgentID: request.AgentID, RequestKey: record.ID.String(), ExternalRefs: json.RawMessage(`{}`)})

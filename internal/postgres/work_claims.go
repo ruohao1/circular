@@ -66,6 +66,9 @@ func ClaimExternalWork(ctx context.Context, tx pgx.Tx, in ExternalWorkClaim, now
 	if err != nil {
 		return WorkClaimResult{}, err
 	}
+	if _, err = freezeTaskCompletion(ctx, tx, task); err != nil {
+		return WorkClaimResult{}, err
+	}
 	created, err := insertExternalWork(ctx, tx, in, task, prerequisites, digest, now)
 	if err != nil {
 		return WorkClaimResult{}, err
@@ -140,6 +143,9 @@ func insertExternalWork(ctx context.Context, tx pgx.Tx, in ExternalWorkClaim, ta
 	if err != nil || tag.RowsAffected() == 0 {
 		return false, err
 	}
+	if err = recordCompletionSession(ctx, tx, task.id, in.SessionID); err != nil {
+		return false, err
+	}
 	_, err = tx.Exec(ctx, `INSERT INTO work_session_receipts(id,session_id,operation_id,kind,input_digest,actor,at) VALUES($1,$2,$2,'claimed',$3,'external',$4)`, uuid.New(), in.SessionID, digest, now.UTC())
 	return err == nil, err
 }
@@ -164,6 +170,9 @@ func claimNativeWork(ctx context.Context, tx pgx.Tx, task planningTask, runID uu
 	_, err = tx.Exec(ctx, `INSERT INTO work_sessions(id,project_id,task_id,kind,run_id,admission_digest,client_name,admitted_revision,admitted_prerequisites,claimed_at)
 		VALUES($1,$2,$3,'native',$4,$5,'Circular',$6,$7,$8)`, id, task.project, task.id, runID, digest, task.revision, prerequisites, now)
 	if err != nil {
+		return WorkSessionView{}, err
+	}
+	if err = recordCompletionSession(ctx, tx, task.id, id); err != nil {
 		return WorkSessionView{}, err
 	}
 	if _, err = tx.Exec(ctx, `INSERT INTO work_session_receipts(id,session_id,operation_id,kind,input_digest,actor,at) VALUES($1,$2,$2,'claimed',$3,'system',$4)`, uuid.New(), id, digest, now); err != nil {

@@ -44,6 +44,7 @@ func queueFixture(t *testing.T, f fixture, title string, repository bool) (strin
 		input["repository_id"] = f.create(t, "repositories", map[string]any{"project_id": project, "name": "Queue source", "clone_url": "/fixture"})["id"]
 	}
 	task := f.create(t, "tasks", input)["id"].(string)
+	f.directCompletion(t, task)
 	return project, agent, task
 }
 

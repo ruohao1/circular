@@ -7,6 +7,7 @@ import (
 	"errors"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/ruohao1/circular/internal/completion"
 	"github.com/ruohao1/circular/internal/integrations"
 	"github.com/ruohao1/circular/internal/postgres"
 	"github.com/ruohao1/circular/internal/testsupport"
@@ -29,15 +30,16 @@ func preparedRequest(t *testing.T) (fixture, integrations.RequestRoute, integrat
 	if e != nil {
 		t.Fatal(e)
 	}
+	requestTask(t, f, saved, request)
 	return f, saved, request
 }
 
 func requestTask(t *testing.T, f fixture, route integrations.RequestRoute, request integrations.ExternalRequestDetail) uuid.UUID {
 	t.Helper()
 	id := uuid.New()
-	_, err := f.pool.Exec(t.Context(), `INSERT INTO tasks(id,project_id,repository_id,title,description,status,external_refs)
-		SELECT $1,$2,$3,title,prompt,'ready',jsonb_build_object('linear',jsonb_build_object('issue_id',issue_id,'account_id',source->>'organization_id'))
-		FROM external_requests WHERE id=$4`, id, f.project, route.RepositoryID, request.ID)
+	err := f.pool.QueryRow(t.Context(), `INSERT INTO tasks(id,project_id,repository_id,title,description,status,external_refs,completion_policy)
+		SELECT $1,$2,$3,title,prompt,'ready',jsonb_build_object('linear',jsonb_build_object('issue_id',issue_id,'account_id',source->>'organization_id')),'{"mode":"direct_completion","requirements":[]}'
+		FROM external_requests WHERE id=$4 ON CONFLICT(project_id,(external_refs->'linear'->>'issue_id')) WHERE external_refs->'linear'->>'issue_id' IS NOT NULL DO UPDATE SET external_refs=tasks.external_refs RETURNING id`, id, route.ProjectID, route.RepositoryID, request.ID).Scan(&id)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -355,7 +357,7 @@ func TestExternalInputCannotBeForgedThroughRunReferences(t *testing.T) {
 		t.Fatal(e)
 	}
 	defer tx.Rollback(t.Context())
-	_, e = tx.Exec(t.Context(), `INSERT INTO tasks(id,project_id,repository_id,title,description,status,external_refs) VALUES($1,$2,$3,'Manual task','Manual prompt','open','{}')`, task, f.project, route.RepositoryID)
+	_, e = tx.Exec(t.Context(), `INSERT INTO tasks(id,project_id,repository_id,title,description,status,external_refs,completion_policy) VALUES($1,$2,$3,'Manual task','Manual prompt','open','{}','{"mode":"direct_completion","requirements":[]}')`, task, f.project, route.RepositoryID)
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -369,5 +371,34 @@ func TestExternalInputCannotBeForgedThroughRunReferences(t *testing.T) {
 	var links int
 	if e = f.pool.QueryRow(t.Context(), `SELECT count(*) FROM external_session_runs WHERE run_id=$1`, r.RunID).Scan(&links); e != nil || links != 0 {
 		t.Fatal("trusted arbitrary refs", e)
+	}
+}
+
+func TestExternalRequestWaitsForCompletionPolicy(t *testing.T) {
+	f, route := agentRequestFixture(t)
+	if _, err := f.service.SaveRequestRoute(t.Context(), route); err != nil {
+		t.Fatal(err)
+	}
+	id := requestEvent(t, f, testsupport.LinearAgentEvent(uuid.NewString(), "created", "Plan completion first"))
+	if worked, err := f.service.ProcessExternalRequest(t.Context()); err != nil || !worked {
+		t.Fatal(worked, err)
+	}
+	waiting, err := f.service.ExternalRequest(t.Context(), id)
+	if err != nil || waiting.Status != "awaiting_approval" || waiting.RunID != "" || !strings.Contains(waiting.Reason, "completion policy") || !strings.Contains(waiting.Reason, "/tasks?taskId=") {
+		t.Fatal(waiting, err)
+	}
+	if worked, err := f.service.ProcessExternalRequest(t.Context()); err != nil || worked {
+		t.Fatal("unplanned request retried automatically", worked, err)
+	}
+	var task uuid.UUID
+	if err = f.pool.QueryRow(t.Context(), `SELECT id FROM tasks WHERE external_refs->'linear'->>'issue_id'=$1`, waiting.IssueID).Scan(&task); err != nil {
+		t.Fatal(err)
+	}
+	requestWorkTx(t, f, func(tx pgx.Tx) error {
+		return postgres.SetTaskCompletionPolicy(t.Context(), tx, task, 1, completion.Policy{Mode: "direct_completion"})
+	})
+	got, err := f.service.StartExternalRequest(t.Context(), id, waiting.InputFingerprint)
+	if err != nil || got.Status != "queued" || got.RunID == "" {
+		t.Fatal("planned request did not reactivate", got, err)
 	}
 }

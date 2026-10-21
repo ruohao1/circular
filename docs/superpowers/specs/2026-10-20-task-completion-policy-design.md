@@ -3,7 +3,7 @@
 Date: 2026-10-20
 Issue: [ISQ-473](https://linear.app/isqrd/issue/ISQ-473/enforce-per-task-completion-policies-and-evidence)
 Baseline: `ea18ddd00d503538622e50a080dc704f7df6ed1d` (merged ISQ-472, PR #8).
-Status: proposed design for review; no product implementation or deployment.
+Status: approved 2026-10-21 for native implementation and one final independent whole-branch review; deployment remains separate.
 
 ## Intent and scope
 
@@ -11,7 +11,7 @@ External coding agents are the primary clients. A Task defines its completion co
 
 The agreed policies are `review_required` and `direct_completion`. Review-required work moves to In Review after a valid successful report, then needs authoritative GitHub CI and a fresh independent review for merge readiness. Direct work can reach Done once its required result/evidence is present and ownership is safely released.
 
-**Proposed product default awaiting review:** review-required Tasks can reach Done only after GitHub confirms the PR was merged and Circular can match that merge to the verified evidence. Readiness alone leaves the Task In Review. The user was asked whether readiness before merge should instead permit Done; this document proposes the merge requirement, without treating silence as approval.
+**Approved product default:** review-required Tasks can reach Done only after GitHub confirms the PR was merged and Circular can match that merge to the verified evidence. Readiness alone leaves the Task In Review.
 
 This issue delivers the policy/evidence services, native integration, external PR review support, API/MCP inspection, and console controls. ISQ-474 adds external claim/heartbeat/finish transport; ISQ-478 adds bidirectional Linear Task status synchronization. Both must call these services. ISQ-473 does not claim those transports already exist.
 

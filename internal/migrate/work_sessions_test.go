@@ -39,7 +39,7 @@ func workHistoryJSON(t *testing.T, p *pgxpool.Pool) []byte {
 	var data []byte
 	// Removing the new nullable column lets us compare every pre-existing value.
 	err := p.QueryRow(t.Context(), `SELECT jsonb_build_object(
-		'tasks',(SELECT jsonb_agg(to_jsonb(t)-'parent_task_id') FROM tasks t),
+		'tasks',(SELECT jsonb_agg(to_jsonb(t)-'parent_task_id'-'completion_policy'-'completion_contract'-'completion_session_id') FROM tasks t),
 		'runs',(SELECT jsonb_agg(to_jsonb(r)) FROM runs r),
 		'events',(SELECT jsonb_agg(to_jsonb(e)) FROM events e),
 		'workspaces',(SELECT jsonb_agg(to_jsonb(w)) FROM workspaces w),

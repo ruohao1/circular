@@ -39,7 +39,7 @@ func planningSeed(t *testing.T) planningFixture {
 func (f planningFixture) task(t *testing.T, title, status, refs string) uuid.UUID {
 	t.Helper()
 	id := uuid.New()
-	_, e := f.p.Exec(t.Context(), `INSERT INTO tasks(id,project_id,repository_id,title,description,status,external_refs) VALUES($1,$2,$3,$4,'original',$5,$6)`, id, f.project, f.repo, title, status, refs)
+	_, e := f.p.Exec(t.Context(), `INSERT INTO tasks(id,project_id,repository_id,title,description,status,external_refs,completion_policy) VALUES($1,$2,$3,$4,'original',$5,$6,'{"mode":"direct_completion","requirements":[]}')`, id, f.project, f.repo, title, status, refs)
 	if e != nil {
 		t.Fatal(e)
 	}

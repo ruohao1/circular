@@ -87,6 +87,7 @@ func (f fixture) run(t *testing.T) map[string]any {
 	agent := f.create(t, "agents", map[string]any{"name": "Engineer", "project_id": project["id"]})
 	repository := f.create(t, "repositories", map[string]any{"project_id": project["id"], "name": "Source", "clone_url": "/fixture"})
 	task := f.create(t, "tasks", map[string]any{"title": "Exercise HTTP", "description": "Prepared requirements", "repository_id": repository["id"], "project_id": project["id"]})
+	f.directCompletion(t, task["id"].(string))
 	return f.create(t, "runs", map[string]any{"task_id": task["id"], "agent_id": agent["id"]})
 }
 
@@ -285,4 +286,12 @@ func TestArtifactDownloadsAreRunScopedAndIntegrityChecked(t *testing.T) {
 		t.Fatal(err)
 	}
 	f.request(t, "GET", path, "", 409)
+}
+
+// Seed the explicit contract independently of the launch behavior being tested.
+func (f fixture) directCompletion(t *testing.T, task string) {
+	t.Helper()
+	if _, err := f.pool.Exec(t.Context(), `UPDATE tasks SET completion_policy='{"mode":"direct_completion","requirements":[]}' WHERE id=$1`, task); err != nil {
+		t.Fatal(err)
+	}
 }

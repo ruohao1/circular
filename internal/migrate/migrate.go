@@ -15,7 +15,7 @@ import (
 //go:embed *.sql
 var scripts embed.FS
 
-const Head = "0019"
+const Head = "0020"
 
 var ErrVersion = errors.New("unsupported database schema version; no migrations applied")
 
@@ -58,10 +58,10 @@ func Up(ctx context.Context, pool *pgxpool.Pool) error {
 	if err != nil {
 		return err
 	}
-	if count > 1 || version != "" && version != "0001" && version != "0002" && version != "0003" && version != "0004" && version != "0005" && version != "0006" && version != "0007" && version != "0008" && version != "0009" && version != "0010" && version != "0011" && version != "0012" && version != "0013" && version != "0014" && version != "0015" && version != "0016" && version != "0017" && version != "0018" && version != Head || count == 1 && version == "" {
+	if count > 1 || version != "" && version != "0001" && version != "0002" && version != "0003" && version != "0004" && version != "0005" && version != "0006" && version != "0007" && version != "0008" && version != "0009" && version != "0010" && version != "0011" && version != "0012" && version != "0013" && version != "0014" && version != "0015" && version != "0016" && version != "0017" && version != "0018" && version != "0019" && version != Head || count == 1 && version == "" {
 		return ErrVersion
 	}
-	for _, next := range []string{"0001", "0002", "0003", "0004", "0005", "0006", "0007", "0008", "0009", "0010", "0011", "0012", "0013", "0014", "0015", "0016", "0017", "0018", Head} {
+	for _, next := range []string{"0001", "0002", "0003", "0004", "0005", "0006", "0007", "0008", "0009", "0010", "0011", "0012", "0013", "0014", "0015", "0016", "0017", "0018", "0019", Head} {
 		if next <= version {
 			continue
 		}

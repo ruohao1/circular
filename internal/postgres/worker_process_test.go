@@ -557,7 +557,7 @@ func TestRealWorkersKeepCancellationAndContainerAuthorityRunScoped(t *testing.T)
 		t.Fatal(err)
 	}
 	defer tx.Rollback(t.Context())
-	if _, err = tx.Exec(t.Context(), `INSERT INTO tasks(id,project_id,repository_id,title,description,status,external_refs) SELECT $2,t.project_id,t.repository_id,'Independent work',t.description,'open','{}' FROM tasks t JOIN runs r ON r.task_id=t.id WHERE r.id=$1`, f.id, secondTask); err != nil {
+	if _, err = tx.Exec(t.Context(), `INSERT INTO tasks(id,project_id,repository_id,title,description,status,external_refs,completion_policy) SELECT $2,t.project_id,t.repository_id,'Independent work',t.description,'open','{}','{"mode":"direct_completion","requirements":[]}' FROM tasks t JOIN runs r ON r.task_id=t.id WHERE r.id=$1`, f.id, secondTask); err != nil {
 		t.Fatal(err)
 	}
 	var agent uuid.UUID
