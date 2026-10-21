@@ -20,21 +20,23 @@ func completionReviewSource(ctx context.Context, q reviewQueryer, session, revie
 	var value prreviews.LaunchSnapshot
 	var report completion.Report
 	var run *uuid.UUID
+	var number *int
 	err := q.QueryRow(ctx, `SELECT t.id,t.project_id,repo.id,repo.clone_url,t.title,t.description,t.external_refs,
- repo.external_refs->'github'->>'installation_id',repo.external_refs->'github'->>'repository_id',repo.name,c.report,w.run_id
+ repo.external_refs->'github'->>'installation_id',repo.external_refs->'github'->>'repository_id',repo.name,c.report,w.run_id,pr.number
  FROM work_sessions w JOIN tasks t ON t.id=w.task_id JOIN repositories repo ON repo.id=t.repository_id AND repo.project_id=t.project_id
  JOIN task_completions c ON c.session_id=w.id AND c.task_id=t.id
+ JOIN task_completion_pull_requests pr ON pr.session_id=c.session_id
  WHERE w.id=$1 AND w.id=t.completion_session_id AND w.released_at IS NOT NULL AND w.outcome='succeeded' AND NOT w.needs_user_resolution
  AND t.status NOT IN ('completed','cancelled') AND t.completion_contract->'policy'->>'mode'='review_required'
  AND c.report IS NOT NULL AND NOT EXISTS(SELECT 1 FROM work_sessions owner WHERE owner.task_id=t.id AND owner.released_at IS NULL)`, session).
-		Scan(&value.TaskID, &value.ProjectID, &value.RepositoryID, &value.CloneURL, &value.TaskTitle, &value.TaskDescription, &value.TaskExternalRefs, &value.PR.InstallationID, &value.PR.GitHubRepositoryID, &value.PR.RepositoryName, &report, &run)
+		Scan(&value.TaskID, &value.ProjectID, &value.RepositoryID, &value.CloneURL, &value.TaskTitle, &value.TaskDescription, &value.TaskExternalRefs, &value.PR.InstallationID, &value.PR.GitHubRepositoryID, &value.PR.RepositoryName, &report, &run, &number)
 	if err != nil {
 		return value, reviewUnavailable(err)
 	}
-	if report.PullRequestNumber == nil {
+	if number == nil {
 		return value, prreviews.ErrSourceInvalid
 	}
-	value.PR.Number = *report.PullRequestNumber
+	value.PR.Number = *number
 	if run != nil {
 		value.SourceRunID = *run
 	} else {
@@ -142,9 +144,10 @@ func ReservePRReviewPublication(ctx context.Context, tx pgx.Tx, review, run uuid
 	err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM work_sessions w WHERE w.id=t.completion_session_id AND w.task_id=t.id
  AND w.run_id IS NOT DISTINCT FROM $8::uuid AND ($2::uuid IS NULL OR w.id=$2) AND w.released_at IS NOT NULL AND w.outcome='succeeded' AND NOT w.needs_user_resolution)
  AND t.status NOT IN ('completed','cancelled')
+ AND EXISTS(SELECT 1 FROM task_completion_pull_requests pr WHERE pr.session_id=t.completion_session_id AND pr.number=$9)
  AND repo.project_id=$3 AND repo.clone_url=$4 AND repo.external_refs->'github'->>'repository_id'=$5
  AND repo.external_refs->'github'->>'installation_id'=$6
- FROM tasks t JOIN repositories repo ON repo.id=t.repository_id WHERE t.id=$1 AND repo.id=$7 FOR SHARE OF repo`, snapshot.TaskID, source.WorkSessionID, snapshot.ProjectID, snapshot.CloneURL, snapshot.PR.GitHubRepositoryID, snapshot.PR.InstallationID, snapshot.RepositoryID, source.RunID).Scan(&allowed)
+ FROM tasks t JOIN repositories repo ON repo.id=t.repository_id WHERE t.id=$1 AND repo.id=$7 FOR SHARE OF repo`, snapshot.TaskID, source.WorkSessionID, snapshot.ProjectID, snapshot.CloneURL, snapshot.PR.GitHubRepositoryID, snapshot.PR.InstallationID, snapshot.RepositoryID, source.RunID, snapshot.PR.Number).Scan(&allowed)
 	if err != nil {
 		return err
 	}

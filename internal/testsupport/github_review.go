@@ -136,9 +136,16 @@ func (p *ProviderFixture) serveReview(w http.ResponseWriter, r *http.Request) bo
 		if state == "merged" {
 			state = "closed"
 		}
-		fixtureJSON(w, map[string]any{"number": v.Number, "html_url": v.URL, "state": state, "merged": f.State == "merged", "base": map[string]any{"ref": v.BaseRef, "sha": v.BaseSHA, "repo": map[string]any{"id": json.Number(f.BaseRepository)}}, "head": map[string]any{"ref": v.HeadRef, "sha": v.HeadSHA, "repo": map[string]any{"id": json.Number(f.HeadRepository)}}})
+		mergeSHA := ""
+		if p.CompletionChecksEnabled.Load() {
+			mergeSHA = strings.Repeat("c", 40)
+			if f.State == "merged" {
+				mergeSHA = strings.Repeat("e", 40)
+			}
+		}
+		fixtureJSON(w, map[string]any{"number": v.Number, "html_url": v.URL, "state": state, "merged": f.State == "merged", "merge_commit_sha": mergeSHA, "base": map[string]any{"ref": v.BaseRef, "sha": v.BaseSHA, "repo": map[string]any{"id": json.Number(f.BaseRepository)}}, "head": map[string]any{"ref": v.HeadRef, "sha": v.HeadSHA, "repo": map[string]any{"id": json.Number(f.HeadRepository)}}})
 	default:
-		return false
+		return p.CompletionChecksEnabled.Load() && serveCompletionFixture(w, r, v)
 	}
 	return true
 }

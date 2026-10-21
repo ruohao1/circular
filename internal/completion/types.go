@@ -46,16 +46,21 @@ type Blocker struct {
 	Action  string `json:"action"`
 }
 type Input struct {
-	Contract            *Contract `json:"contract"`
-	Report              *Report   `json:"report"`
-	SessionID           uuid.UUID `json:"session_id"`
-	CurrentSessionID    uuid.UUID `json:"current_session_id"`
-	Outcome             string    `json:"outcome"`
-	Released            bool      `json:"released"`
-	OwnerActive         bool      `json:"owner_active"`
-	CleanupPending      bool      `json:"cleanup_pending"`
-	NeedsUserResolution bool      `json:"needs_user_resolution"`
-	Stage               string    `json:"stage"`
+	Binding             *Binding          `json:"binding"`
+	Identity            *ProviderIdentity `json:"identity"`
+	Observation         *Observation      `json:"observation"`
+	Review              *ReviewEvidence   `json:"review"`
+	ReviewRevision      int64             `json:"review_revision"`
+	Contract            *Contract         `json:"contract"`
+	Report              *Report           `json:"report"`
+	SessionID           uuid.UUID         `json:"session_id"`
+	CurrentSessionID    uuid.UUID         `json:"current_session_id"`
+	Outcome             string            `json:"outcome"`
+	Released            bool              `json:"released"`
+	OwnerActive         bool              `json:"owner_active"`
+	CleanupPending      bool              `json:"cleanup_pending"`
+	NeedsUserResolution bool              `json:"needs_user_resolution"`
+	Stage               string            `json:"stage"`
 }
 type Verdict struct {
 	NextStage      string    `json:"next_stage"`

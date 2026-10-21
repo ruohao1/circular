@@ -58,7 +58,7 @@ func TestGitHubManifestRegistrationPersistsAndSupportsIndependentWorker(t *testi
 		Public      bool              `json:"public"`
 		Hook        json.RawMessage   `json:"hook_attributes"`
 	}
-	if json.Unmarshal([]byte(registration.Manifest), &manifest) != nil || manifest.Redirect != f.service.RegistrationCallbackURL() || len(manifest.Callbacks) != 1 || manifest.Callbacks[0] != f.service.CallbackURL("github") || manifest.Public || len(manifest.Hook) != 0 || manifest.Permissions["contents"] != "write" || manifest.Permissions["administration"] != "write" || manifest.Permissions["pull_requests"] != "write" || len(manifest.Permissions) != 4 {
+	if json.Unmarshal([]byte(registration.Manifest), &manifest) != nil || manifest.Redirect != f.service.RegistrationCallbackURL() || len(manifest.Callbacks) != 1 || manifest.Callbacks[0] != f.service.CallbackURL("github") || manifest.Public || len(manifest.Hook) != 0 || manifest.Permissions["contents"] != "write" || manifest.Permissions["administration"] != "write" || manifest.Permissions["pull_requests"] != "write" || manifest.Permissions["actions"] != "read" || manifest.Permissions["checks"] != "read" || len(manifest.Permissions) != 6 {
 		t.Fatal("incorrect registration defaults")
 	}
 	code, err := f.provider.ManifestCode(registration.Manifest)

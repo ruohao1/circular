@@ -139,24 +139,29 @@ func (s *Service) SetPRReviewSettings(ctx context.Context, project string, updat
 
 // inspectReviewPR verifies installation visibility and both numeric repository identities.
 func (s *Service) inspectReviewPR(ctx context.Context, token string, snapshot prreviews.LaunchSnapshot, actor PublisherIdentity) (prreviews.PRIdentity, string, error) {
+	pr, state, _, err := s.inspectCompletionPR(ctx, token, snapshot, actor)
+	return pr, state, err
+}
+func (s *Service) inspectCompletionPR(ctx context.Context, token string, snapshot prreviews.LaunchSnapshot, actor PublisherIdentity) (prreviews.PRIdentity, string, string, error) {
 	v := snapshot.PR
 	if !positiveNumber(v.GitHubRepositoryID) || !positiveNumber(v.InstallationID) || v.Number < 1 {
-		return v, "", prreviews.ErrSourceInvalid
+		return v, "", "", prreviews.ErrSourceInvalid
 	}
 	if actor.Mode != "app" {
 		if err := s.deliveryPermission(ctx, token, v.InstallationID); err != nil {
-			return v, "", err
+			return v, "", "", err
 		}
 	}
 	d := githubDelivery{GitHubRepository: v.GitHubRepositoryID, Installation: v.InstallationID, Name: v.RepositoryName, CredentialApp: actor.Mode == "app"}
 	if err := s.deliveryRepository(ctx, token, &d); err != nil {
-		return v, "", err
+		return v, "", "", err
 	}
 	var pr struct {
 		Number     int    `json:"number"`
 		URL        string `json:"html_url"`
 		State      string `json:"state"`
 		Merged     bool   `json:"merged"`
+		MergeSHA   string `json:"merge_commit_sha"`
 		Base, Head struct {
 			Ref  string `json:"ref"`
 			SHA  string `json:"sha"`
@@ -167,23 +172,23 @@ func (s *Service) inspectReviewPR(ctx context.Context, token string, snapshot pr
 	}
 	status, err := s.githubRequest(ctx, token, http.MethodGet, "/repos/"+v.RepositoryName+"/pulls/"+strconv.Itoa(v.Number), nil, &pr)
 	if err != nil {
-		return v, "", err
+		return v, "", "", err
 	}
 	if status != 200 {
-		return v, "", deliveryHTTPError(status)
+		return v, "", "", deliveryHTTPError(status)
 	}
 	if pr.Number != v.Number || pr.URL != "https://github.com/"+v.RepositoryName+"/pull/"+strconv.Itoa(v.Number) || string(pr.Base.Repo.ID) != v.GitHubRepositoryID || string(pr.Head.Repo.ID) != v.GitHubRepositoryID || !prreviews.CommitPattern.MatchString(pr.Base.SHA) || !prreviews.CommitPattern.MatchString(pr.Head.SHA) || pr.Base.Ref == "" || pr.Head.Ref == "" {
-		return v, "", prreviews.ErrSourceInvalid
+		return v, "", "", prreviews.ErrSourceInvalid
 	}
 	if pr.State != "open" && pr.State != "closed" {
-		return v, "", prreviews.ErrSourceInvalid
+		return v, "", "", prreviews.ErrSourceInvalid
 	}
 	v.BaseSHA, v.HeadSHA, v.BaseRef, v.HeadRef, v.URL = pr.Base.SHA, pr.Head.SHA, pr.Base.Ref, pr.Head.Ref, pr.URL
 	state := pr.State
 	if pr.Merged {
 		state = "merged"
 	}
-	return v, state, nil
+	return v, state, pr.MergeSHA, nil
 }
 func (s *Service) prepareReview(ctx context.Context, source, reviewer uuid.UUID) (prreviews.LaunchSnapshot, error) {
 	return s.prepareReviewSource(ctx, prreviews.Source{RunID: &source}, reviewer)

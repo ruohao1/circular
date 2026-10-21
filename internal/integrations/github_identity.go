@@ -39,10 +39,11 @@ type PublisherIdentity struct {
 type GitHubPurpose string
 
 const (
-	GitHubClone       GitHubPurpose = "clone"
-	GitHubPublish     GitHubPurpose = "publish"
-	GitHubReviewRead  GitHubPurpose = "review_read"
-	GitHubReviewWrite GitHubPurpose = "review_write"
+	GitHubCompletionRead GitHubPurpose = "completion_read"
+	GitHubClone          GitHubPurpose = "clone"
+	GitHubPublish        GitHubPurpose = "publish"
+	GitHubReviewRead     GitHubPurpose = "review_read"
+	GitHubReviewWrite    GitHubPurpose = "review_write"
 )
 
 type githubInstallationToken struct {
@@ -275,6 +276,9 @@ func (s *Service) withGitHubRepository(ctx context.Context, project, repositoryI
 		return err
 	}
 	if !bound {
+		if purpose == GitHubCompletionRead {
+			return ErrIdentityUnavailable
+		}
 		return s.withToken(ctx, project, "github", func(token string) error { return use(token, PublisherIdentity{Mode: "user", Provider: "github"}) })
 	}
 	identity, err := s.Identity(ctx, project, "github")
@@ -303,6 +307,10 @@ func (s *Service) withGitHubRepository(ctx context.Context, project, repositoryI
 	case GitHubPublish:
 		permissions["contents"] = "write"
 		permissions["pull_requests"] = "write"
+	case GitHubCompletionRead:
+		permissions["pull_requests"] = "read"
+		permissions["actions"] = "read"
+		permissions["checks"] = "read"
 	case GitHubReviewRead:
 		permissions["pull_requests"] = "read"
 	case GitHubReviewWrite:

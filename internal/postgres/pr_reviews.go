@@ -271,6 +271,9 @@ func (s *PRReviewStore) Launch(ctx context.Context, command ReviewLaunch) (prrev
 		return zero, err
 	}
 	if completionSession != nil {
+		if _, err = tx.Exec(ctx, `UPDATE task_completion_evidence SET observation=NULL,lease_owner=NULL,lease_until=NULL,next_check_at=now() WHERE session_id=$1`, *completionSession); err != nil {
+			return zero, err
+		}
 		if _, err = tx.Exec(ctx, `UPDATE task_completions SET latest_review_id=$2,review_revision=review_revision+1 WHERE session_id=$1`, *completionSession, reviewID); err != nil {
 			return zero, err
 		}

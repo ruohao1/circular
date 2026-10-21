@@ -74,6 +74,26 @@ func SetRepositoryChecks(ctx context.Context, tx pgx.Tx, repositoryID uuid.UUID,
 	return config, nil
 }
 
+// Provider verification happens before this transaction; fence the observed identity.
+func SetVerifiedRepositoryChecks(ctx context.Context, tx pgx.Tx, repo uuid.UUID, expected int64, config completion.CheckConfig, identity completion.ProviderIdentity) (completion.CheckConfig, error) {
+	var current completion.ProviderIdentity
+	var project uuid.UUID
+	if err := tx.QueryRow(ctx, `SELECT project_id FROM repositories WHERE id=$1`, repo).Scan(&project); err != nil {
+		return completion.CheckConfig{}, err
+	}
+	if _, err := tx.Exec(ctx, `SELECT id FROM provider_identities WHERE id=$1 FOR SHARE`, identity.ID); err != nil {
+		return completion.CheckConfig{}, err
+	}
+	err := tx.QueryRow(ctx, `SELECT i.id,i.generation,i.account_id,r.external_refs->'github'->>'repository_id' FROM repositories r JOIN integration_identity_bindings b ON b.project_id=r.project_id AND b.provider='github' JOIN provider_identities i ON i.id=b.identity_id WHERE r.id=$1 AND b.enabled AND i.enabled AND i.status='available' AND i.account_id=r.external_refs->'github'->>'installation_id' FOR SHARE OF b`, repo).Scan(&current.ID, &current.Generation, &current.InstallationID, &current.RepositoryID)
+	if err != nil {
+		return completion.CheckConfig{}, err
+	}
+	if current != identity {
+		return completion.CheckConfig{}, ErrTaskPlanningConflict
+	}
+	return SetRepositoryChecks(ctx, tx, repo, expected, config)
+}
+
 // Caller holds Project → Task locks; an existing contract survives every retry.
 func freezeTaskCompletion(ctx context.Context, tx pgx.Tx, task planningTask) (completion.Contract, error) {
 	var raw, frozen, checks []byte
@@ -118,6 +138,9 @@ func freezeTaskCompletion(ctx context.Context, tx pgx.Tx, task planningTask) (co
 
 func recordCompletionSession(ctx context.Context, tx pgx.Tx, taskID, sessionID uuid.UUID) error {
 	if _, err := tx.Exec(ctx, `INSERT INTO task_completions(task_id,session_id) VALUES($1,$2)`, taskID, sessionID); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(ctx, `INSERT INTO task_completion_evidence(session_id) VALUES($1)`, sessionID); err != nil {
 		return err
 	}
 	_, err := tx.Exec(ctx, `UPDATE tasks SET completion_session_id=$2 WHERE id=$1`, taskID, sessionID)

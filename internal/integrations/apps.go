@@ -280,7 +280,7 @@ func (s *Service) BeginGitHubRegistration(ctx context.Context, project, organiza
 		"description":  "Read selected repositories for Circular coding tasks.",
 		"redirect_url": s.RegistrationCallbackURL(), "callback_urls": []string{s.CallbackURL("github")},
 		"setup_url": s.WebURL() + "/setup?section=integrations",
-		"public":    false, "request_oauth_on_install": false, "default_permissions": map[string]string{"contents": "write", "metadata": "read", "administration": "write", "pull_requests": "write"}, "default_events": []string{},
+		"public":    false, "request_oauth_on_install": false, "default_permissions": map[string]string{"contents": "write", "metadata": "read", "administration": "write", "pull_requests": "write", "actions": "read", "checks": "read"}, "default_events": []string{},
 	})
 	path := "/settings/apps/new"
 	if organization != "" {
@@ -352,7 +352,7 @@ func (s *Service) CompleteGitHubRegistration(ctx context.Context, state, browser
 		return fail(ErrProvider)
 	}
 	for name, permission := range response.Permissions {
-		if !(name == "metadata" && permission == "read" || (name == "contents" || name == "administration" || name == "pull_requests") && permission == "write") {
+		if !((name == "metadata" || name == "actions" || name == "checks") && permission == "read" || (name == "contents" || name == "administration" || name == "pull_requests") && permission == "write") {
 			return fail(ErrAccess)
 		}
 	}

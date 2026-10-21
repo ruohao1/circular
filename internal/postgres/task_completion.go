@@ -83,6 +83,11 @@ func inspectTaskCompletion(ctx context.Context, tx pgx.Tx, taskID uuid.UUID, ses
 			}
 		}
 	}
+	if v.SessionID != uuid.Nil {
+		if err := inspectCompletionEvidence(ctx, tx, &v); err != nil {
+			return v, err
+		}
+	}
 	v.Verdict = completion.Evaluate(v.Input, now)
 	return v, nil
 }

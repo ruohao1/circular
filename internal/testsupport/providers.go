@@ -67,6 +67,7 @@ type ProviderFixture struct {
 	ReviewCreates                 atomic.Int64
 	ReviewLists                   atomic.Int64
 	ReviewReads                   atomic.Int64
+	CompletionChecksEnabled       atomic.Bool
 	ReviewReadReject              atomic.Int64
 	ReviewReject                  atomic.Int64
 	ReviewPermissionDenied        atomic.Bool

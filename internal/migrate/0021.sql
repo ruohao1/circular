@@ -10,6 +10,29 @@ CREATE UNIQUE INDEX pr_review_external_request ON pr_review_launch_intents(sourc
 ALTER TABLE task_completions ADD COLUMN latest_review_id UUID REFERENCES pr_reviews(id) ON DELETE SET NULL,
     ADD COLUMN review_revision BIGINT NOT NULL DEFAULT 0 CHECK (review_revision BETWEEN 0 AND 9007199254740991);
 
+CREATE TABLE task_completion_evidence (
+    session_id UUID PRIMARY KEY REFERENCES task_completions(session_id) ON DELETE CASCADE,
+    pull_request_number INTEGER CHECK(pull_request_number>0),
+    binding_revision BIGINT NOT NULL DEFAULT 0 CHECK(binding_revision BETWEEN 0 AND 9007199254740991),
+    observation JSONB CHECK(observation IS NULL OR jsonb_typeof(observation)='object'),
+    accepted_observation JSONB CHECK(accepted_observation IS NULL OR jsonb_typeof(accepted_observation)='object'),
+    lease_owner UUID,
+    lease_until TIMESTAMPTZ,
+    next_check_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CHECK((lease_owner IS NULL)=(lease_until IS NULL))
+);
+INSERT INTO task_completion_evidence(session_id) SELECT session_id FROM task_completions;
+CREATE VIEW task_completion_pull_requests AS
+SELECT c.session_id,COALESCE(e.pull_request_number,(c.report->>'pull_request_number')::integer,
+    CASE WHEN d.status='delivered' AND d.repository_id=t.repository_id
+        AND d.github_repository_id=repo.external_refs->'github'->>'repository_id'
+        AND d.installation_id=repo.external_refs->'github'->>'installation_id'
+        THEN NULLIF(d.pull_request_number,0) END) AS number,e.binding_revision
+FROM task_completions c JOIN task_completion_evidence e ON e.session_id=c.session_id
+JOIN work_sessions w ON w.id=c.session_id JOIN tasks t ON t.id=c.task_id
+LEFT JOIN repositories repo ON repo.id=t.repository_id
+LEFT JOIN github_run_deliveries d ON d.run_id=w.run_id;
+
 CREATE OR REPLACE FUNCTION enforce_pr_review_identity() RETURNS trigger LANGUAGE plpgsql AS $$
 DECLARE target UUID; previous UUID;
 BEGIN
