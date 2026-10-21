@@ -8,6 +8,9 @@ export type IntegrationIdentityStatus = components["schemas"]["IdentityStatus"];
 export type PRReview = components["schemas"]["PRReviewRead"];
 export type PRReviewLaunch = components["schemas"]["PRReviewLaunch"];
 export type PRReviewSettings = components["schemas"]["PRReviewSettingsRead"];
+export type TaskCompletionView = components["schemas"]["CompletionView"];
+export type CompletionPolicy = components["schemas"]["CompletionPolicy"];
+export type CompletionCheckSetup = components["schemas"]["CompletionCheckSetup"];
 export type Project = components["schemas"]["ProjectRead"];
 export type Repository = components["schemas"]["RepositoryRead"];
 export type Agent = components["schemas"]["AgentRead"];
@@ -239,6 +242,24 @@ export const api = {
     ),
   prReview: (review: string) =>
     request<PRReview>(`/pr-reviews/${encodeURIComponent(review)}`),
+  taskCompletion: (task: string) =>
+    request<TaskCompletionView>(`/tasks/${encodeURIComponent(task)}/completion`),
+  refreshTaskCompletion: (task: string) =>
+    request<TaskCompletionView>(`/tasks/${encodeURIComponent(task)}/completion/refresh`, {}),
+  setTaskCompletionPolicy: (task: string, body: Schema["CompletionPolicyUpdate"]) =>
+    request<TaskCompletionView>(`/tasks/${encodeURIComponent(task)}/completion-policy`, body, undefined, "PUT"),
+  bindTaskPullRequest: (task: string, body: Schema["CompletionBindRequest"]) =>
+    request<TaskCompletionView>(`/tasks/${encodeURIComponent(task)}/pull-request`, body, undefined, "PUT"),
+  repositoryCompletionChecks: (repository: string) =>
+    request<CompletionCheckSetup>(`/repositories/${encodeURIComponent(repository)}/completion-checks`),
+  setRepositoryCompletionChecks: (repository: string, body: Schema["CompletionChecksUpdate"]) =>
+    request<Schema["CompletionCheckConfig"]>(`/repositories/${encodeURIComponent(repository)}/completion-checks`, body, undefined, "PUT"),
+  prepareTaskPRReview: (task: string, reviewer = "") =>
+    request<Schema["PRReviewPreparation"]>(`/tasks/${encodeURIComponent(task)}/pr-reviews/prepare?${query({ reviewer_id: reviewer })}`),
+  taskPRReviews: (task: string, cursor = "") =>
+    request<Schema["PRReviewPage"]>(`/tasks/${encodeURIComponent(task)}/pr-reviews?${query({ cursor })}`),
+  launchTaskPRReview: (task: string, body: PRReviewLaunch) =>
+    request<PRReview>(`/tasks/${encodeURIComponent(task)}/pr-reviews`, body),
   refreshPRReview: (review: string) =>
     request<PRReview>(`/pr-reviews/${encodeURIComponent(review)}/refresh`, {}),
   retryPRReviewPublication: (review: string) =>

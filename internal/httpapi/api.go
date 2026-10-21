@@ -82,6 +82,7 @@ func New(pool *pgxpool.Pool, config Config) (http.Handler, error) {
 	mux.HandleFunc("GET /api/v1/tasks/{task_id}/planning", a.taskPlanningDetail)
 	mux.HandleFunc("PATCH /api/v1/tasks/{task_id}", a.updateTaskPlanning)
 	mux.HandleFunc("POST /api/v1/tasks/{task_id}/move", a.moveTask)
+	a.completionRoutes(mux)
 	mux.HandleFunc("GET /api/v1/projects/{project_id}/run-queue", a.runQueue)
 	a.integrationRoutes(mux)
 	mux.HandleFunc("GET /api/v1/runs", func(w http.ResponseWriter, r *http.Request) { a.list(w, r, "runs", "RunRead") })

@@ -812,6 +812,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/repositories/{repository_id}/completion-checks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["getRepositoryCompletionChecks"];
+        put: operations["setRepositoryCompletionChecks"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/runs": {
         parameters: {
             query?: never;
@@ -1092,6 +1108,54 @@ export interface paths {
         patch: operations["updateTaskPlanning"];
         trace?: never;
     };
+    "/api/v1/tasks/{task_id}/completion": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["getTaskCompletion"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tasks/{task_id}/completion-policy": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put: operations["setTaskCompletionPolicy"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tasks/{task_id}/completion/refresh": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["refreshTaskCompletion"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/tasks/{task_id}/move": {
         parameters: {
             query?: never;
@@ -1117,6 +1181,57 @@ export interface paths {
         };
         get: operations["getTaskPlanning"];
         put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tasks/{task_id}/pr-reviews": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List pr reviews */
+        get: operations["list_task_pr_reviews"];
+        put?: never;
+        /** Launch pr review */
+        post: operations["launch_task_pr_review"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tasks/{task_id}/pr-reviews/prepare": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Prepare pr review */
+        get: operations["prepare_task_pr_review"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tasks/{task_id}/pull-request": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put: operations["bindTaskPullRequest"];
         post?: never;
         delete?: never;
         options?: never;
@@ -1274,6 +1389,171 @@ export interface components {
         CodexModelCatalog: {
             default_model: string;
             models: components["schemas"]["CodexModel"][];
+        };
+        CompletionBinding: {
+            number: number;
+            revision: number;
+        };
+        CompletionBindRequest: {
+            expected_revision: number;
+            number: number;
+            /** Format: uuid */
+            session_id: string;
+        };
+        CompletionBlocker: {
+            action: string;
+            code: string;
+            message: string;
+        };
+        CompletionCheckConfig: {
+            checks: components["schemas"]["CompletionRequiredCheck"][];
+            revision: number;
+        };
+        CompletionCheckEvidence: {
+            attempt: number;
+            check: components["schemas"]["CompletionRequiredCheck"];
+            check_run_id: string;
+            conclusion: string;
+            job_id: string;
+            run_conclusion: string;
+            run_id: string;
+            run_status: string;
+            status: string;
+            tested_sha: string;
+            url: string;
+        };
+        CompletionCheckSetup: {
+            available: components["schemas"]["CompletionRequiredCheck"][];
+            config: components["schemas"]["CompletionCheckConfig"] | null;
+            reason: string;
+            repository_name: string;
+        };
+        CompletionChecksUpdate: {
+            checks: components["schemas"]["CompletionRequiredCheck"][];
+            expected_revision: number;
+        };
+        CompletionConflict: {
+            blockers: components["schemas"]["CompletionBlocker"][];
+            /** @enum {string} */
+            code: "completion_blocked";
+            detail: string;
+        };
+        CompletionContract: {
+            check_config: components["schemas"]["CompletionCheckConfig"];
+            fingerprint: string;
+            policy: components["schemas"]["CompletionPolicy"];
+        };
+        CompletionEvidence: {
+            detail: string;
+            key: string;
+            links?: string[];
+        };
+        CompletionObservation: {
+            binding_revision: number;
+            /** Format: date-time */
+            checked_at: string;
+            checks: components["schemas"]["CompletionCheckEvidence"][] | null;
+            contract_fingerprint: string;
+            error_code: string;
+            identity: components["schemas"]["CompletionProviderIdentity"];
+            merge_sha: string;
+            merge_verified: boolean;
+            merged: boolean;
+            pr: components["schemas"]["PRReviewIdentity"];
+            pr_state: string;
+            /** Format: uuid */
+            review_id: string;
+            review_report_sha: string;
+            review_revision: number;
+            reviewer_fingerprint: string;
+            revision: components["schemas"]["CompletionVerifiedRevision"];
+            /** Format: uuid */
+            session_id: string;
+        };
+        CompletionPolicy: {
+            /** @enum {string} */
+            mode: "review_required" | "direct_completion";
+            requirements?: components["schemas"]["CompletionRequirement"][];
+        };
+        CompletionPolicyUpdate: {
+            expected_revision: number;
+            policy: components["schemas"]["CompletionPolicy"];
+        };
+        CompletionProviderIdentity: {
+            generation: number;
+            /** Format: uuid */
+            id: string;
+            installation_id: string;
+            repository_id: string;
+        };
+        CompletionReport: {
+            evidence: components["schemas"]["CompletionEvidence"][] | null;
+            pull_request_number?: number;
+            result: string;
+        };
+        CompletionRequiredCheck: {
+            app_id: string;
+            name: string;
+            workflow_id: string;
+            workflow_path: string;
+        };
+        CompletionRequirement: {
+            description: string;
+            key: string;
+        };
+        CompletionReviewEvidence: {
+            base_sha: string;
+            coverage: string;
+            findings: components["schemas"]["PRReviewFinding"][] | null;
+            head_sha: string;
+            /** Format: uuid */
+            id: string;
+            report_sha: string;
+            retained: boolean;
+            reviewer_fingerprint: string;
+            /** Format: uuid */
+            run_id: string;
+            state: string;
+        };
+        CompletionVerdict: {
+            advisories: string[];
+            blockers: components["schemas"]["CompletionBlocker"][];
+            can_complete: boolean;
+            /** @enum {string} */
+            merge_readiness: "not_applicable" | "blocked" | "ready";
+            next_stage: string;
+        };
+        CompletionVerifiedRevision: {
+            base_sha: string;
+            head_sha: string;
+            tested_sha: string;
+            tree_sha: string;
+        };
+        CompletionView: {
+            binding: components["schemas"]["CompletionBinding"] | null;
+            cleanup_pending: boolean;
+            contract: components["schemas"]["CompletionContract"] | null;
+            /** Format: uuid */
+            current_session_id: string;
+            identity: components["schemas"]["CompletionProviderIdentity"] | null;
+            needs_user_resolution: boolean;
+            observation: components["schemas"]["CompletionObservation"] | null;
+            /** Format: date-time */
+            observed_at: string;
+            outcome: string;
+            owner_active: boolean;
+            policy: components["schemas"]["CompletionPolicy"] | null;
+            released: boolean;
+            report: components["schemas"]["CompletionReport"] | null;
+            review: components["schemas"]["CompletionReviewEvidence"] | null;
+            review_revision: number;
+            revision: number;
+            /** Format: uuid */
+            session_id: string;
+            stage: components["schemas"]["TaskStatus"];
+            /** Format: uuid */
+            task_id: string;
+            verdict: components["schemas"]["CompletionVerdict"];
         };
         ConnectionDisconnect: {
             disconnected: boolean;
@@ -1769,6 +2049,8 @@ export interface components {
             /** Format: uuid */
             source_run_id: string;
             text: string;
+            /** Format: uuid */
+            work_session_id?: string;
         };
         PRReviewFinding: {
             consequence: string;
@@ -1884,6 +2166,7 @@ export interface components {
             /** Format: uuid */
             repository_id: string;
             reviewer: components["schemas"]["PRReviewerSnapshot"];
+            source?: components["schemas"]["PRReviewSource"];
             /** Format: uuid */
             source_run_id: string;
             task_description: string;
@@ -1893,7 +2176,15 @@ export interface components {
             /** Format: uuid */
             task_id: string;
             task_title: string;
+            /** @enum {integer} */
+            version?: 2;
         };
+        PRReviewSource: {
+            /** Format: uuid */
+            run_id?: string;
+            /** Format: uuid */
+            work_session_id?: string;
+        } & (unknown | unknown);
         PublisherIdentity: {
             account_id: string;
             actor_id: string;
@@ -2203,6 +2494,8 @@ export interface components {
             status: components["schemas"]["RunStatus"];
         };
         TaskPlanningSummary: {
+            completion_contract?: components["schemas"]["CompletionContract"] | null;
+            completion_policy?: components["schemas"]["CompletionPolicy"] | null;
             /**
              * Created At
              * Format: date-time
@@ -2257,6 +2550,8 @@ export interface components {
         TaskPriority: "none" | "low" | "normal" | "high" | "urgent";
         /** TaskRead */
         TaskRead: {
+            completion_contract?: components["schemas"]["CompletionContract"] | null;
+            completion_policy?: components["schemas"]["CompletionPolicy"] | null;
             /**
              * Created At
              * Format: date-time
@@ -5869,6 +6164,110 @@ export interface operations {
             };
         };
     };
+    getRepositoryCompletionChecks: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                repository_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Completion state */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CompletionCheckSetup"];
+                };
+            };
+            /** @description Resource not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Completion blocked, frozen policy, or changed revision */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Request exceeds 128 KiB */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Invalid input */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    setRepositoryCompletionChecks: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                repository_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CompletionChecksUpdate"];
+            };
+        };
+        responses: {
+            /** @description Completion state */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CompletionCheckConfig"];
+                };
+            };
+            /** @description Resource not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Completion blocked, frozen policy, or changed revision */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Request exceeds 128 KiB */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Invalid input */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
     list_runs_api_v1_runs_get: {
         parameters: {
             query?: {
@@ -6925,6 +7324,164 @@ export interface operations {
             };
         };
     };
+    getTaskCompletion: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                task_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Completion state */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CompletionView"];
+                };
+            };
+            /** @description Resource not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Completion blocked, frozen policy, or changed revision */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Request exceeds 128 KiB */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Invalid input */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    setTaskCompletionPolicy: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                task_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CompletionPolicyUpdate"];
+            };
+        };
+        responses: {
+            /** @description Completion state */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CompletionView"];
+                };
+            };
+            /** @description Resource not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Completion blocked, frozen policy, or changed revision */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Request exceeds 128 KiB */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Invalid input */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    refreshTaskCompletion: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                task_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PRReviewEmpty"];
+            };
+        };
+        responses: {
+            /** @description Completion state */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CompletionView"];
+                };
+            };
+            /** @description Resource not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Completion blocked, frozen policy, or changed revision */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Request exceeds 128 KiB */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Invalid input */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
     moveTask: {
         parameters: {
             query?: never;
@@ -6961,7 +7518,9 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["CompletionConflict"] | components["schemas"]["IntegrationProblem"];
+                };
             };
             /** @description Body exceeds 128 KiB */
             413: {
@@ -7008,6 +7567,324 @@ export interface operations {
             };
             /** @description Task locked or revision changed */
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Invalid input */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    list_task_pr_reviews: {
+        parameters: {
+            query?: {
+                cursor?: string;
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                task_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PRReviewPage"];
+                };
+            };
+            /** @description Permission or origin denied */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IntegrationProblem"];
+                };
+            };
+            /** @description Resource not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IntegrationProblem"];
+                };
+            };
+            /** @description Preparation changed, key conflict, or connection/reviewer unavailable */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IntegrationProblem"];
+                };
+            };
+            /** @description JSON request required */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IntegrationProblem"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Provider temporarily unavailable */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IntegrationProblem"];
+                };
+            };
+            /** @description Integration configuration unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IntegrationProblem"];
+                };
+            };
+        };
+    };
+    launch_task_pr_review: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                task_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PRReviewLaunch"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PRReviewRead"];
+                };
+            };
+            /** @description Permission or origin denied */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IntegrationProblem"];
+                };
+            };
+            /** @description Resource not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IntegrationProblem"];
+                };
+            };
+            /** @description Preparation changed, key conflict, or connection/reviewer unavailable */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IntegrationProblem"];
+                };
+            };
+            /** @description JSON request required */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IntegrationProblem"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Provider temporarily unavailable */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IntegrationProblem"];
+                };
+            };
+            /** @description Integration configuration unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IntegrationProblem"];
+                };
+            };
+        };
+    };
+    prepare_task_pr_review: {
+        parameters: {
+            query?: {
+                reviewer_id?: string;
+            };
+            header?: never;
+            path: {
+                task_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PRReviewPreparation"];
+                };
+            };
+            /** @description Permission or origin denied */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IntegrationProblem"];
+                };
+            };
+            /** @description Resource not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IntegrationProblem"];
+                };
+            };
+            /** @description Preparation changed, key conflict, or connection/reviewer unavailable */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IntegrationProblem"];
+                };
+            };
+            /** @description JSON request required */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IntegrationProblem"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Provider temporarily unavailable */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IntegrationProblem"];
+                };
+            };
+            /** @description Integration configuration unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IntegrationProblem"];
+                };
+            };
+        };
+    };
+    bindTaskPullRequest: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                task_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CompletionBindRequest"];
+            };
+        };
+        responses: {
+            /** @description Completion state */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CompletionView"];
+                };
+            };
+            /** @description Resource not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Completion blocked, frozen policy, or changed revision */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Request exceeds 128 KiB */
+            413: {
                 headers: {
                     [name: string]: unknown;
                 };

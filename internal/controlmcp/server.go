@@ -38,7 +38,7 @@ type runInput struct {
 }
 
 func add[In any](server *mcp.Server, name, description string, readOnly, destructive, idempotent bool, handler func(context.Context, In) (object, error)) {
-	open := strings.Contains(name, "pr_review") || name == "circular_start_request" || name == "circular_stop_request" || name == "start_run" || name == "create_github_repository" || name == "list_github_accounts" || name == "get_github_publishing" || name == "set_github_publishing" || name == "publish_run_pull_request"
+	open := strings.Contains(name, "pr_review") || name == "circular_start_request" || name == "circular_stop_request" || name == "start_run" || name == "create_github_repository" || name == "list_github_accounts" || name == "get_github_publishing" || name == "set_github_publishing" || name == "publish_run_pull_request" || name == "refresh_task_completion" || name == "bind_task_pull_request"
 	mcp.AddTool(server, &mcp.Tool{Name: name, Description: description, Annotations: &mcp.ToolAnnotations{
 		ReadOnlyHint: readOnly, DestructiveHint: &destructive, IdempotentHint: idempotent, OpenWorldHint: &open,
 	}}, func(ctx context.Context, _ *mcp.CallToolRequest, input In) (*mcp.CallToolResult, object, error) {
@@ -189,6 +189,7 @@ func New(config Config) (*mcp.Server, error) {
 	c.addGitHubReadTools(server)
 	c.addGitHubDeliveryReadTools(server)
 	c.addPRReviewReadTools(server)
+	c.addCompletionReadTools(server)
 	c.addExternalRequestReads(server)
 	c.addDelegationRead(server)
 	c.addTaskPlanningTools(server)
@@ -199,6 +200,7 @@ func New(config Config) (*mcp.Server, error) {
 		c.addGitHubMutations(server)
 		c.addGitHubDeliveryMutations(server)
 		c.addPRReviewMutations(server)
+		c.addCompletionMutations(server)
 		c.addExternalRequestMutations(server)
 	}
 	return server, nil

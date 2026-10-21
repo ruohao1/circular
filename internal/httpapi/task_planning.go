@@ -259,6 +259,11 @@ func (a *api) moveTask(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	if input.Status == "completed" {
+		if _, err := a.integrations.RefreshTaskCompletion(r.Context(), id); completionError(w, err) {
+			return
+		}
+	}
 	tx, err := a.pool.Begin(r.Context())
 	if dbError(w, err, "Task") {
 		return

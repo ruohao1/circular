@@ -55,7 +55,7 @@ func (a *api) setPRReviewSettings(w http.ResponseWriter, r *http.Request) {
 	}
 }
 func (a *api) preparePRReview(w http.ResponseWriter, r *http.Request) {
-	source, ok := a.githubDeliveryRun(w, r)
+	source, ok := a.reviewSourceID(w, r)
 	if !ok {
 		return
 	}
@@ -70,13 +70,19 @@ func (a *api) preparePRReview(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	result, err := a.integrations.PreparePRReview(r.Context(), source, reviewer)
+	var result prreviews.Preparation
+	var err error
+	if r.PathValue("task_id") != "" {
+		result, err = a.integrations.PrepareTaskPRReview(r.Context(), source, reviewer)
+	} else {
+		result, err = a.integrations.PreparePRReview(r.Context(), source, reviewer)
+	}
 	if !integrationError(w, err) {
 		respond(w, 200, result)
 	}
 }
 func (a *api) listPRReviews(w http.ResponseWriter, r *http.Request) {
-	source, ok := a.githubDeliveryRun(w, r)
+	source, ok := a.reviewSourceID(w, r)
 	if !ok {
 		return
 	}
@@ -89,7 +95,13 @@ func (a *api) listPRReviews(w http.ResponseWriter, r *http.Request) {
 		invalid(w, "query", "cursor", "string_too_long", "Cursor is too long")
 		return
 	}
-	result, err := a.integrations.ListPRReviews(r.Context(), source, int(limit), cursor)
+	var result prreviews.Page
+	var err error
+	if r.PathValue("task_id") != "" {
+		result, err = a.integrations.ListTaskPRReviews(r.Context(), source, int(limit), cursor)
+	} else {
+		result, err = a.integrations.ListPRReviews(r.Context(), source, int(limit), cursor)
+	}
 	if errors.Is(err, integrations.ErrAccess) {
 		invalid(w, "query", "cursor", "value_error", "Review history could not be read with this cursor")
 		return
@@ -99,7 +111,7 @@ func (a *api) listPRReviews(w http.ResponseWriter, r *http.Request) {
 	}
 }
 func (a *api) launchPRReview(w http.ResponseWriter, r *http.Request) {
-	source, ok := a.githubDeliveryRun(w, r)
+	source, ok := a.reviewSourceID(w, r)
 	if !ok {
 		return
 	}
@@ -117,7 +129,13 @@ func (a *api) launchPRReview(w http.ResponseWriter, r *http.Request) {
 		invalid(w, "body", "reviewer_id", "uuid_parsing", "Choose a nonzero reviewer UUID")
 		return
 	}
-	result, err := a.integrations.LaunchPRReview(r.Context(), source, input)
+	var result prreviews.Review
+	var err error
+	if r.PathValue("task_id") != "" {
+		result, err = a.integrations.LaunchTaskPRReview(r.Context(), source, input)
+	} else {
+		result, err = a.integrations.LaunchPRReview(r.Context(), source, input)
+	}
 	if !integrationError(w, err) {
 		respond(w, 202, result)
 	}
@@ -185,4 +203,12 @@ func (a *api) retryPRReviewPublication(w http.ResponseWriter, r *http.Request) {
 	if !integrationError(w, err) {
 		respond(w, 200, result)
 	}
+}
+
+func (a *api) reviewSourceID(w http.ResponseWriter, r *http.Request) (string, bool) {
+	if r.PathValue("task_id") != "" {
+		id, ok := a.completionResource(w, r, "task_id", "tasks")
+		return id.String(), ok
+	}
+	return a.githubDeliveryRun(w, r)
 }

@@ -219,6 +219,17 @@ func sameOptionalUUID(a, b *uuid.UUID) bool {
 }
 
 func MoveTask(ctx context.Context, tx pgx.Tx, taskID uuid.UUID, input TaskMoveInput) (TaskPlanningResult, error) {
+	if input.Status == "completed" {
+		var review bool
+		if err := tx.QueryRow(ctx, `SELECT COALESCE(completion_contract->'policy'->>'mode'='review_required',false) FROM tasks WHERE id=$1`, taskID).Scan(&review); err != nil {
+			return TaskPlanningResult{}, err
+		}
+		if review {
+			if err := lockCompletionTask(ctx, tx, taskID); err != nil {
+				return TaskPlanningResult{}, err
+			}
+		}
+	}
 	return moveTask(ctx, tx, taskID, input, false)
 }
 func moveTask(ctx context.Context, tx pgx.Tx, taskID uuid.UUID, input TaskMoveInput, admission bool) (TaskPlanningResult, error) {
