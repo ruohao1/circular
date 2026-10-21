@@ -10,6 +10,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -72,6 +73,9 @@ touch "$TMPDIR/scratch-ok"
 }
 
 func TestRealDockerReviewCanInspectPinnedGitWithoutSharedCache(t *testing.T) {
+	// This fixture deliberately runs under a different UID and shares readable source files.
+	previousUmask := syscall.Umask(0022)
+	defer syscall.Umask(previousUmask)
 	if os.Getenv("CIRCULAR_RUN_DOCKER_TESTS") != "1" {
 		t.Skip("CIRCULAR_RUN_DOCKER_TESTS=1 enables the real review Git regression")
 	}

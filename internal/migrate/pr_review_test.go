@@ -1,6 +1,7 @@
 package migrate_test
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"testing"
@@ -9,6 +10,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/ruohao1/circular/internal/agents"
 	"github.com/ruohao1/circular/internal/migrate"
+	"github.com/ruohao1/circular/internal/prreviews"
 	"github.com/ruohao1/circular/internal/testsupport"
 )
 
@@ -44,6 +46,43 @@ func legacyDatabase(t *testing.T, revision int) *pgxpool.Pool {
 		t.Fatal(err)
 	}
 	return pool
+}
+
+func TestReviewLegacyUpgradeKeepsSnapshot(t *testing.T) {
+	pool := legacyDatabase(t, 20)
+	snapshot := testsupport.SeedPRReviewSource(t, pool, uuid.Nil)
+	raw, err := json.Marshal(snapshot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	review, run := uuid.New(), uuid.New()
+	tx, err := pool.Begin(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback(t.Context())
+	if _, err = tx.Exec(t.Context(), `INSERT INTO runs(id,task_id,agent_id,parent_run_id,backend,status,attempt,external_refs,kind) VALUES($1,$2,$3,$4,'codex','succeeded',2,'{}','pr_review')`, run, snapshot.TaskID, snapshot.Reviewer.AgentID, snapshot.SourceRunID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = tx.Exec(t.Context(), `INSERT INTO pr_reviews(id,project_id,repository_id,source_run_id,run_id,reviewer_id,identity_key,attempt,snapshot) VALUES($1,$2,$3,$4,$5,$6,'legacy',1,$7)`, review, snapshot.ProjectID, snapshot.RepositoryID, snapshot.SourceRunID, run, snapshot.Reviewer.AgentID, raw); err != nil {
+		t.Fatal(err)
+	}
+	if err = tx.Commit(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if err = migrate.Up(t.Context(), pool); err != nil {
+		t.Fatal(err)
+	}
+	var saved prreviews.LaunchSnapshot
+	var native *uuid.UUID
+	var external *uuid.UUID
+	if err = pool.QueryRow(t.Context(), `SELECT snapshot,source_run_id,source_work_session_id FROM pr_reviews WHERE id=$1`, review).Scan(&saved, &native, &external); err != nil {
+		t.Fatal(err)
+	}
+	sealed, err := prreviews.SealSnapshot(saved)
+	if err != nil || sealed.InputFingerprint != snapshot.InputFingerprint || external != nil || native == nil || *native != snapshot.SourceRunID {
+		t.Fatal("legacy identity changed", sealed, err)
+	}
 }
 
 func TestReviewMigrationPreservesIdentityAndDefaultsOff(t *testing.T) {

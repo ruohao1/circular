@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"time"
 
 	"github.com/google/uuid"
@@ -32,13 +31,25 @@ type reviewQueryer interface {
 
 // Replay resolves an acknowledged or lost launch result before mutable/provider reads.
 func (s *PRReviewStore) Replay(ctx context.Context, source uuid.UUID, request prreviews.LaunchRequest) (*prreviews.Review, error) {
+	return s.ReplaySource(ctx, prreviews.Source{RunID: &source}, request)
+}
+func (s *PRReviewStore) ReplaySource(ctx context.Context, source prreviews.Source, request prreviews.LaunchRequest) (*prreviews.Review, error) {
+	if err := source.Validate(); err != nil {
+		return nil, err
+	}
+	return s.replayReview(ctx, request, s.pool.QueryRow(ctx, `SELECT parameters_sha256,review_id FROM pr_review_launch_intents WHERE source_run_id IS NOT DISTINCT FROM $1::uuid AND source_work_session_id IS NOT DISTINCT FROM $3::uuid AND request_key=$2 AND NOT automatic`, source.RunID, request.RequestKey, source.WorkSessionID))
+}
+func (s *PRReviewStore) ReplayTask(ctx context.Context, task uuid.UUID, request prreviews.LaunchRequest) (*prreviews.Review, error) {
+	return s.replayReview(ctx, request, s.pool.QueryRow(ctx, `SELECT i.parameters_sha256,i.review_id FROM pr_review_launch_intents i JOIN pr_reviews p ON p.id=i.review_id JOIN runs r ON r.id=p.run_id WHERE r.task_id=$1 AND i.request_key=$2 AND NOT i.automatic ORDER BY i.created_at DESC,i.id DESC LIMIT 1`, task, request.RequestKey))
+}
+func (s *PRReviewStore) replayReview(ctx context.Context, request prreviews.LaunchRequest, row pgx.Row) (*prreviews.Review, error) {
 	fingerprint, err := prreviews.Fingerprint(request)
 	if err != nil {
 		return nil, err
 	}
 	var stored string
 	var id *uuid.UUID
-	err = s.pool.QueryRow(ctx, `SELECT parameters_sha256,review_id FROM pr_review_launch_intents WHERE source_run_id=$1 AND request_key=$2 AND NOT automatic`, source, request.RequestKey).Scan(&stored, &id)
+	err = row.Scan(&stored, &id)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
 	}
@@ -58,11 +69,18 @@ func (s *PRReviewStore) Replay(ctx context.Context, source uuid.UUID, request pr
 func (s *PRReviewStore) Launch(ctx context.Context, command ReviewLaunch) (prreviews.Review, error) {
 	var zero prreviews.Review
 	request, snapshot := command.Request, command.Snapshot
+	if snapshot.ValidateSource() != nil {
+		return zero, prreviews.ErrSourceInvalid
+	}
+	source := snapshot.ReviewSource()
+	if command.Automatic && source.WorkSessionID != nil {
+		return zero, prreviews.ErrSourceInvalid
+	}
 	if err := request.Validate(); err != nil {
 		return zero, err
 	}
 	if !command.Automatic {
-		if replay, err := s.Replay(ctx, snapshot.SourceRunID, request); err != nil {
+		if replay, err := s.ReplaySource(ctx, source, request); err != nil {
 			return zero, err
 		} else if replay != nil {
 			return *replay, nil
@@ -94,8 +112,10 @@ func (s *PRReviewStore) Launch(ctx context.Context, command ReviewLaunch) (prrev
 		return zero, err
 	}
 	defer rollback(ctx, tx)
-	if err := ReserveExternalEffect(ctx, tx, snapshot.SourceRunID, "review_launch"); err != nil {
-		return zero, err
+	if source.RunID != nil {
+		if err := ReserveExternalEffect(ctx, tx, *source.RunID, "review_launch"); err != nil {
+			return zero, err
+		}
 	}
 	var automatic bool
 	var selected *uuid.UUID
@@ -106,7 +126,7 @@ func (s *PRReviewStore) Launch(ctx context.Context, command ReviewLaunch) (prrev
 	// The settings lock serializes replay/disable against launch for this project.
 	var priorID *uuid.UUID
 	var priorHash string
-	err = tx.QueryRow(ctx, `SELECT review_id,parameters_sha256 FROM pr_review_launch_intents WHERE source_run_id=$1 AND request_key=$2 AND NOT automatic`, snapshot.SourceRunID, request.RequestKey).Scan(&priorID, &priorHash)
+	err = tx.QueryRow(ctx, `SELECT review_id,parameters_sha256 FROM pr_review_launch_intents WHERE source_run_id IS NOT DISTINCT FROM $1::uuid AND source_work_session_id IS NOT DISTINCT FROM $3::uuid AND request_key=$2 AND NOT automatic`, source.RunID, request.RequestKey, source.WorkSessionID).Scan(&priorID, &priorHash)
 	if err == nil && !command.Automatic {
 		if priorHash != parameterHash {
 			return zero, prreviews.ErrRequestConflict
@@ -135,6 +155,9 @@ func (s *PRReviewStore) Launch(ctx context.Context, command ReviewLaunch) (prrev
 			return zero, prreviews.ErrReviewUnavailable
 		}
 	}
+	if _, err = tx.Exec(ctx, `SELECT id FROM projects WHERE id=$1 FOR NO KEY UPDATE`, snapshot.ProjectID); err != nil {
+		return zero, err
+	}
 	var title, description string
 	var refs json.RawMessage
 	var project, repository uuid.UUID
@@ -150,18 +173,24 @@ func (s *PRReviewStore) Launch(ctx context.Context, command ReviewLaunch) (prrev
 	if refHash != savedRefHash {
 		return zero, prreviews.ErrSnapshotChanged
 	}
-	var coder uuid.UUID
-	var eligible bool
-	err = tx.QueryRow(ctx, `SELECT r.agent_id,r.kind='coding' AND r.status='succeeded' AND r.task_id=$2 AND d.status='delivered'
+	completionSession, err := reserveCompletionReview(ctx, tx, snapshot)
+	if err != nil {
+		return zero, err
+	}
+	if completionSession == nil {
+		var coder uuid.UUID
+		var eligible bool
+		err = tx.QueryRow(ctx, `SELECT r.agent_id,r.kind='coding' AND r.status='succeeded' AND r.task_id=$2 AND d.status='delivered'
 	 AND d.project_id=$3 AND d.repository_id=$4 AND repo.project_id=$3 AND repo.clone_url=$5
 	 AND d.github_repository_id=$6 AND d.installation_id=$7 AND d.pull_request_number=$8 AND d.repository_name=$9
 	 AND repo.external_refs->'github'->>'repository_id'=$6 AND repo.external_refs->'github'->>'installation_id'=$7
 	 FROM runs r JOIN github_run_deliveries d ON d.run_id=r.id JOIN repositories repo ON repo.id=d.repository_id WHERE r.id=$1`, snapshot.SourceRunID, snapshot.TaskID, snapshot.ProjectID, snapshot.RepositoryID, snapshot.CloneURL, snapshot.PR.GitHubRepositoryID, snapshot.PR.InstallationID, snapshot.PR.Number, snapshot.PR.RepositoryName).Scan(&coder, &eligible)
-	if err != nil {
-		return zero, reviewUnavailable(err)
-	}
-	if !eligible || coder == snapshot.Reviewer.AgentID {
-		return zero, prreviews.ErrReviewUnavailable
+		if err != nil {
+			return zero, reviewUnavailable(err)
+		}
+		if !eligible || coder == snapshot.Reviewer.AgentID {
+			return zero, prreviews.ErrReviewUnavailable
+		}
 	}
 	var current prreviews.ReviewerSnapshot
 	var enabled bool
@@ -189,13 +218,15 @@ func (s *PRReviewStore) Launch(ctx context.Context, command ReviewLaunch) (prrev
 	}
 	var reviewID uuid.UUID
 	var attempt int
-	err = tx.QueryRow(ctx, `SELECT id,attempt FROM pr_reviews WHERE identity_key=$1 ORDER BY attempt DESC LIMIT 1 FOR UPDATE`, identity).Scan(&reviewID, &attempt)
+	var priorSourceRun, priorSourceWork *uuid.UUID
+	err = tx.QueryRow(ctx, `SELECT id,attempt,source_run_id,source_work_session_id FROM pr_reviews WHERE identity_key=$1 ORDER BY attempt DESC LIMIT 1 FOR UPDATE`, identity).Scan(&reviewID, &attempt, &priorSourceRun, &priorSourceWork)
+	sameSource := (prreviews.Source{RunID: priorSourceRun, WorkSessionID: priorSourceWork}).Key() == source.Key()
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 		return zero, err
 	}
 	if request.Mode == "again" {
 		var same bool
-		err = tx.QueryRow(ctx, `SELECT source_run_id=$2 AND snapshot->'pr'->>'github_repository_id'=$3 AND (snapshot->'pr'->>'number')::integer=$4 FROM pr_reviews WHERE id=$1`, request.PreviousReviewID, snapshot.SourceRunID, snapshot.PR.GitHubRepositoryID, snapshot.PR.Number).Scan(&same)
+		err = tx.QueryRow(ctx, `SELECT source_run_id IS NOT DISTINCT FROM $2::uuid AND source_work_session_id IS NOT DISTINCT FROM $5::uuid AND snapshot->'pr'->>'github_repository_id'=$3 AND (snapshot->'pr'->>'number')::integer=$4 FROM pr_reviews WHERE id=$1`, request.PreviousReviewID, source.RunID, snapshot.PR.GitHubRepositoryID, snapshot.PR.Number, source.WorkSessionID).Scan(&same)
 		if err != nil {
 			return zero, reviewUnavailable(err)
 		}
@@ -203,14 +234,14 @@ func (s *PRReviewStore) Launch(ctx context.Context, command ReviewLaunch) (prrev
 			return zero, prreviews.ErrRequestConflict
 		}
 	}
-	if reviewID == uuid.Nil || request.Mode == "again" {
+	if reviewID == uuid.Nil || request.Mode == "again" || !sameSource {
 		reviewID = uuid.New()
 		runID := uuid.New()
 		var runAttempt int
 		if err := tx.QueryRow(ctx, `SELECT COALESCE(MAX(attempt),0)+1 FROM runs WHERE task_id=$1`, snapshot.TaskID).Scan(&runAttempt); err != nil {
 			return zero, err
 		}
-		_, err = tx.Exec(ctx, `INSERT INTO runs(id,task_id,agent_id,parent_run_id,backend,status,attempt,external_refs,kind) VALUES($1,$2,$3,$4,$5,'queued',$6,'{}','pr_review')`, runID, snapshot.TaskID, snapshot.Reviewer.AgentID, snapshot.SourceRunID, snapshot.Reviewer.Backend, runAttempt)
+		_, err = tx.Exec(ctx, `INSERT INTO runs(id,task_id,agent_id,parent_run_id,backend,status,attempt,external_refs,kind) VALUES($1,$2,$3,$4,$5,'queued',$6,'{}','pr_review')`, runID, snapshot.TaskID, snapshot.Reviewer.AgentID, source.RunID, snapshot.Reviewer.Backend, runAttempt)
 		if err != nil {
 			return zero, err
 		}
@@ -222,7 +253,7 @@ func (s *PRReviewStore) Launch(ctx context.Context, command ReviewLaunch) (prrev
 		if request.Mode == "again" {
 			previous = &request.PreviousReviewID
 		}
-		_, err = tx.Exec(ctx, `INSERT INTO pr_reviews(id,project_id,repository_id,source_run_id,run_id,reviewer_id,previous_review_id,identity_key,attempt,automatic,snapshot) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`, reviewID, snapshot.ProjectID, snapshot.RepositoryID, snapshot.SourceRunID, runID, snapshot.Reviewer.AgentID, previous, identity, attempt+1, command.Automatic, raw)
+		_, err = tx.Exec(ctx, `INSERT INTO pr_reviews(id,project_id,repository_id,source_run_id,run_id,reviewer_id,previous_review_id,identity_key,attempt,automatic,snapshot,source_work_session_id) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`, reviewID, snapshot.ProjectID, snapshot.RepositoryID, source.RunID, runID, snapshot.Reviewer.AgentID, previous, identity, attempt+1, command.Automatic, raw, source.WorkSessionID)
 		if err != nil {
 			return zero, err
 		}
@@ -234,10 +265,15 @@ func (s *PRReviewStore) Launch(ctx context.Context, command ReviewLaunch) (prrev
 	if command.Automatic {
 		_, err = tx.Exec(ctx, `UPDATE pr_review_launch_intents SET status='launched',review_id=$2,parameters=$3,parameters_sha256=$4,lease_owner=NULL,lease_until=NULL,last_error='' WHERE id=$1`, command.IntentID, reviewID, parameters, parameterHash)
 	} else {
-		_, err = tx.Exec(ctx, `INSERT INTO pr_review_launch_intents(id,project_id,source_run_id,request_key,parameters,parameters_sha256,status,review_id) VALUES($1,$2,$3,$4,$5,$6,'launched',$7)`, uuid.New(), snapshot.ProjectID, snapshot.SourceRunID, request.RequestKey, parameters, parameterHash, reviewID)
+		_, err = tx.Exec(ctx, `INSERT INTO pr_review_launch_intents(id,project_id,source_run_id,request_key,parameters,parameters_sha256,status,review_id,source_work_session_id) VALUES($1,$2,$3,$4,$5,$6,'launched',$7,$8)`, uuid.New(), snapshot.ProjectID, source.RunID, request.RequestKey, parameters, parameterHash, reviewID, source.WorkSessionID)
 	}
 	if err != nil {
 		return zero, err
+	}
+	if completionSession != nil {
+		if _, err = tx.Exec(ctx, `UPDATE task_completions SET latest_review_id=$2,review_revision=review_revision+1 WHERE session_id=$1`, *completionSession, reviewID); err != nil {
+			return zero, err
+		}
 	}
 	_, err = tx.Exec(ctx, `INSERT INTO pr_review_freshness(repository_id,github_repository_id,pull_request_number) VALUES($1,$2,$3) ON CONFLICT DO NOTHING`, snapshot.RepositoryID, snapshot.PR.GitHubRepositoryID, snapshot.PR.Number)
 	if err != nil {
@@ -319,6 +355,21 @@ func (s *PRReviewStore) Get(ctx context.Context, id uuid.UUID) (prreviews.Review
 
 // Source reads the task and reviewer; provider verification happens before SealSnapshot.
 func (s *PRReviewStore) Source(ctx context.Context, source, reviewer uuid.UUID) (prreviews.LaunchSnapshot, error) {
+	var session *uuid.UUID
+	var managed bool
+	if err := s.pool.QueryRow(ctx, `SELECT t.completion_session_id,t.completion_contract IS NOT NULL FROM runs r JOIN tasks t ON t.id=r.task_id WHERE r.id=$1`, source).Scan(&session, &managed); err != nil {
+		return prreviews.LaunchSnapshot{}, reviewUnavailable(err)
+	}
+	if managed {
+		if session == nil {
+			return prreviews.LaunchSnapshot{}, prreviews.ErrSourceInvalid
+		}
+		value, err := completionReviewSource(ctx, s.pool, *session, reviewer)
+		if err == nil && value.SourceRunID != source {
+			return value, prreviews.ErrSourceInvalid
+		}
+		return value, err
+	}
 	var value prreviews.LaunchSnapshot
 	var coder uuid.UUID
 	err := s.pool.QueryRow(ctx, `SELECT r.id,r.task_id,t.project_id,repo.id,repo.clone_url,t.title,t.description,t.external_refs,r.agent_id,
@@ -330,29 +381,7 @@ func (s *PRReviewStore) Source(ctx context.Context, source, reviewer uuid.UUID) 
 	if err != nil {
 		return value, reviewUnavailable(err)
 	}
-	if reviewer == uuid.Nil {
-		var selected *uuid.UUID
-		err = s.pool.QueryRow(ctx, `SELECT reviewer_id FROM pr_review_settings WHERE project_id=$1`, value.ProjectID).Scan(&selected)
-		if err != nil {
-			return value, reviewUnavailable(err)
-		}
-		if selected == nil {
-			return value, prreviews.ErrReviewUnavailable
-		}
-		reviewer = *selected
-	}
-	if reviewer == coder {
-		return value, fmt.Errorf("%w: choose an independent reviewer", prreviews.ErrReviewUnavailable)
-	}
-	var enabled bool
-	err = s.pool.QueryRow(ctx, `SELECT id,name,backend,instructions,backend_config,enabled FROM agents WHERE id=$1 AND project_id=$2`, reviewer, value.ProjectID).Scan(&value.Reviewer.AgentID, &value.Reviewer.Name, &value.Reviewer.Backend, &value.Reviewer.Instructions, &value.Reviewer.BackendConfig, &enabled)
-	if err != nil {
-		return value, reviewUnavailable(err)
-	}
-	if !enabled {
-		return value, fmt.Errorf("%w: selected reviewer is disabled", prreviews.ErrReviewUnavailable)
-	}
-	value.Reviewer, err = prreviews.NormalizeReviewer(value.Reviewer)
+	value.Reviewer, err = reviewSourceReviewer(ctx, s.pool, value.ProjectID, reviewer, coder)
 	if err != nil {
 		return value, err
 	}

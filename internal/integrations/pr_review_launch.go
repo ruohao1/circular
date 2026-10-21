@@ -186,7 +186,20 @@ func (s *Service) inspectReviewPR(ctx context.Context, token string, snapshot pr
 	return v, state, nil
 }
 func (s *Service) prepareReview(ctx context.Context, source, reviewer uuid.UUID) (prreviews.LaunchSnapshot, error) {
-	value, err := postgres.NewPRReviewStore(s.pool).Source(ctx, source, reviewer)
+	return s.prepareReviewSource(ctx, prreviews.Source{RunID: &source}, reviewer)
+}
+func (s *Service) prepareReviewSource(ctx context.Context, source prreviews.Source, reviewer uuid.UUID) (prreviews.LaunchSnapshot, error) {
+	var value prreviews.LaunchSnapshot
+	if source.Validate() != nil {
+		return value, prreviews.ErrSourceInvalid
+	}
+	store := postgres.NewPRReviewStore(s.pool)
+	var err error
+	if source.RunID != nil {
+		value, err = store.Source(ctx, *source.RunID, reviewer)
+	} else {
+		value, err = store.SourceForWork(ctx, *source.WorkSessionID, reviewer)
+	}
 	if err != nil {
 		return value, err
 	}
@@ -213,6 +226,14 @@ func (s *Service) PreparePRReview(ctx context.Context, source, reviewer string) 
 	if err != nil {
 		return v, ErrAccess
 	}
+	return s.prepareReviewRequest(ctx, prreviews.Source{RunID: &sourceID}, reviewer)
+}
+func unavailableReview(err error) prreviews.Preparation {
+	return prreviews.Preparation{Reason: err.Error(), Snapshot: prreviews.LaunchSnapshot{Evidence: []prreviews.Evidence{}, TaskExternalRefs: json.RawMessage(`{}`), Reviewer: prreviews.ReviewerSnapshot{BackendConfig: json.RawMessage(`{}`)}}}
+}
+func (s *Service) prepareReviewRequest(ctx context.Context, source prreviews.Source, reviewer string) (prreviews.Preparation, error) {
+	var v prreviews.Preparation
+	var err error
 	var reviewerID uuid.UUID
 	if reviewer != "" {
 		reviewerID, err = uuid.Parse(reviewer)
@@ -220,12 +241,10 @@ func (s *Service) PreparePRReview(ctx context.Context, source, reviewer string) 
 			return v, ErrAccess
 		}
 	}
-	v.Snapshot, err = s.prepareReview(ctx, sourceID, reviewerID)
+	v.Snapshot, err = s.prepareReviewSource(ctx, source, reviewerID)
 	if err != nil {
 		if reviewAvailabilityError(err) {
-			v.Snapshot = prreviews.LaunchSnapshot{Evidence: []prreviews.Evidence{}, TaskExternalRefs: json.RawMessage(`{}`), Reviewer: prreviews.ReviewerSnapshot{BackendConfig: json.RawMessage(`{}`)}}
-			v.Reason = err.Error()
-			return v, nil
+			return unavailableReview(err), nil
 		}
 		return v, err
 	}
@@ -265,6 +284,9 @@ func (s *Service) PRReview(ctx context.Context, id string) (prreviews.Review, er
 	return result, err
 }
 func (s *Service) ListPRReviews(ctx context.Context, source string, limit int, cursor string) (prreviews.Page, error) {
+	return s.listPRReviews(ctx, source, limit, cursor, false)
+}
+func (s *Service) listPRReviews(ctx context.Context, source string, limit int, cursor string, byTask bool) (prreviews.Page, error) {
 	result := prreviews.Page{Items: []prreviews.Review{}}
 	sourceID, err := uuid.Parse(source)
 	if err != nil {
@@ -286,12 +308,12 @@ func (s *Service) ListPRReviews(ctx context.Context, source string, limit int, c
 			return result, ErrAccess
 		}
 	}
-	rows, err := s.pool.Query(ctx, `SELECT id,created_at FROM pr_reviews WHERE source_run_id=$1 AND ($2::timestamptz IS NULL OR (created_at,id)<($2,$3)) ORDER BY created_at DESC,id DESC LIMIT $4`, sourceID, func() any {
+	rows, err := s.pool.Query(ctx, `SELECT p.id,p.created_at FROM pr_reviews p JOIN runs r ON r.id=p.run_id WHERE (($5 AND r.task_id=$1) OR (NOT $5 AND p.source_run_id=$1)) AND ($2::timestamptz IS NULL OR (p.created_at,p.id)<($2,$3)) ORDER BY p.created_at DESC,p.id DESC LIMIT $4`, sourceID, func() any {
 		if cursor == "" {
 			return nil
 		}
 		return after.Created
-	}(), after.ID, limit+1)
+	}(), after.ID, limit+1, byTask)
 	if err != nil {
 		return result, err
 	}

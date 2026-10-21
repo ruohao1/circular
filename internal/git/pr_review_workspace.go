@@ -70,6 +70,19 @@ func (l *Local) PreparePRReviewGit(ctx context.Context, directory string) (resul
 	if err := l.verifyPRReviewGit(ctx, staging, value, environment); err != nil {
 		return err
 	}
+	// Only this verified, isolated copy is shared with the container's UID.
+	if err := filepath.WalkDir(staging, func(path string, entry fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		mode := fs.FileMode(0644)
+		if entry.IsDir() {
+			mode = 0755
+		}
+		return os.Chmod(path, mode)
+	}); err != nil {
+		return err
+	}
 	if err := ctx.Err(); err != nil {
 		return err
 	}
