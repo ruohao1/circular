@@ -217,8 +217,8 @@ func TestTaskPlanningUpdateAndMoveHTTP(t *testing.T) {
 	if saved["repository_id"] != nil || saved["preferred_agent_id"] != nil || saved["priority"] != "urgent" {
 		t.Fatal(saved)
 	}
-	moved := decode(t, f.request(t, "POST", path+"/move", fmt.Sprintf(`{"expected_revision":3,"expected_board_revision":%v,"status":"in_review","placement":"end"}`, cleared["board_revision"]), 200))
-	if moved["task"].(map[string]any)["status"] != "in_review" {
+	moved := decode(t, f.request(t, "POST", path+"/move", fmt.Sprintf(`{"expected_revision":3,"expected_board_revision":%v,"status":"in_progress","placement":"end"}`, cleared["board_revision"]), 200))
+	if moved["task"].(map[string]any)["status"] != "in_progress" {
 		t.Fatal(moved)
 	}
 	var legacy []any

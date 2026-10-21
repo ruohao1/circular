@@ -193,6 +193,9 @@ func (a *api) create(w http.ResponseWriter, r *http.Request, table, schema strin
 			invalid(w, "body", "status", "enum", "Choose open, ready, in_progress, in_review, completed, or cancelled")
 			return
 		}
+		if planningError(w, postgres.CheckTaskCompletionCreation(status)) {
+			return
+		}
 		var start, finish *string
 		if date, ok := values["planned_start_date"].(string); ok {
 			start = &date

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"github.com/google/uuid"
@@ -218,6 +219,9 @@ func sameOptionalUUID(a, b *uuid.UUID) bool {
 }
 
 func MoveTask(ctx context.Context, tx pgx.Tx, taskID uuid.UUID, input TaskMoveInput) (TaskPlanningResult, error) {
+	return moveTask(ctx, tx, taskID, input, false)
+}
+func moveTask(ctx context.Context, tx pgx.Tx, taskID uuid.UUID, input TaskMoveInput, admission bool) (TaskPlanningResult, error) {
 	anchored := input.Placement == "before" || input.Placement == "after"
 	if input.ExpectedRevision < 1 || input.ExpectedRevision > maxPlanningRevision || input.ExpectedBoardRevision < 1 || input.ExpectedBoardRevision > maxPlanningRevision || !ValidTaskStatus(input.Status) || !slices.Contains([]string{"start", "end", "before", "after", "up", "down"}, input.Placement) || anchored != (input.AnchorID != nil) {
 		return TaskPlanningResult{}, ErrTaskPlanningInput
@@ -232,6 +236,11 @@ func MoveTask(ctx context.Context, tx pgx.Tx, taskID uuid.UUID, input TaskMoveIn
 	}
 	if (input.Placement == "up" || input.Placement == "down") && t.status != input.Status {
 		return out, ErrTaskPlanningInput
+	}
+	if !admission {
+		if err = CheckTaskCompletionMove(ctx, tx, taskID, input.Status, time.Now().UTC()); err != nil {
+			return out, err
+		}
 	}
 	rows, err := tx.Query(ctx, `SELECT id,status FROM tasks WHERE project_id=$1 AND status IN ($2,$3) ORDER BY board_position,id`, t.project, t.status, input.Status)
 	if err != nil {
@@ -284,7 +293,7 @@ func MoveTask(ctx context.Context, tx pgx.Tx, taskID uuid.UUID, input TaskMoveIn
 	// Renumber only affected rows. Pure ordering changes do not rewrite semantic
 	// Task revisions/timestamps, including those of displaced neighbors.
 	if t.status != input.Status {
-		if _, err = tx.Exec(ctx, `UPDATE tasks SET status=$2,revision=revision+1,updated_at=now() WHERE id=$1`, taskID, input.Status); err != nil {
+		if _, err = tx.Exec(ctx, `UPDATE tasks SET status=$2::text,completion_session_id=CASE WHEN $2::text IN ('open','ready','cancelled') THEN NULL ELSE completion_session_id END,revision=revision+1,updated_at=now() WHERE id=$1`, taskID, input.Status); err != nil {
 			return out, err
 		}
 		out.Revision++

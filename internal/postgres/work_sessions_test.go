@@ -105,6 +105,12 @@ func TestExternalWorkReplayAfterRestart(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if _, err = f.move(t, task, "cancelled", "end", nil); err == nil {
+		t.Fatal("active owner allowed manual cancellation")
+	}
+	if _, err = releaseWork(t, f, postgres.WorkAdminInput{TaskID: task, ExpectedSessionID: in.SessionID, OperationID: uuid.New(), Reason: "Release for cancellation"}); err != nil {
+		t.Fatal(err)
+	}
 	if _, err = f.move(t, task, "cancelled", "end", nil); err != nil {
 		t.Fatal(err)
 	}
@@ -154,7 +160,7 @@ func TestExternalWorkReplayAfterRestart(t *testing.T) {
 		if _, err = f.p.Exec(t.Context(), `INSERT INTO repositories(id,project_id,name,clone_url,default_branch,external_refs) VALUES($1,$2,'Other','/fixture','main','{}')`, repo, secondProject); err != nil {
 			t.Fatal(err)
 		}
-		if _, err = f.p.Exec(t.Context(), `INSERT INTO tasks(id,project_id,repository_id,title,description,status,external_refs) VALUES($1,$2,$3,'Other','Ready work','ready','{}')`, secondTask, secondProject, repo); err != nil {
+		if _, err = f.p.Exec(t.Context(), `INSERT INTO tasks(id,project_id,repository_id,title,description,status,external_refs,completion_policy) VALUES($1,$2,$3,'Other','Ready work','ready','{}','{"mode":"direct_completion","requirements":[]}')`, secondTask, secondProject, repo); err != nil {
 			t.Fatal(err)
 		}
 		a := externalClaim(f.task(t, "First", "ready", "{}"))

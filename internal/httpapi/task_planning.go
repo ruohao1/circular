@@ -208,6 +208,11 @@ func decodeTaskMove(w http.ResponseWriter, r *http.Request) (postgres.TaskMoveIn
 	return in, true
 }
 func planningError(w http.ResponseWriter, err error) bool {
+	var completionConflict *postgres.CompletionConflict
+	if errors.As(err, &completionConflict) {
+		respond(w, 409, map[string]any{"detail": err.Error(), "code": "completion_blocked", "blockers": completionConflict.Blockers})
+		return true
+	}
 	if errors.Is(err, postgres.ErrTaskPlanningInput) {
 		problem(w, 422, err.Error())
 		return true

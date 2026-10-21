@@ -443,7 +443,7 @@ func TestTaskPlanningConcurrentIntents(t *testing.T) {
 	r, b := f.versions(t, id)
 	var wg sync.WaitGroup
 	results := make(chan error, 2)
-	for _, status := range []string{"completed", "cancelled"} {
+	for _, status := range []string{"ready", "cancelled"} {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()

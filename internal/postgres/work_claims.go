@@ -153,7 +153,7 @@ func moveClaimedTask(ctx context.Context, tx pgx.Tx, task planningTask) error {
 	if task.status == "in_progress" {
 		return nil
 	}
-	_, err := MoveTask(ctx, tx, task.id, TaskMoveInput{ExpectedRevision: task.revision, ExpectedBoardRevision: task.board, Status: "in_progress", Placement: "end"})
+	_, err := moveTask(ctx, tx, task.id, TaskMoveInput{ExpectedRevision: task.revision, ExpectedBoardRevision: task.board, Status: "in_progress", Placement: "end"}, true)
 	return err
 }
 

@@ -53,7 +53,7 @@ CREATE TRIGGER tasks_completion_contract_immutable BEFORE UPDATE OF completion_p
 CREATE TABLE task_completions (
     session_id UUID PRIMARY KEY,
     task_id UUID NOT NULL,
-    report JSONB CHECK(report IS NULL OR (jsonb_typeof(report)='object' AND octet_length(report::text)<=131072)),
+    report JSONB CHECK(report IS NULL OR jsonb_typeof(report)='object'),
     report_invocation INTEGER CHECK(report_invocation>0),
     reconciliation_pending BOOLEAN NOT NULL DEFAULT false,
     decision JSONB CHECK(decision IS NULL OR jsonb_typeof(decision)='object'),
@@ -71,3 +71,11 @@ BEGIN
 END $$;
 CREATE TRIGGER task_completion_report_immutable BEFORE UPDATE ON task_completions
     FOR EACH ROW EXECUTE FUNCTION preserve_completion_report();
+
+CREATE TABLE native_completion_reports (
+    run_id UUID NOT NULL,
+    invocation INTEGER NOT NULL,
+    report JSONB NOT NULL CHECK(jsonb_typeof(report)='object'),
+    PRIMARY KEY(run_id,invocation),
+    FOREIGN KEY(run_id,invocation) REFERENCES run_invocations(run_id,number) ON DELETE CASCADE
+);

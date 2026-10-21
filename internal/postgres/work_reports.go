@@ -3,12 +3,14 @@ package postgres
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/ruohao1/circular/internal/completion"
 	"github.com/ruohao1/circular/internal/runstate"
 )
 
@@ -17,6 +19,7 @@ type WorkFinishInput struct {
 	OperationID uuid.UUID
 	Outcome     runstate.Status
 	Summary     string
+	Report      *completion.Report `json:"report,omitempty"`
 }
 type WorkAdminInput struct {
 	TaskID, ExpectedSessionID, OperationID uuid.UUID
@@ -110,7 +113,7 @@ func FinishExternalWork(ctx context.Context, tx pgx.Tx, in WorkFinishInput, now 
 	if in.OperationID == uuid.Nil || !in.Outcome.Terminal() || !validWorkText(in.Summary, 4000) {
 		return WorkChangeResult{}, ErrWorkInput
 	}
-	row, err := readWorkSession(ctx, tx, in.Credential.SessionID, true, now)
+	row, err := readWorkSession(ctx, tx, in.Credential.SessionID, false, now)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return WorkChangeResult{}, ErrWorkCredential
 	}
@@ -127,15 +130,63 @@ func FinishExternalWork(ctx context.Context, tx pgx.Tx, in WorkFinishInput, now 
 	if replay, err := replayWorkReceipt(ctx, tx, row.view.ID, in.OperationID, digest, now); !errors.Is(err, pgx.ErrNoRows) {
 		return replay, err
 	}
-	if row.view.ReleasedAt != nil {
-		return WorkChangeResult{}, ErrWorkRevoked
+	if _, err = lockPlanningTask(ctx, tx, row.view.TaskID); err != nil {
+		return WorkChangeResult{}, err
 	}
-	at := workTime(now, row.view)
-	_, err = tx.Exec(ctx, `UPDATE work_sessions SET outcome=$2,finished_at=$3,released_at=$3,release_reason='external finish' WHERE id=$1`, row.view.ID, in.Outcome, at)
+	row, err = readWorkSession(ctx, tx, in.Credential.SessionID, true, now)
 	if err != nil {
 		return WorkChangeResult{}, err
 	}
-	return insertWorkReceipt(ctx, tx, WorkReceipt{SessionID: row.view.ID, OperationID: in.OperationID, Kind: "finished", Actor: "external", Reason: in.Summary, At: at}, digest, now)
+	if err = authenticateWork(row, in.Credential); err != nil {
+		return WorkChangeResult{}, err
+	}
+	if replay, err := replayWorkReceipt(ctx, tx, row.view.ID, in.OperationID, digest, now); !errors.Is(err, pgx.ErrNoRows) {
+		return replay, err
+	}
+	if row.view.ReleasedAt != nil {
+		return WorkChangeResult{}, ErrWorkRevoked
+	}
+	view, err := InspectTaskCompletion(ctx, tx, row.view.TaskID, now)
+	if err != nil {
+		return WorkChangeResult{}, err
+	}
+	if view.CurrentSessionID != row.view.ID {
+		return WorkChangeResult{}, ErrWorkRevoked
+	}
+	if in.Outcome == runstate.Succeeded && in.Report == nil {
+		return WorkChangeResult{}, &CompletionConflict{Blockers: []completion.Blocker{{Code: "report_required", Message: "Successful completion needs a report", Action: "Submit a result and every required evidence item"}}}
+	}
+	summary := in.Summary
+	if in.Report != nil {
+		if view.Contract == nil {
+			return WorkChangeResult{}, ErrWorkInput
+		}
+		if err = completion.ValidateReport(view.Contract.Policy, *in.Report); err != nil {
+			return WorkChangeResult{}, err
+		}
+		if summary != "" && summary != in.Report.Result {
+			return WorkChangeResult{}, ErrWorkInput
+		}
+		summary = in.Report.Result
+		raw, err := json.Marshal(in.Report)
+		if err != nil {
+			return WorkChangeResult{}, err
+		}
+		if _, err = tx.Exec(ctx, `UPDATE task_completions SET report=$2 WHERE session_id=$1`, row.view.ID, raw); err != nil {
+			return WorkChangeResult{}, err
+		}
+	}
+	at := workTime(now, row.view)
+	if _, err = tx.Exec(ctx, `UPDATE work_sessions SET outcome=$2,finished_at=$3,released_at=$3,release_reason='external finish' WHERE id=$1`, row.view.ID, in.Outcome, at); err != nil {
+		return WorkChangeResult{}, err
+	}
+	if err = markTaskCompletionPending(ctx, tx, row.view.ID); err != nil {
+		return WorkChangeResult{}, err
+	}
+	if _, err = ReconcileTaskCompletion(ctx, tx, row.view.ID, at); err != nil {
+		return WorkChangeResult{}, err
+	}
+	return insertWorkReceipt(ctx, tx, WorkReceipt{SessionID: row.view.ID, OperationID: in.OperationID, Kind: "finished", Actor: "external", Reason: summary, At: at}, digest, now)
 }
 
 // Administration is authorized by the private control boundary, never by client metadata.

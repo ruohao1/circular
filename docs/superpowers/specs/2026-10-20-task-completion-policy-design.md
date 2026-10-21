@@ -47,7 +47,7 @@ Planning stage Ready can still describe an incomplete plan. Admission explains m
 
 ## Attempt identity and transitions
 
-Keep ISQ-472 Work sessions and receipts. Add a Task pointer to its current completion session, separate from its current owner. Claiming new work sets it. Explicitly reopening a released Task into Open or Ready clears it, invalidating old promotion candidates while retaining history. A later claim gets a new session ID. Terminal reports never reacquire ownership.
+Keep ISQ-472 Work sessions and receipts. Add a Task pointer to its current completion session, separate from its current owner. Claiming new work sets it. Explicitly reopening a released Task into Open or Ready clears it, invalidating old promotion candidates while retaining history. Explicit Task cancellation also clears it so delayed reconciliation cannot undo cancellation. A later claim gets a new session ID. Terminal reports never reacquire ownership.
 
 | Input | Required conditions | Task result |
 | --- | --- | --- |
