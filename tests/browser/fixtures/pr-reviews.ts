@@ -274,7 +274,10 @@ export async function installPRReviewFixture(page: Page) {
           : "",
         snapshot: review.snapshot,
       };
-    else if (path === `/api/v1/runs/${sourceRunID}/pr-reviews`) {
+    else if (
+      path === `/api/v1/runs/${sourceRunID}/pr-reviews` ||
+      path === `/api/v1/tasks/${taskID}/pr-reviews`
+    ) {
       if (method === "POST") {
         launches.push(request.postDataJSON());
         if (controls.loseLaunch) {

@@ -25,25 +25,33 @@ import {
   DialogDescription,
 } from "./ui/dialog";
 
+type ReviewSourceProps =
+  | { sourceRunID: string; taskID?: never }
+  | { taskID: string; sourceRunID?: never };
+
 export function ReviewLaunchButton({
   sourceRunID,
+  taskID,
   mode = "normal",
   previousReviewID,
   label = "Review PR",
-}: {
-  sourceRunID: string;
+}: ReviewSourceProps & {
   mode?: PRReviewLaunch["mode"];
   previousReviewID?: string;
   label?: string;
 }) {
+  const sourceKey = taskID ? `task:${taskID}` : sourceRunID!;
   const [open, setOpen] = useState(false);
   const storage = reviewStorage();
-  const pending = pendingReviewIntent(storage, sourceRunID);
+  const pending = pendingReviewIntent(storage, sourceKey);
   const navigate = useNavigate();
   const client = useQueryClient();
   const preparation = useQuery({
-    queryKey: ["pr-review-prepare", sourceRunID],
-    queryFn: () => api.preparePRReview(sourceRunID),
+    queryKey: ["pr-review-prepare", sourceKey],
+    queryFn: () =>
+      taskID
+        ? api.prepareTaskPRReview(taskID)
+        : api.preparePRReview(sourceRunID!),
     enabled: open && !pending,
     retry: false,
   });
@@ -54,17 +62,23 @@ export function ReviewLaunchButton({
         throw new Error("Refresh the PR and reviewer before starting.");
       const intent =
         pending ??
-        reviewIntent(storage, sourceRunID, {
+        reviewIntent(storage, sourceKey, {
           mode,
           ...(previousReviewID ? { previous_review_id: previousReviewID } : {}),
           reviewer_id: prepared!.snapshot.reviewer.agent_id,
           expected_input_fingerprint: prepared!.snapshot.input_fingerprint,
         });
-      return api.launchPRReview(sourceRunID, intent);
+      return taskID
+        ? api.launchTaskPRReview(taskID, intent)
+        : api.launchPRReview(sourceRunID!, intent);
     },
     onSuccess: (review) => {
-      clearReviewIntent(storage, sourceRunID);
-      void client.invalidateQueries({ queryKey: ["pr-reviews", sourceRunID] });
+      clearReviewIntent(storage, sourceKey);
+      void client.invalidateQueries({ queryKey: ["pr-reviews", sourceKey] });
+      if (taskID)
+        void client.invalidateQueries({
+          queryKey: ["task-completion", taskID],
+        });
       setOpen(false);
       void navigate({ to: "/runs/$runId", params: { runId: review.run_id } });
     },
@@ -142,7 +156,7 @@ export function ReviewLaunchButton({
                 <Button
                   variant="outline"
                   onClick={() => {
-                    clearReviewIntent(storage, sourceRunID);
+                    clearReviewIntent(storage, sourceKey);
                     launch.reset();
                     void preparation.refetch();
                   }}
@@ -171,12 +185,22 @@ export function RunPRReviews({ sourceRunID }: { sourceRunID: string }) {
     queryFn: () => api.runGitHubDelivery(sourceRunID),
     retry: false,
   });
+  if (delivery.data?.status !== "delivered") return null;
+  return <SourcePRReviews sourceRunID={sourceRunID} />;
+}
+export function TaskPRReviews({ taskID }: { taskID: string }) {
+  return <SourcePRReviews taskID={taskID} />;
+}
+function SourcePRReviews({ sourceRunID, taskID }: ReviewSourceProps) {
+  const sourceKey = taskID ? `task:${taskID}` : sourceRunID!;
   const history = useInfiniteQuery({
-    queryKey: ["pr-reviews", sourceRunID],
-    queryFn: ({ pageParam }) => api.prReviews(sourceRunID, pageParam),
+    queryKey: ["pr-reviews", sourceKey],
+    queryFn: ({ pageParam }) =>
+      taskID
+        ? api.taskPRReviews(taskID, pageParam)
+        : api.prReviews(sourceRunID!, pageParam),
     initialPageParam: "",
     getNextPageParam: (page) => page.next_cursor || undefined,
-    enabled: delivery.data?.status === "delivered",
     refetchInterval: (query) => {
       const reviews =
         query.state.data?.pages.flatMap((page) => page.items) ?? [];
@@ -187,7 +211,6 @@ export function RunPRReviews({ sourceRunID }: { sourceRunID: string }) {
       return intervals.length ? Math.min(...intervals) : false;
     },
   });
-  if (delivery.data?.status !== "delivered") return null;
   const reviews = history.data?.pages.flatMap((page) => page.items) ?? [];
   return (
     <Card role="region" aria-label="Pull request reviews">
@@ -201,7 +224,9 @@ export function RunPRReviews({ sourceRunID }: { sourceRunID: string }) {
           Get a dedicated agent's assessment of this pull request. Each report
           stays linked to the commits it reviewed.
         </p>
-        <ReviewLaunchButton sourceRunID={sourceRunID} />
+        <ReviewLaunchButton
+          {...(taskID ? { taskID } : { sourceRunID: sourceRunID! })}
+        />
         {reviews.length > 0 && (
           <ul className="space-y-3">
             {reviews.map((review) => (

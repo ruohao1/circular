@@ -83,6 +83,7 @@ export class ApiError extends Error {
   constructor(
     message: string,
     public status: number,
+    public code?: string,
   ) {
     super(message);
   }
@@ -113,6 +114,7 @@ async function request<T>(
         ? error.detail
         : `Request failed (${response.status})`,
       response.status,
+      typeof error.code === "string" ? error.code : undefined,
     );
   }
   return response.json() as Promise<T>;

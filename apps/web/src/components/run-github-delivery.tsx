@@ -36,7 +36,7 @@ const descriptions = {
   uncertain:
     "GitHub may have received the request. Check again to reconcile this run's existing branch and pull request.",
   no_changes:
-    "The run did not produce file changes, so a pull request is not needed.",
+    "The run did not produce file changes. A review-required Task still needs a bound PR to complete.",
 };
 
 function pullRequestURL(value: string) {
@@ -118,6 +118,12 @@ export function RunGitHubDelivery({
         </CardTitle>
       </CardHeader>
       <CardContent className="space-y-3">
+        {task.completion_contract && (
+          <p className="text-xs text-muted-foreground">
+            This Task uses manual PR publication. After publishing, inspect its
+            completion requirements in Task details.
+          </p>
+        )}
         {delivery.isPending && (
           <Skeleton
             className="h-5 w-32"

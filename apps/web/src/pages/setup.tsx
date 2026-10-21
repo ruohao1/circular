@@ -1,3 +1,4 @@
+import { RepositoryCompletionChecks } from "@/components/repository-completion-checks";
 import {
   useIsMutating,
   useMutation,
@@ -856,6 +857,7 @@ export function SetupPage({
                   <p className="text-xs leading-relaxed text-muted-foreground [overflow-wrap:anywhere]">
                     {item.clone_url}
                   </p>
+                  <RepositoryCompletionChecks repositoryID={item.id} />
                   <div className="flex flex-wrap items-center gap-3">
                     <Badge variant="outline" className="max-w-full">
                       <GitBranch aria-hidden="true" />
