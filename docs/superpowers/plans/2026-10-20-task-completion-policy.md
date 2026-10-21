@@ -202,7 +202,7 @@ MCP tools: `get_task_completion`, `refresh_task_completion`, `bind_task_pull_req
 - [x] **1. Add targeted regression assertions before any final fixes.** Upgrade retained historical Tasks/reviews/receipts without rewriting fingerprints; reject mixed old-writer/active-owner upgrade. Confirm new policy-managed sessions are skipped by automatic GitHub publication triggers, while manual draft publication and historical pending-delivery reconciliation still work. Old native review/Linear publication fences remain intact. Verify discovery, delegation, request reactivation after policy setup, and native execution browser fixtures supply explicit policies/reports.
 - [x] **2. Verify RED for each newly found gap, then fix its owner.** Run the specific test before the smallest production change. Do not add a parallel completion path to patch a failing caller. Update fixture semantics explicitly instead of disabling tests or globally defaulting policy to direct completion.
 - [x] **3. Document operator/client behavior and rollout.** Explain the contract freeze, supported GitHub permissions/check source, conservative revision-proof blocker, manual publication, preserved historical records, and drain/stop/migrate/restart steps. Include an initial explicit check-selection example for Circular, without credentials or environment-specific IDs. Document native direct/handoff preset semantics and the remaining external lifecycle/status-sync issues.
-- [ ] **4. Run the full required gates once after the final change.** With the correct disposable DB/runtime, run:
+- [x] **4. Run the full required gates once after the final change.** With the correct disposable DB/runtime, run:
 
   ```sh
   gofmt -l cmd internal contracts
@@ -228,3 +228,5 @@ Coverage: policies/evidence/freeze/migration → Task 1; ownership/status bypass
 Native execution approved and implemented in this feature branch; the plan and spec ship with the implementation PR. One fresh whole-branch review follows all task gates. No merge, deployment or live configuration change is included.
 
 Implementation decisions: cancellation clears the current completion pointer while retaining evidence; coding reports reuse the existing report forwarder; new Tasks reuse Save Task → completion policy → Start Run instead of duplicating unsaved requirements in the launcher. See the implementation PR for verification results and review decisions.
+
+Verification on implementation commit `17e3bb8`: formatting, module verification/tidy, vet, build and the full Go race suite passed with PostgreSQL and real Docker enabled. Contracts, typecheck, 53 frontend unit tests and production build passed. All 170 local browser scenarios passed in the final whole-suite run. Compose verified all 154 applicable scenarios (16 existing local-provider-only exclusions); one network-interrupted Gantt case passed unchanged on isolated retry. The disposable Compose stack, volume and execution files were removed.
