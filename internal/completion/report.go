@@ -18,8 +18,8 @@ func ValidateReport(p Policy, r Report) error {
 	if err := ValidatePolicy(p); err != nil {
 		return err
 	}
-	if !validText(r.Result, 4000) || r.PullRequestNumber != nil && *r.PullRequestNumber <= 0 {
-		return fmt.Errorf("%w: supply a result of 1–4000 characters and a positive PR number", ErrReport)
+	if !validText(r.Result, 4000) || r.PullRequestNumber != nil && (*r.PullRequestNumber <= 0 || int64(*r.PullRequestNumber) > 2147483647) {
+		return fmt.Errorf("%w: supply a result of 1–4000 characters and a PR number from 1 to 2147483647", ErrReport)
 	}
 	required := map[string]bool{}
 	for _, v := range p.Requirements {

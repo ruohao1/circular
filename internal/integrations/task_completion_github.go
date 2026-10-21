@@ -281,7 +281,9 @@ func (s *Service) collectCompletionGitHub(ctx context.Context, token string, pr 
 		}
 		o.Revision = accepted.Revision
 		proofs[o.Revision.TestedSHA] = o.Revision
-		shas = []string{o.Revision.TestedSHA}
+		if o.Revision.TestedSHA != o.PR.HeadSHA {
+			shas = append(shas, o.Revision.TestedSHA)
+		}
 		merged, e := s.completionCommit(ctx, token, prefix, o.MergeSHA)
 		if e != nil {
 			return o, e

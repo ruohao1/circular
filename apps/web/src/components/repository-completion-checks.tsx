@@ -8,7 +8,12 @@ import { Button } from "./ui/button";
 
 type Check = CompletionCheckSetup["available"][number];
 const key = (check: Check) =>
-  JSON.stringify([check.workflow_id, check.app_id, check.name]);
+  JSON.stringify([
+    check.workflow_id,
+    check.app_id,
+    check.workflow_path,
+    check.name,
+  ]);
 
 export function RepositoryCompletionChecks({
   repositoryID,
@@ -27,6 +32,10 @@ export function RepositoryCompletionChecks({
   });
   const selected =
     selection ?? (query.data ? initialCompletionChecks(query.data) : []);
+  const available = query.data?.available ?? [];
+  const unavailable = selected.filter(
+    (item) => !available.some((check) => key(check) === key(item)),
+  );
   const save = useMutation({
     mutationFn: () =>
       api.setRepositoryCompletionChecks(repositoryID, {
@@ -83,7 +92,7 @@ export function RepositoryCompletionChecks({
             )}
             <fieldset disabled={save.isPending} className="space-y-2">
               <legend className="sr-only">Required workflow jobs</legend>
-              {query.data.available.map((check) => (
+              {[...available, ...unavailable].map((check) => (
                 <label
                   key={key(check)}
                   className="flex cursor-pointer items-start gap-3 rounded border p-3 text-sm"
@@ -106,6 +115,12 @@ export function RepositoryCompletionChecks({
                       {check.workflow_path} · workflow {check.workflow_id} · app{" "}
                       {check.app_id}
                     </span>
+                    {unavailable.includes(check) && (
+                      <span className="block text-xs text-muted-foreground">
+                        Unavailable — uncheck to remove, then select a
+                        replacement.
+                      </span>
+                    )}
                   </span>
                 </label>
               ))}
@@ -113,7 +128,12 @@ export function RepositoryCompletionChecks({
             <Button
               type="button"
               variant="outline"
-              disabled={save.isPending || query.isFetching || !selected.length}
+              disabled={
+                save.isPending ||
+                query.isFetching ||
+                !selected.length ||
+                unavailable.length > 0
+              }
               onClick={() => save.mutate()}
             >
               Save required checks

@@ -13,6 +13,11 @@ func TestCompletionReportBounds(t *testing.T) {
 	if err := ValidateReport(p, valid); err != nil {
 		t.Fatal(err)
 	}
+	largestPR := 2147483647
+	valid.PullRequestNumber = &largestPR
+	if err := ValidateReport(p, valid); err != nil {
+		t.Fatal("largest supported PR number rejected", err)
+	}
 	cases := []struct {
 		name   string
 		change func(*Report)
@@ -29,6 +34,7 @@ func TestCompletionReportBounds(t *testing.T) {
 		{"url long", func(r *Report) { r.Evidence[0].Links = []string{"https://example.org/" + strings.Repeat("a", 2048)} }},
 		{"too many links", func(r *Report) { r.Evidence[0].Links = slices.Repeat([]string{"https://example.org"}, 6) }},
 		{"nonpositive PR", func(r *Report) { n := 0; r.PullRequestNumber = &n }},
+		{"oversized PR", func(r *Report) { n := 2147483648; r.PullRequestNumber = &n }},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

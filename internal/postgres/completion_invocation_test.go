@@ -65,6 +65,26 @@ func TestCompletionSupervisorReportAndProcessOutcome(t *testing.T) {
 	}
 }
 
+func TestCompletionSupervisorRejectsOversizedPR(t *testing.T) {
+	record := strings.Replace(completionRecord, `"evidence":[]`, `"evidence":[],"pull_request_number":2147483648`, 1)
+	f := newCodexSupervisorFixture(t, []protocolChunk{{"stdout", []byte(record + codexMessage + codexUsage)}}, 0)
+	s, _ := execution.NewSupervisor(f.pool, "completion-worker", f.config)
+	if err := s.Execute(t.Context(), *acquire(t, postgres.NewQueue(f.pool), "completion-worker"), "completion-worker"); err == nil {
+		t.Fatal("oversized PR number accepted")
+	}
+	var reports int
+	if err := f.pool.QueryRow(t.Context(), `SELECT count(*) FROM native_completion_reports WHERE run_id=$1`, f.id).Scan(&reports); err != nil || reports != 0 {
+		t.Fatal("invalid report persisted", reports, err)
+	}
+	if stage := reconcileCompletionFixture(t, f); stage == "completed" {
+		t.Fatal("invalid report completed Task")
+	}
+	var pending bool
+	if err := f.pool.QueryRow(t.Context(), `SELECT c.reconciliation_pending FROM task_completions c JOIN work_sessions s ON s.id=c.session_id WHERE s.run_id=$1`, f.id).Scan(&pending); err != nil || pending {
+		t.Fatal("invalid report left reconciliation pending", pending, err)
+	}
+}
+
 func reconcileCompletionFixture(t *testing.T, f supervisorFixture) string {
 	t.Helper()
 	var session uuid.UUID

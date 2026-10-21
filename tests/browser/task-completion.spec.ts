@@ -356,3 +356,47 @@ test("repository CI selection requires an explicit save and handles missing perm
     page.getByRole("button", { name: "Save required checks", exact: true }),
   ).toHaveCount(0);
 });
+
+for (const change of ["renamed job", "moved workflow"] as const) {
+  test(`repository CI selection can replace a ${change}`, async ({ page }) => {
+    const f = await completionFixture(page);
+    const replacement = f.setup.available[0];
+    const unavailable = {
+      ...replacement,
+      ...(change === "renamed job"
+        ? { name: "Old tests" }
+        : { workflow_path: ".github/workflows/old.yml" }),
+    };
+    f.setup.config = { revision: 4, checks: [unavailable] };
+    await page.goto("/setup?section=repositories");
+    await page.getByText("Required completion checks", { exact: true }).click();
+    const stale = page.getByRole("checkbox", { name: /Unavailable/ });
+    await expect(stale).toBeChecked();
+    const save = page.getByRole("button", {
+      name: "Save required checks",
+      exact: true,
+    });
+    await expect(save).toBeDisabled();
+    await stale.focus();
+    await page.keyboard.press("Space");
+    await expect(stale).toHaveCount(0);
+    await page
+      .getByRole("checkbox", { name: /Tests.*\.github\/workflows\/ci\.yml/ })
+      .check();
+    expect(f.checkSaves).toHaveLength(0);
+    await save.click();
+    await expect(
+      page.getByText("Required checks saved.", { exact: true }),
+    ).toBeVisible();
+    expect(f.checkSaves).toEqual([
+      { expected_revision: 4, checks: [replacement] },
+    ]);
+    await page.reload();
+    await page.getByText("Required completion checks", { exact: true }).click();
+    await expect(
+      page.getByRole("checkbox", { name: /Unavailable/ }),
+    ).toHaveCount(0);
+    await expect(page.getByRole("checkbox", { name: /Tests/ })).toBeChecked();
+    expect(f.errors).toEqual([]);
+  });
+}
