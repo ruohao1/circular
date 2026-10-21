@@ -35,6 +35,33 @@ type workerProcess struct {
 	err     error
 }
 
+func TestCompletionFullWorkerLifecycle(t *testing.T) {
+	first, binary := realWorkerFixture(t)
+	for _, report := range []bool{true, false} {
+		t.Run(fmt.Sprint(report), func(t *testing.T) {
+			f := first
+			if !report {
+				f = newSupervisorFixture(t, nil)
+				f.config.Image = first.config.Image
+				f.config.Docker.DockerExecutable = "docker"
+			} else if _, err := f.pool.Exec(t.Context(), `UPDATE agents SET backend_config='{"completion_report":{"result":"Fixture verified","evidence":[]}}' WHERE id=(SELECT agent_id FROM runs WHERE id=$1)`, f.id); err != nil {
+				t.Fatal(err)
+			}
+			process := startWorker(t, f, binary, "completion-acceptance")
+			snapshot := waitSnapshot(t, f, f.id, func(s testsupport.Snapshot) bool {
+				return s.Run.WorkerID == nil && s.Workspace != nil && s.Workspace.Status == "released"
+			})
+			process.stop(t, syscall.SIGTERM)
+			if snapshot.Run.Status != "succeeded" || (snapshot.Count("task.completion.reported") == 1) != report {
+				t.Fatal(snapshot.Run, snapshot.Events)
+			}
+			if stage := reconcileCompletionFixture(t, f); (stage == "completed") != report {
+				t.Fatal("task completion did not follow explicit report", stage)
+			}
+		})
+	}
+}
+
 func TestDelegationFullWorkerLifecycle(t *testing.T) {
 	// Build once; each outcome owns a separate database schema and worktree root.
 	first, binary := realWorkerFixture(t)

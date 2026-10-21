@@ -6,6 +6,7 @@ import (
 	"strconv"
 
 	"github.com/google/uuid"
+	"github.com/ruohao1/circular/internal/completion"
 	"github.com/ruohao1/circular/internal/delegations"
 	"github.com/ruohao1/circular/internal/prreviews"
 	"github.com/ruohao1/circular/internal/runstate"
@@ -36,6 +37,19 @@ func (f Fake) Prepare(input Input) (Invocation, error) {
 	}
 	var config map[string]json.RawMessage
 	_ = json.Unmarshal(input.Config, &config)
+	if input.CompletionContract != nil {
+		if input.Kind == runstate.PRReview || completion.ValidateContract(*input.CompletionContract) != nil {
+			return Invocation{}, fakeFailure("invalid completion contract", nil)
+		}
+		request["completion_contract"] = input.CompletionContract
+	}
+	if raw, exists := config["completion_report"]; exists {
+		var report completion.Report
+		if input.CompletionContract == nil || prreviews.DecodeStrict(input.Config, &config) != nil || prreviews.DecodeStrict(raw, &report) != nil || completion.ValidateReport(input.CompletionContract.Policy, report) != nil {
+			return Invocation{}, fakeFailure("invalid fake completion_report", nil)
+		}
+		request["completion_report"] = report
+	}
 	if raw, exists := config["delegation_request"]; exists {
 		candidate, err := delegations.Decode(raw)
 		if err != nil || prreviews.DecodeStrict(input.Config, &config) != nil {
@@ -61,7 +75,7 @@ func (f Fake) Prepare(input Input) (Invocation, error) {
 	return Invocation{
 		Command: []string{"--write-output"},
 		Stdin:   append(stdin, '\n'),
-		Decoder: &fakeDecoder{runID: input.RunID, handoff: codexDecoder{targets: input.DelegationTargets}},
+		Decoder: &fakeDecoder{runID: input.RunID, handoff: codexDecoder{targets: input.DelegationTargets, completionContract: input.CompletionContract}},
 	}, nil
 }
 
@@ -73,7 +87,7 @@ type fakeDecoder struct {
 
 func (d *fakeDecoder) Decode(line []byte, stream runtimes.Stream, number int) ([]Event, error) {
 	var header struct{ Type string }
-	if json.Unmarshal(line, &header) == nil && header.Type == "circular.delegation.requested" {
+	if json.Unmarshal(line, &header) == nil && (header.Type == "circular.delegation.requested" || header.Type == "circular.task.completion.reported") {
 		return d.handoff.Decode(line, stream, number)
 	}
 	kind, data, raw, err := decodeFakeRecord(line, d.runID, stream, number)

@@ -17,7 +17,7 @@ type Policy struct {
 type Evidence struct {
 	Key    string   `json:"key"`
 	Detail string   `json:"detail"`
-	Links  []string `json:"links"`
+	Links  []string `json:"links,omitempty"`
 }
 type Report struct {
 	Result            string     `json:"result"`

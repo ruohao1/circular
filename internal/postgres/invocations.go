@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/ruohao1/circular/internal/backends"
+	"github.com/ruohao1/circular/internal/completion"
 	"github.com/ruohao1/circular/internal/delegations"
 	"github.com/ruohao1/circular/internal/prreviews"
 	"github.com/ruohao1/circular/internal/runstate"
@@ -39,6 +40,9 @@ func sealInvocation(input ProvisioningContext) ([]byte, string, error) {
 	if input.Kind != runstate.Coding && input.Kind != runstate.PRReview {
 		return nil, "", ErrResourceConflict
 	}
+	if input.CompletionContract != nil && (input.Kind != runstate.Coding || completion.ValidateContract(*input.CompletionContract) != nil) {
+		return nil, "", ErrResourceConflict
+	}
 	if input.Backend == "codex" {
 		settings, err := backends.ValidateCodexConfig(input.BackendConfig)
 		if err != nil {
@@ -47,7 +51,7 @@ func sealInvocation(input ProvisioningContext) ([]byte, string, error) {
 		input.BackendConfig, _ = json.Marshal(settings)
 	} else if input.Backend == "fake" {
 		// Validate before normalization discards duplicate keys or number syntax.
-		if _, err := (backends.Fake{}).Prepare(backends.Input{Config: input.BackendConfig}); err != nil {
+		if _, err := (backends.Fake{}).Prepare(backends.Input{Config: input.BackendConfig, Kind: input.Kind, CompletionContract: input.CompletionContract}); err != nil {
 			return nil, "", err
 		}
 	} else {

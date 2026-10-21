@@ -19,6 +19,7 @@ import (
 	"github.com/ruohao1/circular/internal/agentproposals"
 	"github.com/ruohao1/circular/internal/codexauth"
 	"github.com/ruohao1/circular/internal/codexconfig"
+	"github.com/ruohao1/circular/internal/completion"
 	"github.com/ruohao1/circular/internal/delegations"
 	"github.com/ruohao1/circular/internal/prreviews"
 )
@@ -31,6 +32,7 @@ const (
 )
 
 type request struct {
+	completionContract      *completion.Contract
 	delegationContextSHA256 string
 	prompt                  string
 	model                   string
@@ -157,6 +159,8 @@ func executeRun(ctx context.Context, value request, stdout, stderr io.Writer, pr
 	var publish func(io.Writer) error
 	var reviewSpool *prreviews.Spool
 	var delegationSpool *delegations.Spool
+	var completionSpool *completion.Spool
+	completionDir := filepath.Join(proposalDir, "completion")
 	mcpConfig := `mcp_servers.circular={command="/circular-codex-workload",args=["mcp",` + strconv.Quote(proposalDir) + `],required=true,enabled_tools=["propose_agent","list_models"]}`
 	if value.purpose == "pr_review" {
 		if value.reviewContext == nil {
@@ -187,6 +191,16 @@ func executeRun(ctx context.Context, value request, stdout, stderr io.Writer, pr
 			return diagnostic(stderr, "cannot prepare Circular agent tools", 1)
 		}
 		publish = proposals.Publish
+		if value.completionContract != nil {
+			if os.Mkdir(completionDir, 0700) != nil {
+				return diagnostic(stderr, "cannot prepare completion tools", 1)
+			}
+			completionSpool, err = completion.NewSpool(completionDir, *value.completionContract)
+			if err != nil {
+				return diagnostic(stderr, "cannot prepare completion tools", 1)
+			}
+			mcpConfig = strings.Replace(mcpConfig, `"propose_agent",`, `"submit_task_result","propose_agent",`, 1)
+		}
 		if len(value.delegationTargets) > 0 {
 			dir := filepath.Join(proposalDir, "delegation")
 			if os.Mkdir(dir, 0700) != nil {
@@ -234,9 +248,14 @@ func executeRun(ctx context.Context, value request, stdout, stderr io.Writer, pr
 	}
 	var forwarder *prreviews.ReportForwarder
 	var reviewStream *reviewOutput
-	if reviewSpool != nil {
+	if reviewSpool != nil || completionSpool != nil {
 		reviewStream = &reviewOutput{writer: stdout}
-		forwarder, err = prreviews.StartReportForwarder(proposalDir, reviewSpool, recordWriter{reviewStream})
+
+		if completionSpool != nil {
+			forwarder, err = prreviews.StartReportForwarder(completionDir, completionSpool, recordWriter{reviewStream})
+		} else {
+			forwarder, err = prreviews.StartReportForwarder(proposalDir, reviewSpool, recordWriter{reviewStream})
+		}
 		if err != nil {
 			return diagnostic(stderr, "cannot prepare Circular review output", 1)
 		}
@@ -257,7 +276,7 @@ func executeRun(ctx context.Context, value request, stdout, stderr io.Writer, pr
 			return 1
 		}
 	}
-	if child.Err() == nil && forwarder == nil {
+	if child.Err() == nil && reviewSpool == nil {
 		if err := publish(stdout); err != nil {
 			return diagnostic(stderr, "cannot publish Circular agent output", 1)
 		}
@@ -385,7 +404,7 @@ func parse(input []byte) (request, error) {
 		if err != nil || !ok {
 			return request{}, invalid
 		}
-		if name != "protocol_version" && name != "prompt" && name != "model" && name != "reasoning_effort" && name != "api_key" && name != "auth_mode" && name != "purpose" && name != "review_context_sha256" && name != "delegation_targets" && name != "delegation_context_sha256" {
+		if name != "protocol_version" && name != "prompt" && name != "model" && name != "reasoning_effort" && name != "api_key" && name != "auth_mode" && name != "purpose" && name != "review_context_sha256" && name != "delegation_targets" && name != "delegation_context_sha256" && name != "completion_contract" {
 			return request{}, invalid
 		}
 		if _, duplicate := fields[name]; duplicate {
@@ -437,6 +456,12 @@ func parse(input []byte) (request, error) {
 	}
 	if value.purpose != "coding" && value.purpose != "pr_review" || value.purpose == "pr_review" && !prreviews.DigestPattern.MatchString(value.contextSHA256) || value.purpose == "coding" && value.contextSHA256 != "" {
 		return request{}, invalid
+	}
+
+	if raw, exists := fields["completion_contract"]; exists {
+		if value.purpose != "coding" || prreviews.DecodeStrict(raw, &value.completionContract) != nil || value.completionContract == nil || completion.ValidateContract(*value.completionContract) != nil {
+			return request{}, invalid
+		}
 	}
 	settings, err := codexconfig.Resolve(value.model, value.effort)
 	if raw, ok := fields["delegation_targets"]; ok {

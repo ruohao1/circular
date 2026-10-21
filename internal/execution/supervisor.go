@@ -440,7 +440,7 @@ func (s *Supervisor) prepareBackend(inputs postgres.ProvisioningContext) (prepar
 		return prepared, &backends.Failure{Message: "unsupported Run backend"}
 	}
 	var err error
-	prepared.invocation, err = adapter.Prepare(backends.Input{DelegationContextSHA256: inputs.DelegationContextSHA256, Kind: inputs.Kind, ReviewContextSHA256: inputs.ReviewContextSHA256, RunID: inputs.RunID, TaskTitle: inputs.TaskTitle, TaskDescription: inputs.TaskDescription, Instructions: inputs.Instructions, Config: inputs.BackendConfig, DelegationTargets: inputs.DelegationTargets})
+	prepared.invocation, err = adapter.Prepare(backends.Input{CompletionContract: inputs.CompletionContract, DelegationContextSHA256: inputs.DelegationContextSHA256, Kind: inputs.Kind, ReviewContextSHA256: inputs.ReviewContextSHA256, RunID: inputs.RunID, TaskTitle: inputs.TaskTitle, TaskDescription: inputs.TaskDescription, Instructions: inputs.Instructions, Config: inputs.BackendConfig, DelegationTargets: inputs.DelegationTargets})
 	return prepared, err
 }
 

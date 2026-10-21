@@ -10,6 +10,7 @@ COPY internal/agenttools ./internal/agenttools
 COPY internal/delegations ./internal/delegations
 COPY internal/artifacts ./internal/artifacts
 COPY internal/prreviews ./internal/prreviews
+COPY internal/completion ./internal/completion
 COPY internal/runstate ./internal/runstate
 COPY cmd/circular-codex-workload ./cmd/circular-codex-workload
 RUN CGO_ENABLED=0 go build -trimpath -o /circular-codex-workload ./cmd/circular-codex-workload

@@ -157,6 +157,9 @@ func (s *Resources) SuspendForDelegation(ctx context.Context, parentID uuid.UUID
 	}
 	record.ChildTaskID, record.ChildRunID = &childTask, &child.RunID
 	frozen := ProvisioningContext{Invocation: 1, RunID: child.RunID, WorkspaceID: WorkspaceID(child.RunID), RepositoryID: input.RepositoryID, Kind: runstate.Coding, CloneURL: input.CloneURL, BaseRef: checkpoint.SourceCommit, Backend: backend, TaskTitle: request.Objective.Title, TaskDescription: request.Objective.Description, Instructions: instructions, BackendConfig: config, SourceRunID: parentID, SourceCheckpoint: &checkpoint}
+	if err = tx.QueryRow(ctx, `SELECT completion_contract FROM tasks WHERE id=$1`, childTask).Scan(&frozen.CompletionContract); err != nil {
+		return record, err
+	}
 	if err = SaveInvocationInput(ctx, tx, frozen); err != nil {
 		return record, err
 	}

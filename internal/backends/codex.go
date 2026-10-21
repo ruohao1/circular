@@ -10,6 +10,7 @@ import (
 
 	"github.com/ruohao1/circular/internal/agentproposals"
 	"github.com/ruohao1/circular/internal/codexconfig"
+	"github.com/ruohao1/circular/internal/completion"
 	"github.com/ruohao1/circular/internal/delegations"
 	"github.com/ruohao1/circular/internal/prreviews"
 	"github.com/ruohao1/circular/internal/runstate"
@@ -78,6 +79,15 @@ func (c Codex) Prepare(input Input) (Invocation, error) {
 		request["purpose"] = "pr_review"
 		request["review_context_sha256"] = input.ReviewContextSHA256
 	}
+
+	if input.CompletionContract != nil {
+		if input.Kind == runstate.PRReview || completion.ValidateContract(*input.CompletionContract) != nil {
+			return bad("invalid coding completion contract")
+		}
+		request["completion_contract"] = input.CompletionContract
+		policy, _ := json.Marshal(input.CompletionContract.Policy)
+		request["prompt"] = request["prompt"].(string) + "\n\nBefore your final successful exit, call submit_task_result with the result and evidence for every frozen requirement: " + string(policy) + ". A final text message is not a completion report. A handoff report cannot complete the parent; its continuation must submit its own final report. PR publication is manual for this Task."
+	}
 	if settings.ReasoningEffort != "" {
 		request["reasoning_effort"] = settings.ReasoningEffort
 	}
@@ -88,7 +98,7 @@ func (c Codex) Prepare(input Input) (Invocation, error) {
 	if err != nil || len(stdin)+1 > 16*1024*1024 {
 		return bad("Codex workload input exceeds the supported limit")
 	}
-	return Invocation{Stdin: append(stdin, '\n'), Decoder: &codexDecoder{secret: c.APIKey, review: input.Kind == runstate.PRReview, targets: input.DelegationTargets}, NetworkEnabled: true, UseCredentials: mode == "chatgpt", StderrText: true, TemporaryStorageMB: 128}, nil
+	return Invocation{Stdin: append(stdin, '\n'), Decoder: &codexDecoder{secret: c.APIKey, review: input.Kind == runstate.PRReview, targets: input.DelegationTargets, completionContract: input.CompletionContract}, NetworkEnabled: true, UseCredentials: mode == "chatgpt", StderrText: true, TemporaryStorageMB: 128}, nil
 }
 
 // ValidateCodexConfig checks public Agent settings without requiring credentials.
@@ -131,11 +141,13 @@ func ValidateCodexConfig(raw json.RawMessage) (codexconfig.Settings, error) {
 }
 
 type codexDecoder struct {
-	secret     string
-	completed  bool
-	review     bool
-	targets    []delegations.Target
-	delegation *delegations.Request
+	completionContract *completion.Contract
+	completionReport   string
+	secret             string
+	completed          bool
+	review             bool
+	targets            []delegations.Target
+	delegation         *delegations.Request
 }
 
 func (d *codexDecoder) Decode(line []byte, stream runtimes.Stream, number int) ([]Event, error) {
@@ -165,6 +177,35 @@ func (d *codexDecoder) Decode(line []byte, stream runtimes.Stream, number int) (
 	}
 	// The trusted workload publishes MCP drafts after the CLI has finished,
 	// including after turn.completed. These remain proposals until user review.
+
+	if kind == "circular.task.completion.reported" {
+		if d.review || d.completionContract == nil || len(doc) != 2 {
+			return fail("emitted completion without a coding contract")
+		}
+		raw, err := json.Marshal(doc["report"])
+		var report completion.Report
+		if err != nil || prreviews.DecodeStrict(raw, &report) != nil || completion.ValidateReport(d.completionContract.Policy, report) != nil {
+			return fail("emitted invalid completion evidence")
+		}
+		digest, err := prreviews.Fingerprint(report)
+		if err != nil {
+			return fail("emitted invalid completion evidence")
+		}
+		if d.completionReport != "" {
+			if d.completionReport == digest {
+				return nil, nil
+			}
+			return fail("emitted conflicting completion reports")
+		}
+		d.completionReport = digest
+		var data map[string]any
+		decoder := json.NewDecoder(bytes.NewReader(raw))
+		decoder.UseNumber()
+		if decoder.Decode(&data) != nil {
+			return fail("emitted invalid completion evidence")
+		}
+		return []Event{{Type: "task.completion.reported", Source: "circular", Data: data, Raw: doc}}, nil
+	}
 	if kind == "circular.delegation.requested" {
 		if d.review || len(d.targets) == 0 {
 			return fail("emitted a delegation without permission")
