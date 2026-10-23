@@ -67,9 +67,9 @@
 
 ## Final review and delivery
 
-- [ ] Request one independent whole-branch review against the spec and Review Focus.
-- [ ] Resolve substantive findings with regression tests and record the result.
-- [ ] Create the implementation PR and attach it to the issue; do not deploy.
+- [x] Request one independent whole-branch review against the spec and Review Focus.
+- [x] Resolve substantive findings with regression tests and record the result.
+- [x] Create the implementation PR and attach it to the issue; do not deploy.
 
 ## Execution record
 
@@ -89,3 +89,12 @@ Validation on 2026-10-23:
 - `corepack pnpm contracts:check`, `typecheck`, all 53 frontend unit tests, and production build passed. Existing bundle-size/browser-module warnings remain.
 - All 11 selected local browser scenarios passed: seven completion, three planning, and bundled MCP setup/access/activity. The initial MCP run found an outdated read-only tool count (27 instead of 29); the corrected scenario passed and explicitly checks all four new writes are absent from read-only tools.
 - Existing OpenAPI operations/schemas remain semantically unchanged; new operation IDs are unique. No dependency or migration added. No deployment or live-provider/model call performed.
+
+Independent final review covered `195eaf0..f01507e`: no Critical, Important, or
+Minor findings, and no behavior declined for judgment. The reviewer independently
+ran `go test ./internal/httpapi ./internal/controlmcp -run '^TestTaskWork' -count=1 -timeout=2m`;
+HTTP passed in 6.849s and MCP in 2.212s. No fix pass was needed.
+
+Implementation PR: https://github.com/ruohao1/circular/pull/10. Hosted CI runs on
+the PR; the validated local result above does not substitute for its final status.
+No merge or deployment of this feature is performed by this plan.
