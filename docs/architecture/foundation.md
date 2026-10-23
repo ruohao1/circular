@@ -93,10 +93,14 @@ Project, Task, Run, then session. Linear launch preserves provider/grant/route
 locks before taking Project, then Agent/Repository. An owner conflict leaves the
 request waiting for explicit restart; invalid preparation requires approval.
 
-These lifecycle services live in `internal/postgres`. This foundation adds parent
-and prerequisite fields to existing planning API/MCP tools and safe native launch
-conflicts; external claim/heartbeat/finish MCP tools, completion policy, status
-sync and ownership visualizations are separate follow-ups.
+These lifecycle services live in `internal/postgres`. Private HTTP handlers and
+control MCP expose external claim, heartbeat, finish, inspection, and explicit
+user release through those same services. External clients create no placeholder
+coding Run. Existing planning pagination discovers candidates; Task work reads
+combine guidance, dependency state, ownership and completion evidence. Owner
+credentials are caller-retained and excluded from inspection and errors.
+Completion policies apply through the shared service transaction. Linear workflow
+status sync and ownership visualizations remain separate follow-ups.
 
 ## Isolation seam
 

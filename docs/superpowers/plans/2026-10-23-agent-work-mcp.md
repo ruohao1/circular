@@ -50,23 +50,42 @@
 
 **Files:**
 - Create: `internal/controlmcp/task_work.go`, `internal/controlmcp/task_work_test.go`
-- Modify: `internal/controlmcp/server.go`, `internal/controlmcp/client.go`, existing tool-surface tests/fixtures, `docs/development/control-mcp.md`
+- Modify: `internal/controlmcp/server.go`, `internal/controlmcp/client.go`, existing tool-surface tests/fixtures, `docs/development/control-mcp.md`, `docs/user-guide/coding-agent.md`, `docs/architecture/foundation.md`
 - Verify: `internal/httpapi/mcp*_test.go`, `tests/browser/mcp.spec.ts`, existing task/completion scenarios.
 
 **Interfaces:**
 - Consumes: Task 1's HTTP lifecycle, read models, error codes and reload actions; existing `list_task_planning`.
 - Produces: six tools named in the spec. Both read tools exist in all access modes; four write tools exist only in full control. Network failures preserve caller-owned retry parameters.
 
-- [ ] Write MCP integration tests over the real API/database covering candidate discovery, claim, reconnect/replay, heartbeat, completion and no replacement Run; write read-only and lost-claim cases.
-- [ ] Run `go test ./internal/controlmcp -run 'TestTaskWork' -count=1`; expect missing-tool failures.
-- [ ] Implement thin tools, bounded typed arguments, annotations, and descriptions. Reuse server-side validation. Error messages retain stable codes and reload guidance; include work retry identities in uncertain-response messages.
-- [ ] Update tool inventories and private setup/recovery documentation with a complete client workflow and safe credential generation example.
-- [ ] Run `go test ./internal/controlmcp ./internal/httpapi -count=1`; expect PASS.
-- [ ] Run formatting, module checks, vet/build, full Go race suite with PostgreSQL and Docker, generated contracts, frontend typecheck/unit/build, and focused browser MCP/task regressions; expect PASS and record exact commands/results.
-- [ ] Commit the MCP feature and validation record, request one fresh whole-branch review, fix substantive findings with regression tests, then create the implementation PR.
+- [x] Write MCP integration tests over the real API/database covering candidate discovery, claim, reconnect/replay, heartbeat, completion and no replacement Run; write read-only and lost-claim cases.
+- [x] Run `go test ./internal/controlmcp -run 'TestTaskWork' -count=1`; expect missing-tool failures.
+- [x] Implement thin tools, bounded typed arguments, annotations, and descriptions. Reuse server-side validation. Error messages retain stable codes and reload guidance; include work retry identities in uncertain-response messages.
+- [x] Update tool inventories and private setup/recovery documentation with a complete client workflow and safe credential generation example.
+- [x] Run `go test ./internal/controlmcp ./internal/httpapi -count=1`; expect PASS.
+- [x] Run formatting, module checks, vet/build, full Go race suite with PostgreSQL and Docker, generated contracts, frontend typecheck/unit/build, and focused browser MCP/task regressions; expect PASS and record exact commands/results.
+- [x] Commit the MCP feature and validation record.
+
+## Final review and delivery
+
+- [ ] Request one independent whole-branch review against the spec and Review Focus.
+- [ ] Resolve substantive findings with regression tests and record the result.
+- [ ] Create the implementation PR and attach it to the issue; do not deploy.
 
 ## Execution record
 
 Base: merge commit `195eaf02dcbb74ec08b1a07f30e5d6732cd50137` (PR #9). Its tree matches tested head `9080606`; all three CI jobs passed before merge. Work uses a managed isolated worktree; the unrelated dirty root checkout is preserved.
 
 HTTP verification: missing-route tests failed before implementation; lifecycle, preparation, replay, revocation, native cleanup and boundary cases pass. Shared PostgreSQL ownership/completion regressions pass (`go test ./internal/httpapi ./internal/postgres -run 'TestTaskWork|TestExternalWork|TestWork|TestCompletion' -count=1`). Generated contracts match.
+
+MCP verification: missing-tool tests failed before implementation. A real HTTP
+proxy committed a claim and dropped its response; reconnect/retry recovered the
+same session. Both read tools work in read-only mode, and all four mutations are
+unavailable. No external lifecycle path creates a replacement coding Run.
+
+Validation on 2026-10-23:
+
+- Formatting, `go mod verify`, `go mod tidy -diff`, `go vet ./...` and `go build ./...` passed.
+- `CIRCULAR_RUN_DOCKER_TESTS=1 go test -race ./... -count=1 -timeout=10m` passed with disposable PostgreSQL. PostgreSQL package: 259.643s; HTTP: 61.960s; control MCP: 12.767s.
+- `corepack pnpm contracts:check`, `typecheck`, all 53 frontend unit tests, and production build passed. Existing bundle-size/browser-module warnings remain.
+- All 11 selected local browser scenarios passed: seven completion, three planning, and bundled MCP setup/access/activity. The initial MCP run found an outdated read-only tool count (27 instead of 29); the corrected scenario passed and explicitly checks all four new writes are absent from read-only tools.
+- Existing OpenAPI operations/schemas remain semantically unchanged; new operation IDs are unique. No dependency or migration added. No deployment or live-provider/model call performed.

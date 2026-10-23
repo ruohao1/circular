@@ -3,8 +3,8 @@ title: "Connect your coding agent"
 description: "Add Circular to your coding assistant with a connection URL or one command."
 ---
 
-Use your coding assistant to browse projects, inspect results, and manage work in
-Circular. Tasks and runs it creates also appear in the console.
+Use your coding assistant to browse projects, inspect results, and track its own
+work in Circular. It can also start a Circular-managed Run when you request one.
 
 The connection is included with Circular. Keep Circular running, and use a coding
 assistant on the same computer. You do not need another account or model API key.
@@ -16,8 +16,8 @@ choose its **Access**:
 
 | Choice           | What it allows                                                                                                                                |
 | ---------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Read only**    | Browse projects, repositories, agents, and tasks; read results and inspect agent recommendations.                                             |
-| **Full control** | Everything above, plus create projects, agents, and tasks; choose models and reasoning levels; accept recommendations; start and cancel runs. |
+| **Read only**    | Browse projects, repositories, agents, and tasks; read results, current ownership and work-session activity.                                             |
+| **Full control** | Everything above, plus create projects, agents, and tasks; choose models and reasoning levels; accept recommendations; claim and report work; start and cancel runs. |
 
 Access applies to **every project in this Circular installation**. Choose
 **Read only** if you only want help understanding existing work.
@@ -75,16 +75,48 @@ the selected Circular agent and its existing model connection. See
 [agents and runs](/docs/agents-and-runs) for how to review changes.
 
 Choose the Task's completion policy and requirements in Task details before its
-first Run. Your assistant can inspect **Task completion**, refresh authoritative
+first claim or Run. Your assistant can inspect **Task completion**, refresh authoritative
 GitHub evidence, bind a PR number, and start an independent Task review. It must
 resolve the returned blockers before moving a review-required Task to Done;
 reporting success or moving a card cannot bypass the requirements.
 
 Circular-managed coding Runs submit their structured result through the local
-`submit_task_result` tool. The external assistant's claim, heartbeat and finish
-MCP workflow is a separate upcoming feature (ISQ-474). Connecting MCP today does
-not register your local coding process as an active Work session. Linear workflow
-status sync is also separate (ISQ-478); current run/review comments remain available.
+`submit_task_result` tool. For work performed by your existing assistant, use the
+workflow below. Linear workflow status sync is still separate; current run/review
+comments remain available.
+
+## Track work your assistant performs
+
+With **Full control**, ask:
+
+```text
+Use Circular to find a Ready task in my project. Read its scope, dependencies,
+completion policy and current owner. If the requirements are clear, claim it and
+do the work here. Keep Circular informed with heartbeats, then submit the result
+and required evidence. Ask me when the requirements or ownership need resolving.
+```
+
+Your assistant uses `get_task_work` to inspect a candidate, then `claim_task_work`
+to register a Work session and move the Task to In Progress. This does not launch
+another coding agent. An existing owner blocks competing claims.
+
+The assistant must retain its session credential and operation IDs for retries.
+It sends `heartbeat_task_work` about every 30 seconds while working. After 120
+seconds without contact, Circular reports that the session needs attention;
+ownership stays with that session. Connecting MCP alone does not claim a Task or
+start heartbeats. Automatic client skills/plugins remain a follow-on.
+
+`finish_task_work` submits the outcome, summary and required evidence. Successful
+review-required work enters In Review; eligible direct-completion work becomes
+Done. A failed or cancelled attempt closes without declaring the Task complete.
+Missing required evidence keeps the claim active so the assistant can correct it.
+
+Use `get_task_work` or `get_work_session` to inspect ownership and contact; both
+are available in **Read only** mode. If a client has stopped permanently, explicitly
+ask to release that exact owner with a reason. `release_task_work` prevents future
+reports from its credential, but cannot stop an external process editing files.
+Native cancellation waits for cleanup. Prepare the Task as Ready before a new
+attempt. A competing agent must never release another owner automatically.
 
 ## Check or change the connection
 
