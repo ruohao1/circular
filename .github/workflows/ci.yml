@@ -77,7 +77,8 @@ jobs:
       - name: Check Docker availability
         run: docker info
       - name: Run race, database, isolation, and worker-process tests
-        run: go test -race ./... -count=1 -timeout=300s
+        # The combined PostgreSQL/worker suite can exceed five minutes on hosted runners.
+        run: go test -race ./... -count=1 -timeout=10m
 
   frontend:
     name: Frontend / contracts
