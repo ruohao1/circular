@@ -86,6 +86,7 @@ export function TaskCompletion({
     onError: () => void query.refetch(),
   });
   const value = query.data;
+  const completed = value?.stage === "completed";
   const pending =
     disabled || policy.isPending || refresh.isPending || binding.isPending;
   const edit = () => {
@@ -253,14 +254,14 @@ export function TaskCompletion({
           {value.contract && (
             <>
               <p role="status" className="font-medium">
-                {completionLabel(value.verdict)}
+                {completed ? "Completed" : completionLabel(value.verdict)}
               </p>
               <p className="text-xs text-muted-foreground">
-                Completion evidence does not change the planning stage to Ready.
-                Review-required work stays In Review until a verified merge and
-                an explicit move to Done.
+                {completed
+                  ? "Completion accepted. The evidence below records that decision."
+                  : "Completion evidence does not change the planning stage to Ready. Review-required work stays In Review until a verified merge and an explicit move to Done."}
               </p>
-              {value.verdict.blockers.length > 0 && (
+              {!completed && value.verdict.blockers.length > 0 && (
                 <ul
                   aria-label="Completion blockers"
                   className="space-y-3 text-sm"
@@ -309,26 +310,28 @@ export function TaskCompletion({
           )}
           {value.policy?.mode === "review_required" && (
             <>
-              <p className="text-xs text-muted-foreground">
-                Publish this Task's PR manually. Required checks and reviewer
-                setup are in{" "}
-                <Link
-                  to="/setup"
-                  search={{ section: "repositories" }}
-                  className="underline"
-                >
-                  Repository settings
-                </Link>{" "}
-                and{" "}
-                <Link
-                  to="/setup"
-                  search={{ section: "integrations" }}
-                  className="underline"
-                >
-                  Integrations
-                </Link>
-                .
-              </p>
+              {!completed && (
+                <p className="text-xs text-muted-foreground">
+                  Publish this Task's PR manually. Required checks and reviewer
+                  setup are in{" "}
+                  <Link
+                    to="/setup"
+                    search={{ section: "repositories" }}
+                    className="underline"
+                  >
+                    Repository settings
+                  </Link>{" "}
+                  and{" "}
+                  <Link
+                    to="/setup"
+                    search={{ section: "integrations" }}
+                    className="underline"
+                  >
+                    Integrations
+                  </Link>
+                  .
+                </p>
+              )}
               {value.binding && (
                 <p className="text-sm">
                   Bound pull request:{" "}
@@ -346,7 +349,7 @@ export function TaskCompletion({
                   )}
                 </p>
               )}
-              {value.report && (
+              {value.report && !completed && (
                 <form
                   onSubmit={(event) => {
                     event.preventDefault();
@@ -373,14 +376,16 @@ export function TaskCompletion({
                 </form>
               )}
               <div className="flex flex-wrap items-center gap-3">
-                <Button
-                  type="button"
-                  variant="outline"
-                  disabled={pending || !value.binding}
-                  onClick={() => refresh.mutate()}
-                >
-                  Refresh completion evidence
-                </Button>
+                {!completed && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    disabled={pending || !value.binding}
+                    onClick={() => refresh.mutate()}
+                  >
+                    Refresh completion evidence
+                  </Button>
+                )}
                 <span className="text-xs text-muted-foreground">
                   Observed:{" "}
                   {completionAge(value.observation?.checked_at ?? null)}
@@ -453,7 +458,7 @@ export function TaskCompletion({
                 </div>
               )}
               {value.report && value.binding && (
-                <TaskPRReviews taskID={taskID} />
+                <TaskPRReviews taskID={taskID} readOnly={completed} />
               )}
             </>
           )}

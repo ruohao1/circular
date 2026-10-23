@@ -132,3 +132,37 @@ func TestCompletionMergeProof(t *testing.T) {
 		}
 	}
 }
+
+func TestCompletedReviewKeepsHistoricalDecision(t *testing.T) {
+	now := time.Now().UTC()
+	in := readyCompletion(t, now)
+	in.Observation.PRState = "merged"
+	in.Observation.Merged = true
+	in.Observation.MergeSHA = strings.Repeat("9", 40)
+	in.Observation.MergeVerified = true
+	if v := Evaluate(in, now); !v.CanComplete {
+		t.Fatal("completion was not eligible", v)
+	}
+	in.Stage = "completed"
+	for _, change := range []struct {
+		name  string
+		apply func(*Input)
+	}{
+		{"expired", func(*Input) {}},
+		{"disconnected", func(i *Input) { i.Identity = nil }},
+		{"review artifact expired", func(i *Input) { i.Review.Retained = false }},
+	} {
+		t.Run(change.name, func(t *testing.T) {
+			copy := cloneCompletion(t, in)
+			change.apply(&copy)
+			v := Evaluate(copy, now.Add(2*time.Minute))
+			if !v.CanComplete || v.NextStage != "completed" || v.MergeReadiness != "not_applicable" || len(v.Blockers) != 0 {
+				t.Fatal("accepted completion was reevaluated", v)
+			}
+			copy.Stage, copy.CurrentSessionID = "ready", uuid.Nil
+			if v := Evaluate(copy, now.Add(2*time.Minute)); v.CanComplete || !hasCompletionBlock(v, "attempt_superseded") {
+				t.Fatal("reopening reused the accepted completion", v)
+			}
+		})
+	}
+}

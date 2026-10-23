@@ -42,8 +42,10 @@ func Evaluate(in Input, now time.Time) Verdict {
 	if len(v.Blockers) > 0 {
 		return v
 	}
-	if !review {
+	// Done records accepted history; reopening requires a new current session.
+	if !review || in.Stage == "completed" {
 		v.NextStage = "completed"
+		v.MergeReadiness = "not_applicable"
 		v.CanComplete = true
 		return v
 	}

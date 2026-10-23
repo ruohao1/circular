@@ -188,10 +188,20 @@ export function RunPRReviews({ sourceRunID }: { sourceRunID: string }) {
   if (delivery.data?.status !== "delivered") return null;
   return <SourcePRReviews sourceRunID={sourceRunID} />;
 }
-export function TaskPRReviews({ taskID }: { taskID: string }) {
-  return <SourcePRReviews taskID={taskID} />;
+export function TaskPRReviews({
+  taskID,
+  readOnly,
+}: {
+  taskID: string;
+  readOnly?: boolean;
+}) {
+  return <SourcePRReviews taskID={taskID} readOnly={readOnly} />;
 }
-function SourcePRReviews({ sourceRunID, taskID }: ReviewSourceProps) {
+function SourcePRReviews({
+  sourceRunID,
+  taskID,
+  readOnly = false,
+}: ReviewSourceProps & { readOnly?: boolean }) {
   const sourceKey = taskID ? `task:${taskID}` : sourceRunID!;
   const history = useInfiniteQuery({
     queryKey: ["pr-reviews", sourceKey],
@@ -221,12 +231,15 @@ function SourcePRReviews({ sourceRunID, taskID }: ReviewSourceProps) {
       </CardHeader>
       <CardContent className="space-y-4">
         <p className="text-xs leading-relaxed text-muted-foreground">
-          Get a dedicated agent's assessment of this pull request. Each report
-          stays linked to the commits it reviewed.
+          {readOnly
+            ? "Past reports stay linked to the commits they reviewed."
+            : "Get a dedicated agent's assessment of this pull request. Each report stays linked to the commits it reviewed."}
         </p>
-        <ReviewLaunchButton
-          {...(taskID ? { taskID } : { sourceRunID: sourceRunID! })}
-        />
+        {!readOnly && (
+          <ReviewLaunchButton
+            {...(taskID ? { taskID } : { sourceRunID: sourceRunID! })}
+          />
+        )}
         {reviews.length > 0 && (
           <ul className="space-y-3">
             {reviews.map((review) => (

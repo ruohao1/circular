@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -281,8 +282,11 @@ func (s *Service) collectCompletionGitHub(ctx context.Context, token string, pr 
 		}
 		o.Revision = accepted.Revision
 		proofs[o.Revision.TestedSHA] = o.Revision
-		if o.Revision.TestedSHA != o.PR.HeadSHA {
-			shas = append(shas, o.Revision.TestedSHA)
+		// Merging must not hide a newer run on either pre-merge candidate.
+		for _, sha := range []string{o.Revision.TestedSHA, accepted.MergeSHA} {
+			if prreviews.CommitPattern.MatchString(sha) && !slices.Contains(shas, sha) {
+				shas = append(shas, sha)
+			}
 		}
 		merged, e := s.completionCommit(ctx, token, prefix, o.MergeSHA)
 		if e != nil {

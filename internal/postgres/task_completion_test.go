@@ -133,6 +133,36 @@ func TestCompletionTaskMoveGuard(t *testing.T) {
 		t.Fatal("move released owner")
 	}
 }
+func TestCompletedTaskReopenedInProgressNeedsNewWork(t *testing.T) {
+	f := planningSeed(t)
+	task := f.task(t, "Reopen completed work", "ready", "{}")
+	claim := externalClaim(task)
+	if _, err := claimWork(t, f, claim); err != nil {
+		t.Fatal(err)
+	}
+	finish := postgres.WorkFinishInput{Credential: postgres.WorkCredential{SessionID: claim.SessionID, Secret: claim.Secret}, OperationID: uuid.New(), Outcome: "succeeded", Report: &completion.Report{Result: "Done"}}
+	first, err := finishReport(t, f, finish)
+	if err != nil || completionView(t, f, task).Stage != "completed" {
+		t.Fatal("completion failed", err)
+	}
+	if _, err = f.move(t, task, "in_progress", "end", nil); err != nil {
+		t.Fatal(err)
+	}
+	view := completionView(t, f, task)
+	if view.CurrentSessionID != uuid.Nil || view.Verdict.CanComplete {
+		t.Fatal("reopen retained the old completion authority", view)
+	}
+	replay, err := finishReport(t, f, finish)
+	if err != nil || replay.Receipt.ID != first.Receipt.ID || completionView(t, f, task).Stage != "in_progress" {
+		t.Fatal("finish replay changed reopened work", replay, err)
+	}
+	_, err = f.move(t, task, "completed", "end", nil)
+	var conflict *postgres.CompletionConflict
+	if !errors.As(err, &conflict) {
+		t.Fatal("reopened work completed without a fresh session", err)
+	}
+}
+
 func TestCompletionFinishRacesReopenAndPolicyEdit(t *testing.T) {
 	for _, operation := range []string{"reopen", "policy"} {
 		t.Run(operation, func(t *testing.T) {

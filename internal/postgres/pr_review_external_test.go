@@ -15,6 +15,11 @@ import (
 
 func externalReviewFixture(t *testing.T) (planningFixture, uuid.UUID, uuid.UUID) {
 	t.Helper()
+	return completionReviewFixture(t, false)
+}
+
+func completionReviewFixture(t *testing.T, native bool) (planningFixture, uuid.UUID, uuid.UUID) {
+	t.Helper()
 	f := planningSeed(t)
 	if _, err := f.p.Exec(t.Context(), `UPDATE repositories SET name='fixture/private-source',clone_url='https://github.com/fixture/private-source.git',external_refs='{"github":{"repository_id":"101","installation_id":"42"}}' WHERE id=$1`, f.repo); err != nil {
 		t.Fatal(err)
@@ -32,6 +37,24 @@ func externalReviewFixture(t *testing.T) (planningFixture, uuid.UUID, uuid.UUID)
 	}
 	if err = tx.Commit(t.Context()); err != nil {
 		t.Fatal(err)
+	}
+	if native {
+		run, err := nativeLaunch(t, f, task, "review-source")
+		if err != nil {
+			t.Fatal(err)
+		}
+		// Seed accepted, cleaned native work; execution cleanup is tested separately.
+		if _, err = f.p.Exec(t.Context(), `UPDATE runs SET status='succeeded',finished_at=now() WHERE id=$1`, run.RunID); err != nil {
+			t.Fatal(err)
+		}
+		var session uuid.UUID
+		if err = f.p.QueryRow(t.Context(), `UPDATE work_sessions SET outcome='succeeded',finished_at=now(),released_at=now(),release_reason='completed fixture' WHERE run_id=$1 RETURNING id`, run.RunID).Scan(&session); err != nil {
+			t.Fatal(err)
+		}
+		if _, err = f.p.Exec(t.Context(), `UPDATE task_completions SET report='{"result":"Native result","evidence":[{"key":"tests","detail":"Native agent says passed"}],"pull_request_number":1}' WHERE session_id=$1`, session); err != nil {
+			t.Fatal(err)
+		}
+		return f, task, session
 	}
 	claim := externalClaim(task)
 	claim.ExpectedRevision, _ = f.versions(t, task)
@@ -155,6 +178,63 @@ func TestCompletionReviewLatestRequestedAndScope(t *testing.T) {
 	req = prreviews.LaunchRequest{RequestKey: uuid.New(), ExpectedInputFingerprint: snapshot.InputFingerprint, Mode: "normal"}
 	if _, err = store.Launch(t.Context(), postgres.ReviewLaunch{Snapshot: snapshot, Request: req}); !errors.Is(err, prreviews.ErrSourceInvalid) {
 		t.Fatal("completed task launched", err)
+	}
+}
+
+func TestCompletionReviewRestoredDefaultsStartsFreshAttempt(t *testing.T) {
+	for _, native := range []bool{false, true} {
+		t.Run(map[bool]string{false: "external", true: "native"}[native], func(t *testing.T) {
+			f, task, session := completionReviewFixture(t, native)
+			store := postgres.NewPRReviewStore(f.p)
+			launch := func(snapshot prreviews.LaunchSnapshot, key uuid.UUID) prreviews.Review {
+				t.Helper()
+				review, err := store.Launch(t.Context(), postgres.ReviewLaunch{Snapshot: snapshot, Request: prreviews.LaunchRequest{RequestKey: key, Mode: "normal", ExpectedInputFingerprint: snapshot.InputFingerprint}})
+				if err != nil {
+					t.Fatal(err)
+				}
+				return review
+			}
+			original := prepareExternalReview(t, f, session)
+			firstKey := uuid.New()
+			first := launch(original, firstKey)
+			testsupport.CompletePRReview(t, f.p, first, t.TempDir(), emptyReviewReport())
+			if _, err := f.p.Exec(t.Context(), `UPDATE agents SET instructions=instructions || ' Extra review instruction.' WHERE id=$1`, original.Reviewer.AgentID); err != nil {
+				t.Fatal(err)
+			}
+			changed := prepareExternalReview(t, f, session)
+			second := launch(changed, uuid.New())
+			if _, err := f.p.Exec(t.Context(), `UPDATE runs SET status='failed',finished_at=now() WHERE id=$1`, second.RunID); err != nil {
+				t.Fatal(err)
+			}
+			if reused := launch(changed, uuid.New()); reused.ID != second.ID {
+				t.Fatal("current attempt was not reused", reused.ID, second.ID)
+			}
+			if replay := launch(original, firstKey); replay.ID != first.ID {
+				t.Fatal("lost acknowledgement changed", replay.ID, first.ID)
+			}
+			before := completionView(t, f, task)
+			if before.Review == nil || before.Review.ID != second.ID || before.Review.State != "failed" {
+				t.Fatal("replay changed the current failed attempt", before.Review)
+			}
+			if _, err := f.p.Exec(t.Context(), `UPDATE agents SET instructions=$2 WHERE id=$1`, original.Reviewer.AgentID, original.Reviewer.Instructions); err != nil {
+				t.Fatal(err)
+			}
+			restored := launch(prepareExternalReview(t, f, session), uuid.New())
+			if restored.ID == first.ID || restored.ID == second.ID || restored.RunID == first.RunID || restored.RunID == second.RunID || restored.RunStatus != "queued" || restored.Attempt != first.Attempt+1 {
+				t.Fatal("restored defaults did not start a fresh attempt", restored.ID, restored.RunID, restored.RunStatus, restored.Attempt)
+			}
+			after := completionView(t, f, task)
+			if after.Review == nil || after.Review.ID != restored.ID || after.Review.State != "queued" {
+				t.Fatal("fresh attempt did not replace the failed attempt", after.Review)
+			}
+			if reused := launch(original, uuid.New()); reused.ID != restored.ID {
+				t.Fatal("fresh current attempt was not reused", reused.ID, restored.ID)
+			}
+			var count int
+			if err := f.p.QueryRow(t.Context(), `SELECT count(*) FROM pr_reviews`).Scan(&count); err != nil || count != 3 {
+				t.Fatal("unexpected review executions", count, err)
+			}
+		})
 	}
 }
 

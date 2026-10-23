@@ -292,6 +292,49 @@ test("review readiness remains separate from Done and stale evidence can recover
   expect(f.errors).toEqual([]);
 });
 
+test("completed task keeps accepted evidence without recovery actions", async ({
+  page,
+}) => {
+  const f = await completionFixture(page);
+  f.state.tasks[0].status = "completed";
+  f.view.stage = "completed";
+  f.view.observation!.checked_at = new Date(Date.now() - 125_000).toISOString();
+  f.view.verdict = {
+    next_stage: "completed",
+    merge_readiness: "not_applicable",
+    can_complete: true,
+    blockers: [],
+    advisories: [],
+  };
+  await page.goto(`/tasks?taskId=${T}`);
+  const panel = page.getByRole("region", {
+    name: "Task completion",
+    exact: true,
+  });
+  await expect(panel.getByText("Completed", { exact: true })).toBeVisible();
+  await expect(panel).toContainText("Zero accepted");
+  await expect(panel).toContainText("Observed: 2 minutes ago");
+  await expect(
+    panel.getByRole("link", { name: "Read independent report" }),
+  ).toBeVisible();
+  await expect(
+    panel.getByRole("region", { name: "Pull request reviews", exact: true }),
+  ).toBeVisible();
+  await expect(
+    panel.getByRole("button", { name: "Refresh completion evidence" }),
+  ).toHaveCount(0);
+  await expect(
+    panel.getByRole("button", { name: "Bind pull request" }),
+  ).toHaveCount(0);
+  await expect(
+    panel.getByRole("button", { name: "Review PR", exact: true }),
+  ).toHaveCount(0);
+  await expect(
+    panel.getByText("Completion blocked", { exact: true }),
+  ).toHaveCount(0);
+  expect(f.errors).toEqual([]);
+});
+
 test("blocked keyboard drop retains In Review placement and focus", async ({
   page,
 }) => {

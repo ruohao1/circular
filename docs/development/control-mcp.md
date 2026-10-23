@@ -286,6 +286,11 @@ checkpoint semantics, rollout and recovery diagnostics.
 bound PR, observation age, required checks, latest independent review and stable
 blocker codes. `prepare_task_pr_review` and `list_task_pr_reviews` are also
 available read-only. Preparation verifies inputs but starts no model work.
+For a completed Task, the verdict describes the accepted historical result
+(`next_stage=completed`, `merge_readiness=not_applicable`); observation expiry or
+a later GitHub reconnect does not invalidate it. Reopening requires fresh tracked
+work. Completed Tasks retain their evidence and review history without refresh,
+rebinding or new-review controls.
 
 Full control additionally exposes `refresh_task_completion`,
 `bind_task_pull_request` and `launch_task_pr_review`. Bind only a positive PR

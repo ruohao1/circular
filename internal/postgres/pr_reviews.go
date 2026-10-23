@@ -224,6 +224,12 @@ func (s *PRReviewStore) Launch(ctx context.Context, command ReviewLaunch) (prrev
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 		return zero, err
 	}
+	currentAttempt := true
+	if completionSession != nil {
+		if err := tx.QueryRow(ctx, `SELECT COALESCE(latest_review_id=$2,false) FROM task_completions WHERE session_id=$1`, *completionSession, reviewID).Scan(&currentAttempt); err != nil {
+			return zero, err
+		}
+	}
 	if request.Mode == "again" {
 		var same bool
 		err = tx.QueryRow(ctx, `SELECT source_run_id IS NOT DISTINCT FROM $2::uuid AND source_work_session_id IS NOT DISTINCT FROM $5::uuid AND snapshot->'pr'->>'github_repository_id'=$3 AND (snapshot->'pr'->>'number')::integer=$4 FROM pr_reviews WHERE id=$1`, request.PreviousReviewID, source.RunID, snapshot.PR.GitHubRepositoryID, snapshot.PR.Number, source.WorkSessionID).Scan(&same)
@@ -234,7 +240,7 @@ func (s *PRReviewStore) Launch(ctx context.Context, command ReviewLaunch) (prrev
 			return zero, prreviews.ErrRequestConflict
 		}
 	}
-	if reviewID == uuid.Nil || request.Mode == "again" || !sameSource {
+	if reviewID == uuid.Nil || request.Mode == "again" || !sameSource || !currentAttempt {
 		reviewID = uuid.New()
 		runID := uuid.New()
 		var runAttempt int

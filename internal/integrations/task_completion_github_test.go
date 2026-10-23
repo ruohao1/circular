@@ -59,7 +59,7 @@ func completionProvider(t *testing.T, scenario string) (*Service, prreviews.PRId
 			if scenario == "changed" && n > 1 {
 				currentHead = strings.Repeat("f", 40)
 			}
-			if scenario == "head proof" || scenario == "no proof" {
+			if scenario == "head proof" || scenario == "no proof" || strings.HasPrefix(scenario, "merged newer test merge") {
 				testMerge = ""
 			}
 			if strings.HasPrefix(scenario, "merged") {
@@ -102,8 +102,17 @@ func completionProvider(t *testing.T, scenario string) (*Service, prreviews.PRId
 				return
 			}
 			tested := merge
-			if scenario == "head proof" || scenario == "no proof" {
+			if scenario == "head proof" || scenario == "no proof" || strings.HasPrefix(scenario, "merged newer test merge") {
 				tested = head
+			}
+
+			if strings.HasPrefix(scenario, "merged newer test merge") && r.URL.Query().Get("head_sha") == merge {
+				status, conclusion := "queued", ""
+				if scenario == "merged newer test merge failed" {
+					status, conclusion = "completed", "failure"
+				}
+				encode(map[string]any{"total_count": 1, "workflow_runs": []any{map[string]any{"id": 11, "workflow_id": 123, "run_number": 2, "run_attempt": 1, "head_sha": merge, "check_suite_id": 41, "status": status, "conclusion": conclusion, "path": ".github/workflows/ci.yml"}}})
+				return
 			}
 			if strings.HasPrefix(scenario, "merged newer head") && r.URL.Query().Get("head_sha") == head {
 				status, conclusion := "queued", ""
@@ -146,13 +155,16 @@ func completionProvider(t *testing.T, scenario string) (*Service, prreviews.PRId
 			encode(map[string]any{"total_count": 1, "workflow_runs": []any{run}})
 		case r.URL.Path == prefix+"/actions/runs/10/attempts/2/jobs", r.URL.Path == prefix+"/actions/runs/11/attempts/1/jobs":
 			tested := merge
-			if scenario == "head proof" || scenario == "no proof" {
+			if scenario == "head proof" || scenario == "no proof" || strings.HasPrefix(scenario, "merged newer test merge") {
 				tested = head
 			}
 			job := map[string]any{"id": 20, "run_id": 10, "head_sha": tested, "name": "Tests", "status": "completed", "conclusion": "success", "check_run_url": "http://" + r.Host + prefix + "/check-runs/30", "html_url": pr.URL}
 			if r.URL.Path == prefix+"/actions/runs/11/attempts/1/jobs" {
 				job["id"], job["run_id"], job["head_sha"], job["conclusion"] = 21, 11, head, "failure"
 				job["check_run_url"] = "http://" + r.Host + prefix + "/check-runs/31"
+				if strings.HasPrefix(scenario, "merged newer test merge") {
+					job["head_sha"] = merge
+				}
 			}
 			if scenario == "job failed" {
 				job["conclusion"] = "failure"
@@ -167,7 +179,7 @@ func completionProvider(t *testing.T, scenario string) (*Service, prreviews.PRId
 				t.Error("check attempts were filtered")
 			}
 			tested := merge
-			if scenario == "head proof" || scenario == "no proof" {
+			if scenario == "head proof" || scenario == "no proof" || strings.HasPrefix(scenario, "merged newer test merge") {
 				tested = head
 			}
 			app := 15368
@@ -177,6 +189,9 @@ func completionProvider(t *testing.T, scenario string) (*Service, prreviews.PRId
 			check := map[string]any{"id": 30, "head_sha": tested, "name": "Tests", "status": "completed", "conclusion": "success", "app": map[string]any{"id": app, "slug": "github-actions"}, "check_suite": map[string]any{"id": 40}}
 			if r.URL.Path == prefix+"/check-suites/41/check-runs" {
 				check["id"], check["head_sha"], check["conclusion"], check["check_suite"] = 31, head, "failure", map[string]any{"id": 41}
+				if strings.HasPrefix(scenario, "merged newer test merge") {
+					check["head_sha"] = merge
+				}
 			}
 			if scenario == "check skipped" {
 				check["conclusion"] = "skipped"
@@ -257,6 +272,23 @@ func TestCompletionGitHubMergedNewerHeadRun(t *testing.T) {
 			}
 			if got.ErrorCode == "" && len(got.Checks) == 1 && got.Checks[0].RunStatus == "completed" && got.Checks[0].RunConclusion == "success" && got.Checks[0].Conclusion == "success" {
 				t.Fatal("newer head run ignored in favor of old test-merge success", got)
+			}
+		})
+	}
+}
+
+func TestCompletionGitHubMergedNewerTestMergeRun(t *testing.T) {
+	for _, scenario := range []string{"merged newer test merge queued", "merged newer test merge failed"} {
+		t.Run(scenario, func(t *testing.T) {
+			s, pr, checks, prior := completionProvider(t, scenario)
+			prior.Revision.TestedSHA = pr.HeadSHA
+			prior.MergeSHA = strings.Repeat("c", 40)
+			got, err := s.collectCompletionGitHub(t.Context(), "fixture-app-token", pr, checks, prior)
+			if err != nil || !got.Merged || !got.MergeVerified || got.Revision != prior.Revision {
+				t.Fatal("accepted merge proof changed", got, err)
+			}
+			if got.ErrorCode == "" && len(got.Checks) == 1 && got.Checks[0].RunStatus == "completed" && got.Checks[0].RunConclusion == "success" && got.Checks[0].Conclusion == "success" {
+				t.Fatal("newer test-merge run ignored in favor of old head success", got.Checks[0])
 			}
 		})
 	}

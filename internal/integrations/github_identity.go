@@ -220,14 +220,6 @@ func (s *Service) SaveGitHubIdentity(ctx context.Context, project string, value 
 	if err := lockApp(ctx, tx, "github"); err != nil {
 		return IdentityStatus{}, err
 	}
-	var previous string
-	err = tx.QueryRow(ctx, `SELECT i.account_id FROM integration_identity_bindings b JOIN provider_identities i ON i.id=b.identity_id WHERE b.project_id=$1 AND b.provider='github' FOR UPDATE OF b`, project).Scan(&previous)
-	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
-		return IdentityStatus{}, err
-	}
-	if previous != "" && previous != installationID {
-		return IdentityStatus{}, ErrIdentityConflict
-	}
 	if !s.environmentApp("github") {
 		var encrypted []byte
 		if err := tx.QueryRow(ctx, `SELECT credentials FROM integration_apps WHERE provider='github' FOR UPDATE`).Scan(&encrypted); err != nil {
@@ -260,6 +252,15 @@ func (s *Service) SaveGitHubIdentity(ctx context.Context, project string, value 
 	 VALUES($1,'github',$2,$3,$4,$5,$6,$7,$8,'available',$9) ON CONFLICT(provider,app_client_id,account_id) DO UPDATE SET account_name=EXCLUDED.account_name,actor_id=EXCLUDED.actor_id,actor_name=EXCLUDED.actor_name,actor_login=EXCLUDED.actor_login,avatar_url=EXCLUDED.avatar_url,status='available',enabled=true,generation=provider_identities.generation+1,updated_at=now() RETURNING id`, uuid.NewString(), app.ClientID, installationID, installation.Account.Login, strconv.FormatInt(bot.ID, 10), bot.Name, bot.Login, bot.AvatarURL, []string{"contents:read", "pull_requests:write"}).Scan(&identityID)
 	if err != nil {
 		return IdentityStatus{}, err
+	}
+	// Lock the identity before its binding, matching completion and other identity writers.
+	var previous string
+	err = tx.QueryRow(ctx, `SELECT i.account_id FROM integration_identity_bindings b JOIN provider_identities i ON i.id=b.identity_id WHERE b.project_id=$1 AND b.provider='github' FOR UPDATE OF b`, project).Scan(&previous)
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return IdentityStatus{}, err
+	}
+	if previous != "" && previous != installationID {
+		return IdentityStatus{}, ErrIdentityConflict
 	}
 	if _, err := tx.Exec(ctx, `INSERT INTO integration_identity_bindings(project_id,provider,identity_id) VALUES($1,'github',$2) ON CONFLICT(project_id,provider) DO UPDATE SET enabled=true,updated_at=now()`, project, identityID); err != nil {
 		return IdentityStatus{}, err

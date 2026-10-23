@@ -8,6 +8,7 @@ import (
 	"github.com/ruohao1/circular/internal/prreviews"
 	"github.com/ruohao1/circular/internal/testsupport"
 	"testing"
+	"time"
 )
 
 func TestCompletionGitHubIdentityScopedAndNoHumanFallback(t *testing.T) {
@@ -114,6 +115,51 @@ func TestCompletionCurrentReviewChecksAndVerifiedMerge(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err = tx.Commit(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = f.service.SaveGitHubIdentity(t.Context(), f.project, nil); err != nil {
+		t.Fatal(err)
+	}
+	inspect, err := f.pool.Begin(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer inspect.Rollback(t.Context())
+	historical, err := postgres.InspectTaskCompletion(t.Context(), inspect, source.TaskID, time.Now().UTC().Add(2*time.Minute))
+	if err != nil || historical.Stage != "completed" || !historical.Verdict.CanComplete || historical.Verdict.NextStage != "completed" || len(historical.Verdict.Blockers) != 0 {
+		t.Fatal("accepted completion expired or changed on reconnect", historical, err)
+	}
+	if historical.Observation == nil || !historical.Observation.CheckedAt.Equal(merged.Observation.CheckedAt) || historical.Report == nil || historical.Report.Result != merged.Report.Result {
+		t.Fatal("accepted evidence was lost", historical)
+	}
+	if err = inspect.Commit(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	reads := f.provider.ReviewReads.Load()
+	f.provider.ReviewReadReject.Store(503)
+	historical, err = f.service.RefreshTaskCompletion(t.Context(), source.TaskID)
+	if err != nil || !historical.Verdict.CanComplete || len(historical.Verdict.Blockers) != 0 || f.provider.ReviewReads.Load() != reads {
+		t.Fatal("completed task attempted provider recovery", historical, err)
+	}
+	reopen, err := f.pool.Begin(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reopen.Rollback(t.Context())
+	if err = reopen.QueryRow(t.Context(), `SELECT task_board_revision FROM projects WHERE id=$1`, f.project).Scan(&board); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = postgres.MoveTask(t.Context(), reopen, source.TaskID, postgres.TaskMoveInput{ExpectedRevision: historical.Revision, ExpectedBoardRevision: board, Status: "in_progress", Placement: "end"}); err != nil {
+		t.Fatal(err)
+	}
+	reopened, err := postgres.InspectTaskCompletion(t.Context(), reopen, source.TaskID, time.Now().UTC())
+	if err != nil || reopened.CurrentSessionID != uuid.Nil || reopened.Verdict.CanComplete {
+		t.Fatal("reopened review task retained completed session", reopened, err)
+	}
+	if err = postgres.CheckTaskCompletionMove(t.Context(), reopen, source.TaskID, "completed", time.Now().UTC()); err == nil {
+		t.Fatal("reopened review task did not require fresh work")
+	}
+	if err = reopen.Commit(t.Context()); err != nil {
 		t.Fatal(err)
 	}
 }

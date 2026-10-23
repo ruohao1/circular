@@ -304,7 +304,7 @@ func moveTask(ctx context.Context, tx pgx.Tx, taskID uuid.UUID, input TaskMoveIn
 	// Renumber only affected rows. Pure ordering changes do not rewrite semantic
 	// Task revisions/timestamps, including those of displaced neighbors.
 	if t.status != input.Status {
-		if _, err = tx.Exec(ctx, `UPDATE tasks SET status=$2::text,completion_session_id=CASE WHEN $2::text IN ('open','ready','cancelled') THEN NULL ELSE completion_session_id END,revision=revision+1,updated_at=now() WHERE id=$1`, taskID, input.Status); err != nil {
+		if _, err = tx.Exec(ctx, `UPDATE tasks SET status=$2::text,completion_session_id=CASE WHEN status='completed' OR $2::text IN ('open','ready','cancelled') THEN NULL ELSE completion_session_id END,revision=revision+1,updated_at=now() WHERE id=$1`, taskID, input.Status); err != nil {
 			return out, err
 		}
 		out.Revision++
