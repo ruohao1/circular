@@ -5216,6 +5216,447 @@
           "code",
           "blockers"
         ]
+      },
+      "WorkCredential": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "session_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "session_secret": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$",
+            "minLength": 64,
+            "maxLength": 64,
+            "description": "Caller-generated 256-bit random session secret; retain before the first claim. Never put in a URL or log."
+          }
+        },
+        "required": [
+          "session_id",
+          "session_secret"
+        ]
+      },
+      "WorkClaimRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "session_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "session_secret": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$",
+            "minLength": 64,
+            "maxLength": 64,
+            "description": "Caller-generated 256-bit random session secret; retain before the first claim. Never put in a URL or log."
+          },
+          "expected_revision": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          },
+          "client_name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 80
+          },
+          "client_version": {
+            "type": "string",
+            "maxLength": 80
+          }
+        },
+        "required": [
+          "session_id",
+          "session_secret",
+          "expected_revision",
+          "client_name"
+        ]
+      },
+      "WorkHeartbeatRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "session_secret": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$",
+            "minLength": 64,
+            "maxLength": 64,
+            "description": "Caller-generated 256-bit random session secret; retain before the first claim. Never put in a URL or log."
+          },
+          "sequence": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          }
+        },
+        "required": [
+          "session_secret",
+          "sequence"
+        ]
+      },
+      "WorkFinishRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "session_secret": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$",
+            "minLength": 64,
+            "maxLength": 64,
+            "description": "Caller-generated 256-bit random session secret; retain before the first claim. Never put in a URL or log."
+          },
+          "operation_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "outcome": {
+            "type": "string",
+            "enum": [
+              "succeeded",
+              "failed",
+              "cancelled"
+            ]
+          },
+          "summary": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4000
+          },
+          "report": {
+            "$ref": "#/components/schemas/CompletionReport"
+          }
+        },
+        "required": [
+          "session_secret",
+          "operation_id",
+          "outcome",
+          "summary"
+        ],
+        "description": "Success requires a complete report whose result equals summary. Retain operation_id and all arguments for retries."
+      },
+      "WorkReleaseRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "expected_session_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "operation_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4000
+          }
+        },
+        "required": [
+          "expected_session_id",
+          "operation_id",
+          "reason"
+        ]
+      },
+      "WorkReceipt": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "session_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "operation_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "actor": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "replacement_session_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "session_id",
+          "operation_id",
+          "kind",
+          "actor",
+          "reason",
+          "at",
+          "replacement_session_id"
+        ]
+      },
+      "WorkSessionDetail": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "session": {
+            "$ref": "#/components/schemas/WorkSessionRead"
+          },
+          "receipts": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/WorkReceipt"
+            }
+          }
+        },
+        "required": [
+          "session",
+          "receipts"
+        ]
+      },
+      "WorkHeartbeatRead": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "session": {
+            "$ref": "#/components/schemas/WorkSessionRead"
+          }
+        },
+        "required": [
+          "session"
+        ]
+      },
+      "WorkClaimRead": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "session": {
+            "$ref": "#/components/schemas/WorkSessionRead"
+          },
+          "created": {
+            "type": "boolean"
+          },
+          "credential": {
+            "$ref": "#/components/schemas/WorkCredential"
+          },
+          "task_revision": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          },
+          "board_revision": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          }
+        },
+        "required": [
+          "session",
+          "created",
+          "credential",
+          "task_revision",
+          "board_revision"
+        ]
+      },
+      "WorkChangeRead": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "session": {
+            "$ref": "#/components/schemas/WorkSessionRead"
+          },
+          "receipt": {
+            "$ref": "#/components/schemas/WorkReceipt"
+          },
+          "replacement": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/WorkSessionRead"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "pending_cleanup": {
+            "type": "boolean"
+          },
+          "task_revision": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          },
+          "board_revision": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          }
+        },
+        "required": [
+          "session",
+          "receipt",
+          "replacement",
+          "pending_cleanup",
+          "task_revision",
+          "board_revision"
+        ]
+      },
+      "WorkPrerequisiteRead": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "title": {
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/TaskStatus"
+          },
+          "revision": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "status",
+          "revision"
+        ]
+      },
+      "TaskWorkRead": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "project": {
+            "$ref": "#/components/schemas/ProjectRead"
+          },
+          "task": {
+            "$ref": "#/components/schemas/TaskRead"
+          },
+          "repository": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RepositoryRead"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "prerequisites": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/WorkPrerequisiteRead"
+            }
+          },
+          "owner": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/WorkSessionRead"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "completion": {
+            "$ref": "#/components/schemas/CompletionView"
+          },
+          "board_revision": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          }
+        },
+        "required": [
+          "project",
+          "task",
+          "repository",
+          "prerequisites",
+          "owner",
+          "completion",
+          "board_revision"
+        ]
+      },
+      "WorkProblem": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "code": {
+            "type": "string",
+            "enum": [
+              "task_owned",
+              "task_not_ready",
+              "task_revision_conflict",
+              "work_credential_invalid",
+              "work_claim_lost",
+              "work_replay_conflict",
+              "invalid_work_input",
+              "invalid_completion_report",
+              "completion_blocked"
+            ]
+          },
+          "detail": {
+            "type": "string"
+          },
+          "action": {
+            "type": "string"
+          },
+          "reload_path": {
+            "type": "string"
+          },
+          "owner": {
+            "$ref": "#/components/schemas/WorkSessionRead"
+          },
+          "reasons": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "blocking_task_ids": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "blockers": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CompletionBlocker"
+            }
+          }
+        },
+        "required": [
+          "code",
+          "detail",
+          "action",
+          "reload_path"
+        ]
       }
     }
   },
@@ -11742,6 +12183,486 @@
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/CompletionChecksUpdate"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/tasks/{task_id}/work": {
+      "get": {
+        "operationId": "getTaskWork",
+        "tags": [
+          "Task Work"
+        ],
+        "description": "Inspect guidance, scope, dependencies, ownership and completion in one snapshot. Claim rechecks eligibility.",
+        "parameters": [
+          {
+            "name": "task_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Current work state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskWorkRead"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource not found"
+          }
+        }
+      }
+    },
+    "/api/v1/work-sessions/{session_id}": {
+      "get": {
+        "operationId": "getWorkSession",
+        "tags": [
+          "Task Work"
+        ],
+        "description": "Inspect safe session facts and lifecycle receipts. Never returns credentials.",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Current work state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkSessionDetail"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource not found"
+          }
+        }
+      }
+    },
+    "/api/v1/tasks/{task_id}/work/claim": {
+      "post": {
+        "operationId": "claimTaskWork",
+        "tags": [
+          "Task Work"
+        ],
+        "description": "Claim Ready work without starting a Run. Retain session_id, session_secret and original arguments for retries.",
+        "parameters": [
+          {
+            "name": "task_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Current work state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkClaimRead"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource not found"
+          },
+          "403": {
+            "description": "Invalid session credential or request origin",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/WorkProblem"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "detail": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Ownership, replay, completion or revision conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkProblem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid input or Task not ready",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/WorkProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/HTTPValidationError"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Request exceeds 128 KiB"
+          },
+          "415": {
+            "description": "JSON request required"
+          },
+          "201": {
+            "description": "Work session created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkClaimRead"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WorkClaimRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/work-sessions/{session_id}/heartbeat": {
+      "post": {
+        "operationId": "heartbeatTaskWork",
+        "tags": [
+          "Task Work"
+        ],
+        "description": "Report contact from the active owner. Duplicate/older sequences never advance contact time.",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Current work state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkHeartbeatRead"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource not found"
+          },
+          "403": {
+            "description": "Invalid session credential or request origin",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/WorkProblem"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "detail": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Ownership, replay, completion or revision conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkProblem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid input or Task not ready",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/WorkProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/HTTPValidationError"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Request exceeds 128 KiB"
+          },
+          "415": {
+            "description": "JSON request required"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WorkHeartbeatRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/work-sessions/{session_id}/finish": {
+      "post": {
+        "operationId": "finishTaskWork",
+        "tags": [
+          "Task Work"
+        ],
+        "description": "Finish the owned attempt through its frozen policy. Replays preserve the original receipt without advancing stages again.",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Current work state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkChangeRead"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource not found"
+          },
+          "403": {
+            "description": "Invalid session credential or request origin",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/WorkProblem"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "detail": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Ownership, replay, completion or revision conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkProblem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid input or Task not ready",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/WorkProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/HTTPValidationError"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Request exceeds 128 KiB"
+          },
+          "415": {
+            "description": "JSON request required"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WorkFinishRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/tasks/{task_id}/work/release": {
+      "post": {
+        "operationId": "releaseTaskWork",
+        "tags": [
+          "Task Work"
+        ],
+        "description": "Explicit user recovery only. Native work retains ownership while cancellation cleanup is pending.",
+        "parameters": [
+          {
+            "name": "task_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Current work state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkChangeRead"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource not found"
+          },
+          "403": {
+            "description": "Invalid session credential or request origin",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/WorkProblem"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "detail": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Ownership, replay, completion or revision conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkProblem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid input or Task not ready",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/WorkProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/HTTPValidationError"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Request exceeds 128 KiB"
+          },
+          "415": {
+            "description": "JSON request required"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WorkReleaseRequest"
               }
             }
           }

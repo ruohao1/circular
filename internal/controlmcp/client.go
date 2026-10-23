@@ -102,23 +102,25 @@ func (c *client) request(ctx context.Context, method, address string, body any) 
 			return nil, ctx.Err()
 		}
 		if method != http.MethodGet {
-			return nil, errors.New("Circular request did not complete; the action may have been saved. Inspect current state before retrying. For start_run or create_github_repository, reuse the same request_key and parameters")
+			return nil, errors.New("Circular request did not complete; the action may have been saved. Inspect current state before retrying. For start_run or create_github_repository, reuse the same request_key and parameters. For work reports, retain session_id/session_secret, the original claim arguments, heartbeat sequence, and finish/release operation_id; retry with identical arguments")
 		}
 		return nil, errors.New("cannot reach Circular; check that the API is running and --api-url is reachable from the MCP process")
 	}
 	defer res.Body.Close()
 	data, err = io.ReadAll(io.LimitReader(res.Body, maxResponseBytes+1))
 	if err != nil {
-		return nil, errors.New("Circular response was interrupted; for a launch or repository creation retry, reuse the same request_key and parameters")
+		return nil, errors.New("Circular response was interrupted; the action may have been saved. Reuse the same request_key for launches/creation, or the retained session_id/session_secret and original claim arguments, heartbeat sequence, or finish/release operation_id and arguments")
 	}
 	if len(data) > maxResponseBytes {
 		return nil, errors.New("Circular response exceeds 8 MiB; narrow the project/task filter or download the artifact through the console")
 	}
 	if res.StatusCode < 200 || res.StatusCode >= 300 {
 		var problem struct {
-			Detail   json.RawMessage `json:"detail"`
-			Code     string          `json:"code"`
-			Blockers []struct {
+			Detail     json.RawMessage `json:"detail"`
+			Code       string          `json:"code"`
+			Action     string          `json:"action"`
+			ReloadPath string          `json:"reload_path"`
+			Blockers   []struct {
 				Code string `json:"code"`
 			} `json:"blockers"`
 		}
@@ -128,7 +130,10 @@ func (c *client) request(ctx context.Context, method, address string, body any) 
 				message = string(problem.Detail)
 			}
 		}
-		if problem.Code == "completion_blocked" {
+		if problem.Action != "" {
+			message = problem.Action + " (" + problem.ReloadPath + "): " + message
+		}
+		if problem.Code != "" {
 			codes := []string{problem.Code}
 			for _, blocker := range problem.Blockers {
 				codes = append(codes, blocker.Code)

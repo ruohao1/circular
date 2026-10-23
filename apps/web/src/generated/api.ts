@@ -1239,6 +1239,108 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/tasks/{task_id}/work": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description Inspect guidance, scope, dependencies, ownership and completion in one snapshot. Claim rechecks eligibility. */
+        get: operations["getTaskWork"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tasks/{task_id}/work/claim": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** @description Claim Ready work without starting a Run. Retain session_id, session_secret and original arguments for retries. */
+        post: operations["claimTaskWork"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tasks/{task_id}/work/release": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** @description Explicit user recovery only. Native work retains ownership while cancellation cleanup is pending. */
+        post: operations["releaseTaskWork"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/work-sessions/{session_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description Inspect safe session facts and lifecycle receipts. Never returns credentials. */
+        get: operations["getWorkSession"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/work-sessions/{session_id}/finish": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** @description Finish the owned attempt through its frozen policy. Replays preserve the original receipt without advancing stages again. */
+        post: operations["finishTaskWork"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/work-sessions/{session_id}/heartbeat": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** @description Report contact from the active owner. Duplicate/older sequences never advance contact time. */
+        post: operations["heartbeatTaskWork"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -2617,6 +2719,15 @@ export interface components {
             /** Format: date */
             to: string;
         };
+        TaskWorkRead: {
+            board_revision: number;
+            completion: components["schemas"]["CompletionView"];
+            owner: components["schemas"]["WorkSessionRead"] | null;
+            prerequisites: components["schemas"]["WorkPrerequisiteRead"][];
+            project: components["schemas"]["ProjectRead"];
+            repository: components["schemas"]["RepositoryRead"] | null;
+            task: components["schemas"]["TaskRead"];
+        };
         /** UsageRead */
         UsageRead: {
             /**
@@ -2658,6 +2769,98 @@ export interface components {
         WebhookSettingsUpdate: {
             public_origin: string;
             signing_secret?: string;
+        };
+        WorkChangeRead: {
+            board_revision: number;
+            pending_cleanup: boolean;
+            receipt: components["schemas"]["WorkReceipt"];
+            replacement: components["schemas"]["WorkSessionRead"] | null;
+            session: components["schemas"]["WorkSessionRead"];
+            task_revision: number;
+        };
+        WorkClaimRead: {
+            board_revision: number;
+            created: boolean;
+            credential: components["schemas"]["WorkCredential"];
+            session: components["schemas"]["WorkSessionRead"];
+            task_revision: number;
+        };
+        WorkClaimRequest: {
+            client_name: string;
+            client_version?: string;
+            expected_revision: number;
+            /** Format: uuid */
+            session_id: string;
+            /** @description Caller-generated 256-bit random session secret; retain before the first claim. Never put in a URL or log. */
+            session_secret: string;
+        };
+        WorkCredential: {
+            /** Format: uuid */
+            session_id: string;
+            /** @description Caller-generated 256-bit random session secret; retain before the first claim. Never put in a URL or log. */
+            session_secret: string;
+        };
+        /** @description Success requires a complete report whose result equals summary. Retain operation_id and all arguments for retries. */
+        WorkFinishRequest: {
+            /** Format: uuid */
+            operation_id: string;
+            /** @enum {string} */
+            outcome: "succeeded" | "failed" | "cancelled";
+            report?: components["schemas"]["CompletionReport"];
+            /** @description Caller-generated 256-bit random session secret; retain before the first claim. Never put in a URL or log. */
+            session_secret: string;
+            summary: string;
+        };
+        WorkHeartbeatRead: {
+            session: components["schemas"]["WorkSessionRead"];
+        };
+        WorkHeartbeatRequest: {
+            sequence: number;
+            /** @description Caller-generated 256-bit random session secret; retain before the first claim. Never put in a URL or log. */
+            session_secret: string;
+        };
+        WorkPrerequisiteRead: {
+            /** Format: uuid */
+            id: string;
+            revision: number;
+            status: components["schemas"]["TaskStatus"];
+            title: string;
+        };
+        WorkProblem: {
+            action: string;
+            blockers?: components["schemas"]["CompletionBlocker"][];
+            blocking_task_ids?: string[];
+            /** @enum {string} */
+            code: "task_owned" | "task_not_ready" | "task_revision_conflict" | "work_credential_invalid" | "work_claim_lost" | "work_replay_conflict" | "invalid_work_input" | "invalid_completion_report" | "completion_blocked";
+            detail: string;
+            owner?: components["schemas"]["WorkSessionRead"];
+            reasons?: string[];
+            reload_path: string;
+        };
+        WorkReceipt: {
+            actor: string;
+            /** Format: date-time */
+            at: string;
+            /** Format: uuid */
+            id: string;
+            kind: string;
+            /** Format: uuid */
+            operation_id: string;
+            reason: string;
+            replacement_session_id: string | null;
+            /** Format: uuid */
+            session_id: string;
+        };
+        WorkReleaseRequest: {
+            /** Format: uuid */
+            expected_session_id: string;
+            /** Format: uuid */
+            operation_id: string;
+            reason: string;
+        };
+        WorkSessionDetail: {
+            receipts: components["schemas"]["WorkReceipt"][];
+            session: components["schemas"]["WorkSessionRead"];
         };
         WorkSessionRead: {
             agent_id: string | null;
@@ -7896,6 +8099,377 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+        };
+    };
+    getTaskWork: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                task_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Current work state */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TaskWorkRead"];
+                };
+            };
+            /** @description Resource not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    claimTaskWork: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                task_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WorkClaimRequest"];
+            };
+        };
+        responses: {
+            /** @description Current work state */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkClaimRead"];
+                };
+            };
+            /** @description Work session created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkClaimRead"];
+                };
+            };
+            /** @description Invalid session credential or request origin */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkProblem"] | {
+                        detail?: string;
+                    };
+                };
+            };
+            /** @description Resource not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Ownership, replay, completion or revision conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkProblem"];
+                };
+            };
+            /** @description Request exceeds 128 KiB */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description JSON request required */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Invalid input or Task not ready */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkProblem"] | components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    releaseTaskWork: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                task_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WorkReleaseRequest"];
+            };
+        };
+        responses: {
+            /** @description Current work state */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkChangeRead"];
+                };
+            };
+            /** @description Invalid session credential or request origin */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkProblem"] | {
+                        detail?: string;
+                    };
+                };
+            };
+            /** @description Resource not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Ownership, replay, completion or revision conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkProblem"];
+                };
+            };
+            /** @description Request exceeds 128 KiB */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description JSON request required */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Invalid input or Task not ready */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkProblem"] | components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    getWorkSession: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Current work state */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkSessionDetail"];
+                };
+            };
+            /** @description Resource not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    finishTaskWork: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WorkFinishRequest"];
+            };
+        };
+        responses: {
+            /** @description Current work state */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkChangeRead"];
+                };
+            };
+            /** @description Invalid session credential or request origin */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkProblem"] | {
+                        detail?: string;
+                    };
+                };
+            };
+            /** @description Resource not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Ownership, replay, completion or revision conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkProblem"];
+                };
+            };
+            /** @description Request exceeds 128 KiB */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description JSON request required */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Invalid input or Task not ready */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkProblem"] | components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    heartbeatTaskWork: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WorkHeartbeatRequest"];
+            };
+        };
+        responses: {
+            /** @description Current work state */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkHeartbeatRead"];
+                };
+            };
+            /** @description Invalid session credential or request origin */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkProblem"] | {
+                        detail?: string;
+                    };
+                };
+            };
+            /** @description Resource not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Ownership, replay, completion or revision conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkProblem"];
+                };
+            };
+            /** @description Request exceeds 128 KiB */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description JSON request required */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Invalid input or Task not ready */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkProblem"] | components["schemas"]["HTTPValidationError"];
+                };
             };
         };
     };
