@@ -1405,6 +1405,10 @@
           },
           "text": {
             "type": "string"
+          },
+          "work_session_id": {
+            "type": "string",
+            "format": "uuid"
           }
         },
         "required": [
@@ -1930,6 +1934,15 @@
           },
           "task_title": {
             "type": "string"
+          },
+          "source": {
+            "$ref": "#/components/schemas/PRReviewSource"
+          },
+          "version": {
+            "type": "integer",
+            "enum": [
+              2
+            ]
           }
         },
         "required": [
@@ -2705,6 +2718,26 @@
               }
             ],
             "description": "Immutable parent Task in the same Project, set at creation."
+          },
+          "completion_policy": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CompletionPolicy"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "completion_contract": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CompletionContract"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
@@ -3527,6 +3560,26 @@
               }
             ],
             "description": "Immutable parent Task in the same Project, set at creation."
+          },
+          "completion_policy": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CompletionPolicy"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "completion_contract": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CompletionContract"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
@@ -4342,6 +4395,826 @@
           "detail",
           "code",
           "owner"
+        ]
+      },
+      "CompletionRequirement": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "key": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_]{0,63}$"
+          },
+          "description": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1000
+          }
+        },
+        "required": [
+          "key",
+          "description"
+        ]
+      },
+      "CompletionPolicy": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "mode": {
+            "type": "string",
+            "enum": [
+              "review_required",
+              "direct_completion"
+            ]
+          },
+          "requirements": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CompletionRequirement"
+            },
+            "maxItems": 20
+          }
+        },
+        "required": [
+          "mode"
+        ]
+      },
+      "CompletionPolicyUpdate": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "expected_revision": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          },
+          "policy": {
+            "$ref": "#/components/schemas/CompletionPolicy"
+          }
+        },
+        "required": [
+          "expected_revision",
+          "policy"
+        ]
+      },
+      "CompletionRequiredCheck": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "workflow_id": {
+            "type": "string",
+            "pattern": "^[1-9][0-9]*$"
+          },
+          "app_id": {
+            "type": "string",
+            "pattern": "^[1-9][0-9]*$"
+          },
+          "workflow_path": {
+            "type": "string",
+            "maxLength": 2048
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          }
+        },
+        "required": [
+          "workflow_id",
+          "app_id",
+          "workflow_path",
+          "name"
+        ]
+      },
+      "CompletionCheckConfig": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "revision": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "checks": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CompletionRequiredCheck"
+            },
+            "maxItems": 50
+          }
+        },
+        "required": [
+          "revision",
+          "checks"
+        ]
+      },
+      "CompletionChecksUpdate": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "expected_revision": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "checks": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CompletionRequiredCheck"
+            },
+            "minItems": 1,
+            "maxItems": 50
+          }
+        },
+        "required": [
+          "expected_revision",
+          "checks"
+        ]
+      },
+      "CompletionCheckSetup": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "repository_name": {
+            "type": "string"
+          },
+          "config": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CompletionCheckConfig"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "available": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CompletionRequiredCheck"
+            },
+            "maxItems": 2000
+          },
+          "reason": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "repository_name",
+          "config",
+          "available",
+          "reason"
+        ]
+      },
+      "CompletionContract": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "policy": {
+            "$ref": "#/components/schemas/CompletionPolicy"
+          },
+          "check_config": {
+            "$ref": "#/components/schemas/CompletionCheckConfig"
+          },
+          "fingerprint": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          }
+        },
+        "required": [
+          "policy",
+          "check_config",
+          "fingerprint"
+        ]
+      },
+      "CompletionEvidence": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "key": {
+            "type": "string"
+          },
+          "detail": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4000
+          },
+          "links": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uri",
+              "maxLength": 2048
+            },
+            "maxItems": 5
+          }
+        },
+        "required": [
+          "key",
+          "detail"
+        ]
+      },
+      "CompletionReport": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "result": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4000
+          },
+          "evidence": {
+            "anyOf": [
+              {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/CompletionEvidence"
+                },
+                "maxItems": 20
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "pull_request_number": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 2147483647
+          }
+        },
+        "required": [
+          "result",
+          "evidence"
+        ]
+      },
+      "CompletionBinding": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "number": {
+            "type": "integer"
+          },
+          "revision": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          }
+        },
+        "required": [
+          "number",
+          "revision"
+        ]
+      },
+      "CompletionBindRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "number": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 2147483647
+          },
+          "session_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "expected_revision": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          }
+        },
+        "required": [
+          "number",
+          "session_id",
+          "expected_revision"
+        ]
+      },
+      "CompletionProviderIdentity": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "generation": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "installation_id": {
+            "type": "string",
+            "pattern": "^[1-9][0-9]*$"
+          },
+          "repository_id": {
+            "type": "string",
+            "pattern": "^[1-9][0-9]*$"
+          }
+        },
+        "required": [
+          "id",
+          "generation",
+          "installation_id",
+          "repository_id"
+        ]
+      },
+      "CompletionVerifiedRevision": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "base_sha": {
+            "type": "string"
+          },
+          "head_sha": {
+            "type": "string"
+          },
+          "tested_sha": {
+            "type": "string"
+          },
+          "tree_sha": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "base_sha",
+          "head_sha",
+          "tested_sha",
+          "tree_sha"
+        ]
+      },
+      "CompletionCheckEvidence": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "check": {
+            "$ref": "#/components/schemas/CompletionRequiredCheck"
+          },
+          "run_id": {
+            "type": "string"
+          },
+          "job_id": {
+            "type": "string"
+          },
+          "check_run_id": {
+            "type": "string"
+          },
+          "tested_sha": {
+            "type": "string"
+          },
+          "run_status": {
+            "type": "string"
+          },
+          "run_conclusion": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "conclusion": {
+            "type": "string"
+          },
+          "url": {
+            "type": "string"
+          },
+          "attempt": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "check",
+          "run_id",
+          "job_id",
+          "check_run_id",
+          "tested_sha",
+          "run_status",
+          "run_conclusion",
+          "status",
+          "conclusion",
+          "url",
+          "attempt"
+        ]
+      },
+      "CompletionReviewEvidence": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "run_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "state": {
+            "type": "string"
+          },
+          "base_sha": {
+            "type": "string"
+          },
+          "head_sha": {
+            "type": "string"
+          },
+          "reviewer_fingerprint": {
+            "type": "string"
+          },
+          "report_sha": {
+            "type": "string"
+          },
+          "coverage": {
+            "type": "string"
+          },
+          "retained": {
+            "type": "boolean"
+          },
+          "findings": {
+            "anyOf": [
+              {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/PRReviewFinding"
+                }
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "run_id",
+          "state",
+          "base_sha",
+          "head_sha",
+          "reviewer_fingerprint",
+          "report_sha",
+          "coverage",
+          "retained",
+          "findings"
+        ]
+      },
+      "CompletionObservation": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "session_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "binding_revision": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "review_revision": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "contract_fingerprint": {
+            "type": "string"
+          },
+          "identity": {
+            "$ref": "#/components/schemas/CompletionProviderIdentity"
+          },
+          "review_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "reviewer_fingerprint": {
+            "type": "string"
+          },
+          "review_report_sha": {
+            "type": "string"
+          },
+          "pr": {
+            "$ref": "#/components/schemas/PRReviewIdentity"
+          },
+          "pr_state": {
+            "type": "string"
+          },
+          "revision": {
+            "$ref": "#/components/schemas/CompletionVerifiedRevision"
+          },
+          "checks": {
+            "anyOf": [
+              {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/CompletionCheckEvidence"
+                },
+                "maxItems": 50
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "merged": {
+            "type": "boolean"
+          },
+          "merge_sha": {
+            "type": "string"
+          },
+          "merge_verified": {
+            "type": "boolean"
+          },
+          "error_code": {
+            "type": "string"
+          },
+          "checked_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "session_id",
+          "binding_revision",
+          "review_revision",
+          "contract_fingerprint",
+          "identity",
+          "review_id",
+          "reviewer_fingerprint",
+          "review_report_sha",
+          "pr",
+          "pr_state",
+          "revision",
+          "checks",
+          "merged",
+          "merge_sha",
+          "merge_verified",
+          "error_code",
+          "checked_at"
+        ]
+      },
+      "CompletionBlocker": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "code": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          },
+          "action": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message",
+          "action"
+        ]
+      },
+      "CompletionVerdict": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "next_stage": {
+            "type": "string"
+          },
+          "merge_readiness": {
+            "type": "string",
+            "enum": [
+              "not_applicable",
+              "blocked",
+              "ready"
+            ]
+          },
+          "can_complete": {
+            "type": "boolean"
+          },
+          "blockers": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CompletionBlocker"
+            }
+          },
+          "advisories": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "next_stage",
+          "merge_readiness",
+          "can_complete",
+          "blockers",
+          "advisories"
+        ]
+      },
+      "CompletionView": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "task_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "revision": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          },
+          "policy": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CompletionPolicy"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "verdict": {
+            "$ref": "#/components/schemas/CompletionVerdict"
+          },
+          "observed_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "binding": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CompletionBinding"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "identity": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CompletionProviderIdentity"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "observation": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CompletionObservation"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "review": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CompletionReviewEvidence"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "review_revision": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "contract": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CompletionContract"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "report": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CompletionReport"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "session_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "current_session_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "outcome": {
+            "type": "string"
+          },
+          "stage": {
+            "$ref": "#/components/schemas/TaskStatus"
+          },
+          "released": {
+            "type": "boolean"
+          },
+          "owner_active": {
+            "type": "boolean"
+          },
+          "cleanup_pending": {
+            "type": "boolean"
+          },
+          "needs_user_resolution": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "task_id",
+          "revision",
+          "policy",
+          "verdict",
+          "observed_at",
+          "binding",
+          "identity",
+          "observation",
+          "review",
+          "review_revision",
+          "contract",
+          "report",
+          "session_id",
+          "current_session_id",
+          "outcome",
+          "stage",
+          "released",
+          "owner_active",
+          "cleanup_pending",
+          "needs_user_resolution"
+        ]
+      },
+      "PRReviewSource": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "run_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "work_session_id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [],
+        "oneOf": [
+          {
+            "required": [
+              "run_id"
+            ],
+            "not": {
+              "required": [
+                "work_session_id"
+              ]
+            }
+          },
+          {
+            "required": [
+              "work_session_id"
+            ],
+            "not": {
+              "required": [
+                "run_id"
+              ]
+            }
+          }
+        ]
+      },
+      "CompletionConflict": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "detail": {
+            "type": "string"
+          },
+          "code": {
+            "type": "string",
+            "enum": [
+              "completion_blocked"
+            ]
+          },
+          "blockers": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CompletionBlocker"
+            }
+          }
+        },
+        "required": [
+          "detail",
+          "code",
+          "blockers"
         ]
       }
     }
@@ -9976,7 +10849,21 @@
             "description": "Scoped resource not found"
           },
           "409": {
-            "description": "Task locked or revision changed"
+            "description": "Task locked or revision changed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/CompletionConflict"
+                    },
+                    {
+                      "$ref": "#/components/schemas/IntegrationProblem"
+                    }
+                  ]
+                }
+              }
+            }
           },
           "422": {
             "description": "Invalid input"
@@ -10220,6 +11107,645 @@
           }
         },
         "summary": "Replace allowed delegation targets"
+      }
+    },
+    "/api/v1/tasks/{task_id}/pr-reviews": {
+      "get": {
+        "operationId": "list_task_pr_reviews",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "task_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "maximum": 100,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "maxLength": 1024,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PRReviewPage"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntegrationProblem"
+                }
+              }
+            },
+            "description": "Permission or origin denied"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntegrationProblem"
+                }
+              }
+            },
+            "description": "Resource not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntegrationProblem"
+                }
+              }
+            },
+            "description": "Preparation changed, key conflict, or connection/reviewer unavailable"
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntegrationProblem"
+                }
+              }
+            },
+            "description": "JSON request required"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntegrationProblem"
+                }
+              }
+            },
+            "description": "Provider temporarily unavailable"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntegrationProblem"
+                }
+              }
+            },
+            "description": "Integration configuration unavailable"
+          }
+        },
+        "summary": "List pr reviews",
+        "tags": [
+          "PR Reviews"
+        ]
+      },
+      "post": {
+        "operationId": "launch_task_pr_review",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "task_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PRReviewLaunch"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PRReviewRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntegrationProblem"
+                }
+              }
+            },
+            "description": "Permission or origin denied"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntegrationProblem"
+                }
+              }
+            },
+            "description": "Resource not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntegrationProblem"
+                }
+              }
+            },
+            "description": "Preparation changed, key conflict, or connection/reviewer unavailable"
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntegrationProblem"
+                }
+              }
+            },
+            "description": "JSON request required"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntegrationProblem"
+                }
+              }
+            },
+            "description": "Provider temporarily unavailable"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntegrationProblem"
+                }
+              }
+            },
+            "description": "Integration configuration unavailable"
+          }
+        },
+        "summary": "Launch pr review",
+        "tags": [
+          "PR Reviews"
+        ]
+      }
+    },
+    "/api/v1/tasks/{task_id}/pr-reviews/prepare": {
+      "get": {
+        "operationId": "prepare_task_pr_review",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "task_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "reviewer_id",
+            "required": false,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PRReviewPreparation"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntegrationProblem"
+                }
+              }
+            },
+            "description": "Permission or origin denied"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntegrationProblem"
+                }
+              }
+            },
+            "description": "Resource not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntegrationProblem"
+                }
+              }
+            },
+            "description": "Preparation changed, key conflict, or connection/reviewer unavailable"
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntegrationProblem"
+                }
+              }
+            },
+            "description": "JSON request required"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntegrationProblem"
+                }
+              }
+            },
+            "description": "Provider temporarily unavailable"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntegrationProblem"
+                }
+              }
+            },
+            "description": "Integration configuration unavailable"
+          }
+        },
+        "summary": "Prepare pr review",
+        "tags": [
+          "PR Reviews"
+        ]
+      }
+    },
+    "/api/v1/tasks/{task_id}/completion-policy": {
+      "put": {
+        "operationId": "setTaskCompletionPolicy",
+        "tags": [
+          "Task Completion"
+        ],
+        "parameters": [
+          {
+            "name": "task_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Completion state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CompletionView"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource not found"
+          },
+          "409": {
+            "description": "Completion blocked, frozen policy, or changed revision"
+          },
+          "422": {
+            "description": "Invalid input"
+          },
+          "413": {
+            "description": "Request exceeds 128 KiB"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CompletionPolicyUpdate"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/tasks/{task_id}/completion": {
+      "get": {
+        "operationId": "getTaskCompletion",
+        "tags": [
+          "Task Completion"
+        ],
+        "parameters": [
+          {
+            "name": "task_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Completion state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CompletionView"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource not found"
+          },
+          "409": {
+            "description": "Completion blocked, frozen policy, or changed revision"
+          },
+          "422": {
+            "description": "Invalid input"
+          },
+          "413": {
+            "description": "Request exceeds 128 KiB"
+          }
+        }
+      }
+    },
+    "/api/v1/tasks/{task_id}/completion/refresh": {
+      "post": {
+        "operationId": "refreshTaskCompletion",
+        "tags": [
+          "Task Completion"
+        ],
+        "parameters": [
+          {
+            "name": "task_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Completion state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CompletionView"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource not found"
+          },
+          "409": {
+            "description": "Completion blocked, frozen policy, or changed revision"
+          },
+          "422": {
+            "description": "Invalid input"
+          },
+          "413": {
+            "description": "Request exceeds 128 KiB"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PRReviewEmpty"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/tasks/{task_id}/pull-request": {
+      "put": {
+        "operationId": "bindTaskPullRequest",
+        "tags": [
+          "Task Completion"
+        ],
+        "parameters": [
+          {
+            "name": "task_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Completion state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CompletionView"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource not found"
+          },
+          "409": {
+            "description": "Completion blocked, frozen policy, or changed revision"
+          },
+          "422": {
+            "description": "Invalid input"
+          },
+          "413": {
+            "description": "Request exceeds 128 KiB"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CompletionBindRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/repositories/{repository_id}/completion-checks": {
+      "get": {
+        "operationId": "getRepositoryCompletionChecks",
+        "tags": [
+          "Task Completion"
+        ],
+        "parameters": [
+          {
+            "name": "repository_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Completion state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CompletionCheckSetup"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource not found"
+          },
+          "409": {
+            "description": "Completion blocked, frozen policy, or changed revision"
+          },
+          "422": {
+            "description": "Invalid input"
+          },
+          "413": {
+            "description": "Request exceeds 128 KiB"
+          }
+        }
+      },
+      "put": {
+        "operationId": "setRepositoryCompletionChecks",
+        "tags": [
+          "Task Completion"
+        ],
+        "parameters": [
+          {
+            "name": "repository_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Completion state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CompletionCheckConfig"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource not found"
+          },
+          "409": {
+            "description": "Completion blocked, frozen policy, or changed revision"
+          },
+          "422": {
+            "description": "Invalid input"
+          },
+          "413": {
+            "description": "Request exceeds 128 KiB"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CompletionChecksUpdate"
+              }
+            }
+          }
+        }
       }
     }
   }

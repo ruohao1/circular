@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 
 	"github.com/google/uuid"
+	"github.com/ruohao1/circular/internal/completion"
 	"github.com/ruohao1/circular/internal/delegations"
 	"github.com/ruohao1/circular/internal/runstate"
 	"github.com/ruohao1/circular/internal/runtimes"
@@ -15,6 +16,7 @@ import (
 const MaxLineBytes = 1024 * 1024
 
 type Input struct {
+	CompletionContract      *completion.Contract
 	DelegationContextSHA256 string
 	RunID                   uuid.UUID
 	Kind                    runstate.Kind

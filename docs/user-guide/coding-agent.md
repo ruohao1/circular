@@ -74,6 +74,18 @@ the [console](/) to follow the work and review its result. Starting a run uses
 the selected Circular agent and its existing model connection. See
 [agents and runs](/docs/agents-and-runs) for how to review changes.
 
+Choose the Task's completion policy and requirements in Task details before its
+first Run. Your assistant can inspect **Task completion**, refresh authoritative
+GitHub evidence, bind a PR number, and start an independent Task review. It must
+resolve the returned blockers before moving a review-required Task to Done;
+reporting success or moving a card cannot bypass the requirements.
+
+Circular-managed coding Runs submit their structured result through the local
+`submit_task_result` tool. The external assistant's claim, heartbeat and finish
+MCP workflow is a separate upcoming feature (ISQ-474). Connecting MCP today does
+not register your local coding process as an active Work session. Linear workflow
+status sync is also separate (ISQ-478); current run/review comments remain available.
+
 ## Check or change the connection
 
 In Setup → MCP, **Ready to add** means Circular's connection is available. After

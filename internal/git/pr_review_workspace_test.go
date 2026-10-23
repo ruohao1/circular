@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 
 	git "github.com/ruohao1/circular/internal/git"
@@ -122,5 +123,33 @@ func TestReviewGitRejectsModifiedOrLinkedMetadata(t *testing.T) {
 				t.Fatal("mutated metadata was accepted", err)
 			}
 		})
+	}
+}
+
+func TestReviewGitReadableUnderPrivateUmask(t *testing.T) {
+	previous := syscall.Umask(0077)
+	defer syscall.Umask(previous)
+	f := testsupport.PrepareReviewWorkspace(t)
+	if err := f.Git.PreparePRReviewGit(t.Context(), f.Directory); err != nil {
+		t.Fatal(err)
+	}
+	if err := filepath.WalkDir(filepath.Join(f.Directory, "git"), func(path string, entry os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		info, err := entry.Info()
+		if err != nil {
+			return err
+		}
+		if entry.IsDir() {
+			if info.Mode().Perm()&0555 != 0555 {
+				t.Fatalf("unreadable reviewer directory %s", path)
+			}
+		} else if info.Mode().Perm()&0444 != 0444 {
+			t.Fatalf("unreadable reviewer file %s", path)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
 	}
 }

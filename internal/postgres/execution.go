@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/ruohao1/circular/internal/agentproposals"
+	"github.com/ruohao1/circular/internal/completion"
 	"github.com/ruohao1/circular/internal/delegations"
 	"github.com/ruohao1/circular/internal/prreviews"
 	"github.com/ruohao1/circular/internal/runstate"
@@ -42,6 +43,7 @@ func (r *RunResources) RenewLease() error {
 // ProvisioningContext binds the claimed attempt to its Task, Agent and
 // Repository. The Backend is the Run's selection, not the Agent's current one.
 type ProvisioningContext struct {
+	CompletionContract               *completion.Contract `json:"completion_contract,omitempty"`
 	SourceRunID                      uuid.UUID
 	SourceCheckpoint                 *delegations.Checkpoint
 	Invocation                       int
@@ -93,7 +95,11 @@ func (r *RunResources) ProvisioningContext() (ProvisioningContext, error) {
 		inputs.BackendConfig = snapshot.Reviewer.BackendConfig
 		return inputs, nil
 	}
+	if err := r.tx.QueryRow(r.ctx, `SELECT t.completion_contract FROM tasks t JOIN runs r ON r.task_id=t.id WHERE r.id=$1`, r.id).Scan(&inputs.CompletionContract); err != nil {
+		return inputs, err
+	}
 	if input, linked, err := r.externalProvisioningContext(); linked || err != nil {
+		input.CompletionContract = inputs.CompletionContract
 		return input, err
 	}
 	err := r.tx.QueryRow(r.ctx, `SELECT repositories.id,repositories.clone_url,repositories.default_branch,
@@ -123,6 +129,19 @@ func (r *RunResources) AppendBackendEvent(source, kind string, data, raw map[str
 		return ErrResourceState
 	}
 	switch kind {
+	case "task.completion.reported":
+		encoded, err := json.Marshal(data)
+		if err != nil {
+			return err
+		}
+		var report completion.Report
+		if err = prreviews.DecodeStrict(encoded, &report); err != nil {
+			return err
+		}
+		if err = r.SaveCompletionReport(r.invocation, report); err != nil {
+			return err
+		}
+		return r.eventWithRaw(kind, source, data, raw)
 	case "delegation.requested":
 		if r.kind != runstate.Coding || r.invocation != 1 {
 			return ErrResourceState

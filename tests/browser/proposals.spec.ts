@@ -88,14 +88,31 @@ test("render a discovery report and review, edit, create and dismiss its agents"
       project_id: project.id,
       name: "Report runner",
       backend: "fake",
-      backend_config: { delay_ms: 10 },
+      backend_config: {
+        delay_ms: 10,
+        completion_report: {
+          result: "Discovery fixture executed",
+          evidence: [],
+        },
+      },
     });
     const task = await post("tasks", {
       project_id: project.id,
       repository_id: repository.id,
       title: "Understand the repository",
-      description: "Inspect the source and propose an appropriate coding Agent.",
+      description:
+        "Inspect the source and propose an appropriate coding Agent.",
     });
+    expect(
+      (
+        await request.put(`${base}/tasks/${task.id}/completion-policy`, {
+          data: {
+            expected_revision: 1,
+            policy: { mode: "direct_completion", requirements: [] },
+          },
+        })
+      ).ok(),
+    ).toBeTruthy();
     const run = await post("runs", { task_id: task.id, agent_id: agent.id });
     await expect
       .poll(

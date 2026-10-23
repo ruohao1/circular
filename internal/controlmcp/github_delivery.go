@@ -12,7 +12,7 @@ type githubDeliverySettingsInput struct {
 }
 
 func (c *client) addGitHubDeliveryReadTools(server *mcp.Server) {
-	add(server, "get_github_publishing", "Read whether this project automatically opens draft pull requests for future successful runs, including permission guidance.", true, false, true,
+	add(server, "get_github_publishing", "Read legacy automatic draft publishing settings and permission guidance. Tasks with frozen completion contracts require manual publication.", true, false, true,
 		func(ctx context.Context, input githubDeliverySettingsInput) (object, error) {
 			return c.record(ctx, http.MethodGet, "/projects/"+input.ProjectID+"/integrations/github/run-delivery", "settings", nil)
 		})
@@ -23,10 +23,10 @@ func (c *client) addGitHubDeliveryReadTools(server *mcp.Server) {
 }
 
 func (c *client) addGitHubDeliveryMutations(server *mcp.Server) {
-	add(server, "set_github_publishing", "Enable or disable automatic draft pull requests for future successful runs in this project. Changes external publishing behavior; enable only when the user requested automatic publishing. Existing runs are not backfilled and pull requests are never merged automatically.", false, false, true,
+	add(server, "set_github_publishing", "Enable or disable automatic draft pull requests for legacy work without frozen completion contracts in this project. Policy-managed Tasks require explicit manual publication. Changes external publishing behavior; enable only when the user requested automatic publishing. Existing runs are not backfilled and pull requests are never merged automatically.", false, false, true,
 		func(ctx context.Context, input struct {
 			ProjectID string `json:"project_id" jsonschema:"Circular Project UUID"`
-			Enabled   bool   `json:"enabled" jsonschema:"Whether future successful runs automatically open draft pull requests"`
+			Enabled   bool   `json:"enabled" jsonschema:"Whether successful legacy runs without completion contracts automatically open draft pull requests"`
 		}) (object, error) {
 			return c.record(ctx, http.MethodPost, "/projects/"+input.ProjectID+"/integrations/github/run-delivery", "settings", object{"enabled": input.Enabled})
 		})

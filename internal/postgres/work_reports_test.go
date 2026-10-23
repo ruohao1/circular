@@ -9,6 +9,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/ruohao1/circular/internal/completion"
 	"github.com/ruohao1/circular/internal/postgres"
 	"github.com/ruohao1/circular/internal/runstate"
 )
@@ -16,7 +17,7 @@ import (
 func finishWork(t *testing.T, f planningFixture, in postgres.ExternalWorkClaim, op uuid.UUID, outcome runstate.Status, now time.Time) (postgres.WorkChangeResult, error) {
 	t.Helper()
 	return workTx(t, f.p, func(tx pgx.Tx) (postgres.WorkChangeResult, error) {
-		return postgres.FinishExternalWork(t.Context(), tx, postgres.WorkFinishInput{Credential: postgres.WorkCredential{SessionID: in.SessionID, Secret: in.Secret}, OperationID: op, Outcome: outcome, Summary: "Tests passed"}, now)
+		return postgres.FinishExternalWork(t.Context(), tx, postgres.WorkFinishInput{Credential: postgres.WorkCredential{SessionID: in.SessionID, Secret: in.Secret}, OperationID: op, Outcome: outcome, Summary: "Tests passed", Report: &completion.Report{Result: "Tests passed"}}, now)
 	})
 }
 func reassignWork(t *testing.T, f planningFixture, in postgres.WorkAdminInput, replacement postgres.ExternalWorkClaim) (postgres.WorkChangeResult, error) {
@@ -76,7 +77,11 @@ func TestExternalWorkFinishIsIdempotent(t *testing.T) {
 		}
 		var status, start, finish string
 		var revision int64
-		if err = f.p.QueryRow(t.Context(), `SELECT status,planned_start_date::text,planned_finish_date::text,revision FROM tasks WHERE id=$1`, in.TaskID).Scan(&status, &start, &finish, &revision); err != nil || status != "in_progress" || start != "2026-10-01" || finish != "2026-10-31" || revision != 2 {
+		wantStatus, wantRevision := "in_progress", int64(2)
+		if outcome == "succeeded" {
+			wantStatus, wantRevision = "completed", 3
+		}
+		if err = f.p.QueryRow(t.Context(), `SELECT status,planned_start_date::text,planned_finish_date::text,revision FROM tasks WHERE id=$1`, in.TaskID).Scan(&status, &start, &finish, &revision); err != nil || status != wantStatus || start != "2026-10-01" || finish != "2026-10-31" || revision != wantRevision {
 			t.Fatal(status, start, finish, revision, err)
 		}
 	}
@@ -210,7 +215,8 @@ func TestWorkAdminReplayCannotReviveOwnership(t *testing.T) {
 			}
 		}
 		for _, status := range []string{"completed", "in_review", "cancelled"} {
-			if _, err := f.move(t, owner.TaskID, status, "end", nil); err != nil {
+			// Seed legacy stage drift; public stage changes with an owner are rejected.
+			if _, err := f.p.Exec(t.Context(), `UPDATE tasks SET status=$2 WHERE id=$1`, owner.TaskID, status); err != nil {
 				t.Fatal(err)
 			}
 			next.ExpectedRevision, _ = f.versions(t, owner.TaskID)
@@ -219,7 +225,7 @@ func TestWorkAdminReplayCannotReviveOwnership(t *testing.T) {
 				t.Fatal("closed task handed off", err)
 			}
 		}
-		if _, err := f.move(t, owner.TaskID, "in_progress", "end", nil); err != nil {
+		if _, err := f.p.Exec(t.Context(), `UPDATE tasks SET status='in_progress' WHERE id=$1`, owner.TaskID); err != nil {
 			t.Fatal(err)
 		}
 		blocker := f.task(t, "Reopened prerequisite", "open", "{}")

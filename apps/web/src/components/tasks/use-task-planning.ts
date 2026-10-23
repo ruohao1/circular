@@ -301,7 +301,7 @@ export function useTaskPlanning(projectId: string, search: TaskPlanningSearch) {
         setFailure({
           id: write.id,
           message: error.message,
-          conflict: error instanceof ApiError && error.status === 409,
+          conflict: error instanceof ApiError && error.status === 409 && error.code !== "completion_blocked",
         });
         if (write.kind === "move")
           setNotice({

@@ -175,7 +175,7 @@ func (s *Service) reserveReviewPublication(ctx context.Context, run uuid.UUID, p
 		return false, e
 	}
 	defer rollback(ctx, tx)
-	if e = postgres.ReserveExternalEffect(ctx, tx, run, "github_review"); e != nil {
+	if e = postgres.ReservePRReviewPublication(ctx, tx, p.ID, run); e != nil {
 		return false, e
 	}
 	tag, e := tx.Exec(ctx, `UPDATE pr_review_publications SET started=true,body=$3,expected_author_id=$4,updated_at=now() WHERE review_id=$1 AND lease_owner=$2 AND lease_until>now() AND NOT started AND status IN ('pending','retrying')`, p.ID, p.Owner, p.Body, p.Author)

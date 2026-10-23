@@ -4,7 +4,10 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
+	"github.com/ruohao1/circular/internal/completion"
 	"github.com/ruohao1/circular/internal/integrations"
+	"github.com/ruohao1/circular/internal/postgres"
 	"github.com/ruohao1/circular/internal/testsupport"
 	"github.com/ruohao1/circular/internal/webhooks"
 	"testing"
@@ -42,7 +45,22 @@ func TestWebhookProviderOutageRecoversAfterRetryBudget(t *testing.T) {
 		t.Fatal("restored provider did not recover accepted request", worked, err)
 	}
 	if worked, err := f.service.ProcessExternalRequest(t.Context()); err != nil || !worked {
-		t.Fatal("recovered request did not launch", worked, err)
+		t.Fatal("recovered request did not reach planning", worked, err)
+	}
+	var requestID string
+	var task uuid.UUID
+	if err := f.pool.QueryRow(t.Context(), `SELECT e.id,t.id FROM external_requests e JOIN tasks t ON t.external_refs->'linear'->>'issue_id'=e.issue_id::text`).Scan(&requestID, &task); err != nil {
+		t.Fatal(err)
+	}
+	waiting, err := f.service.ExternalRequest(t.Context(), requestID)
+	if err != nil || waiting.Status != "awaiting_approval" {
+		t.Fatal("recovered request bypassed policy planning", waiting, err)
+	}
+	requestWorkTx(t, f, func(tx pgx.Tx) error {
+		return postgres.SetTaskCompletionPolicy(t.Context(), tx, task, 1, completion.Policy{Mode: "direct_completion"})
+	})
+	if started, err := f.service.StartExternalRequest(t.Context(), requestID, waiting.InputFingerprint); err != nil || started.RunID == "" {
+		t.Fatal("planned recovered request did not launch", started, err)
 	}
 	acceptFixtureWebhook(t, f, "linear", "fixture-linear", "AgentSessionEvent", payload)
 	if _, err := f.service.ProcessIntegrationWebhook(t.Context()); err != nil {

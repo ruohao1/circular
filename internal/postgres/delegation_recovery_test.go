@@ -122,6 +122,9 @@ func TestDelegationCancelRaces(t *testing.T) {
 		if err = tx.QueryRow(t.Context(), `SELECT agent_id FROM runs WHERE id=$1`, snapshot.SourceRunID).Scan(&agent); err != nil {
 			t.Fatal(err)
 		}
+		if _, err = tx.Exec(t.Context(), `UPDATE tasks SET completion_policy='{"mode":"direct_completion","requirements":[]}' WHERE id=$1`, snapshot.TaskID); err != nil {
+			t.Fatal(err)
+		}
 		launched, err := postgres.CreateRun(t.Context(), tx, postgres.RunLaunchInput{TaskID: snapshot.TaskID, AgentID: agent})
 		if err != nil {
 			t.Fatal(err)

@@ -87,6 +87,9 @@ func finishNativeWork(ctx context.Context, tx pgx.Tx, runID uuid.UUID, outcome r
 	if _, err = tx.Exec(ctx, `UPDATE work_sessions SET outcome=$2,finished_at=$3 WHERE id=$1`, row.view.ID, outcome, at); err != nil {
 		return err
 	}
+	if err = markTaskCompletionPending(ctx, tx, row.view.ID); err != nil {
+		return err
+	}
 	row.view.Outcome = &outcome
 	if err = nativeReceipt(ctx, tx, row.view, "finished", "native Run "+string(outcome), at); err != nil {
 		return err
@@ -127,6 +130,9 @@ func releaseNativeWorkAfterCleanup(ctx context.Context, tx pgx.Tx, runID uuid.UU
 	}
 	at := workTime(now, row.view)
 	if _, err = tx.Exec(ctx, `UPDATE work_sessions SET released_at=$2,release_reason='native cleanup complete' WHERE id=$1`, row.view.ID, at); err != nil {
+		return err
+	}
+	if err = markTaskCompletionPending(ctx, tx, row.view.ID); err != nil {
 		return err
 	}
 	return nativeReceipt(ctx, tx, row.view, "released", "native cleanup complete", at)
@@ -172,4 +178,9 @@ func releaseNativeTaskWork(ctx context.Context, tx pgx.Tx, in WorkAdminInput, ro
 		}
 	}
 	return insertWorkReceipt(ctx, tx, WorkReceipt{SessionID: row.view.ID, OperationID: in.OperationID, Kind: kind, Actor: "user", Reason: in.Reason, At: at}, digest, now)
+}
+
+func markTaskCompletionPending(ctx context.Context, tx pgx.Tx, sessionID uuid.UUID) error {
+	_, err := tx.Exec(ctx, `UPDATE task_completions SET reconciliation_pending=true WHERE session_id=$1 AND applied_at IS NULL`, sessionID)
+	return err
 }

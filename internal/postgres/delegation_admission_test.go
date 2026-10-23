@@ -99,6 +99,11 @@ func TestDelegationAdmissionReplayAndConflict(t *testing.T) {
 			t.Fatal("duplicate admission")
 		}
 	}
+
+	var childContract bool
+	if err := f.pool.QueryRow(t.Context(), `SELECT completion_contract->'policy'->>'mode'='direct_completion' AND completion_contract->'policy'->'requirements'->0->>'key'='handoff' FROM tasks WHERE id=$1`, first.ChildTaskID).Scan(&childContract); err != nil || !childContract {
+		t.Fatal("child completion contract missing", err)
+	}
 	if first.ChildRunID == nil || first.ChildTaskID == nil || first.Status != "waiting" {
 		t.Fatal(first)
 	}

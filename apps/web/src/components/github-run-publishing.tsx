@@ -49,9 +49,9 @@ export function GitHubRunPublishing({
             id="github-run-publishing-help"
             className="text-xs leading-relaxed text-muted-foreground"
           >
-            After a successful run with changes, Circular publishes a dedicated
-            branch and opens a draft pull request for you to review. Pull
-            requests are never merged automatically.
+            This setting applies to legacy work without a completion contract.
+            New Tasks with completion requirements use manual draft publication.
+            Pull requests are never merged automatically.
           </p>
         </div>
         <Switch

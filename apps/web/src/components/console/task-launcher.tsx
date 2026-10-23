@@ -7,6 +7,7 @@ import {
   stageLabels,
   taskStages,
 } from "@/lib/task-planning";
+import { TaskCompletion } from "@/components/tasks/task-completion";
 import { TaskScheduleFields } from "@/components/tasks/task-schedule-fields";
 import { ErrorAlert } from "@/components/error-alert";
 import { ResourceSelect } from "@/components/resource-select";
@@ -105,7 +106,7 @@ export function TaskLauncherDialog(p: TaskLauncherDialogProps) {
               ? "Get a project brief, priorities, and recommended agents from the repository."
               : planningOnly
                 ? "Add work to the board. Dates are optional."
-                : "Save work for later, or start an Agent in an isolated Workspace."}
+                : "Save the Task, choose its completion requirements, then start an Agent."}
           </DialogDescription>
           {p.project && (
             <p className="text-xs text-muted-foreground">
@@ -120,7 +121,7 @@ export function TaskLauncherDialog(p: TaskLauncherDialogProps) {
           className="space-y-5"
           onSubmit={(e) => {
             e.preventDefault();
-            if (planningOnly) p.onSave();
+            if (planningOnly || !readonly) p.onSave();
             else p.onSubmit();
           }}
         >
@@ -313,10 +314,9 @@ export function TaskLauncherDialog(p: TaskLauncherDialogProps) {
             <div className="ml-auto flex flex-wrap gap-2">
               {!readonly && (
                 <Button
-                  type={planningOnly ? "submit" : "button"}
-                  variant={planningOnly ? "default" : "outline"}
+                  type="submit"
+                  variant="default"
                   disabled={pending || !p.canSave}
-                  onClick={planningOnly ? undefined : p.onSave}
                 >
                   {p.saving ? "Saving…" : "Save Task"}
                 </Button>
@@ -331,7 +331,7 @@ export function TaskLauncherDialog(p: TaskLauncherDialogProps) {
                   Start another Task
                 </Button>
               )}
-              {!planningOnly && (
+              {!planningOnly && readonly && (
                 <Button type="submit" disabled={pending || !p.canLaunch}>
                   {pending ? (
                     <LoaderCircle className="animate-spin" aria-hidden="true" />
@@ -348,6 +348,12 @@ export function TaskLauncherDialog(p: TaskLauncherDialogProps) {
             </div>
           </div>
         </form>
+        {(draft?.imported?.id || draft?.partial?.taskId) && (
+          <TaskCompletion
+            taskID={(draft.imported?.id || draft.partial?.taskId)!}
+            disabled={pending}
+          />
+        )}
       </DialogContent>
     </Dialog>
   );

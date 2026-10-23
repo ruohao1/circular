@@ -33,6 +33,18 @@ _Avoid_: Agent, worker lease
 The exclusive ownership of a Task by one Work session. Lost contact does not transfer or release that ownership.
 _Avoid_: Assignment, preferred Agent, worker lease
 
+**Completion policy**:
+The Task's chosen result requirements and whether it requires independent review and a merged pull request, or permits direct completion.
+
+**Completion contract**:
+The completion policy and required checks fixed when work first starts. Reopening a Task does not weaken this contract.
+
+**Completion report**:
+The coding attempt's structured result and evidence for the Task's requirements. It records the coder's claims; independent verification remains separate.
+
+**Merge readiness**:
+Whether current checks and independent review support merging the Task's pull request. It is separate from the planning stage Ready and from completion after a verified merge.
+
 **Run**:
 One concrete execution attempt of a task by an agent using a selected backend.
 _Avoid_: Agent, job

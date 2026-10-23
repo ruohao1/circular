@@ -131,3 +131,33 @@ func TestGitHubIdentityRejectsInvalidReplacementAndTracksRename(t *testing.T) {
 		t.Fatal("hardcoded bot identity", status, err)
 	}
 }
+
+func TestGitHubIdentityRejectsDifferentAccountWithoutChangingSettings(t *testing.T) {
+	f := githubAppFixture(t)
+	identity, err := f.service.SaveGitHubIdentity(t.Context(), f.project, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.pool.Exec(t.Context(), `UPDATE provider_identities SET account_id='999' WHERE id=$1`, identity.IdentityID); err != nil {
+		t.Fatal(err)
+	}
+	var before []byte
+	if err := f.pool.QueryRow(t.Context(), `SELECT credentials FROM integration_apps WHERE provider='github'`).Scan(&before); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.service.SaveGitHubIdentity(t.Context(), f.project, nil); !errors.Is(err, integrations.ErrIdentityConflict) {
+		t.Fatal("reconnect accepted a different installation", err)
+	}
+	var after []byte
+	var count int
+	if err := f.pool.QueryRow(t.Context(), `SELECT credentials,(SELECT count(*) FROM provider_identities) FROM integration_apps WHERE provider='github'`).Scan(&after, &count); err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(before, after) || count != 1 {
+		t.Fatal("rejected reconnect changed app settings or inserted an identity")
+	}
+	status, err := f.service.Identity(t.Context(), f.project, "github")
+	if err != nil || status.IdentityID != identity.IdentityID || status.AccountID != "999" {
+		t.Fatal("rejected reconnect changed the account binding", status, err)
+	}
+}

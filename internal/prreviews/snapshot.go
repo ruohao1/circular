@@ -38,6 +38,9 @@ func NormalizeReviewer(value ReviewerSnapshot) (ReviewerSnapshot, error) {
 }
 
 func SealSnapshot(value LaunchSnapshot) (LaunchSnapshot, error) {
+	if (value.Source != nil || value.Version != 0) && value.ValidateSource() != nil {
+		return value, ErrSourceInvalid
+	}
 	var err error
 	value.Reviewer, err = NormalizeReviewer(value.Reviewer)
 	if err != nil {
@@ -65,6 +68,14 @@ func (request LaunchRequest) Validate() error {
 }
 
 func ReviewIdentity(snapshot LaunchSnapshot) (string, error) {
+	if snapshot.Source != nil {
+		return Fingerprint(struct {
+			Source     string
+			Repository uuid.UUID
+			PR         PRIdentity
+			Reviewer   string
+		}{snapshot.ReviewSource().Key(), snapshot.RepositoryID, snapshot.PR, snapshot.Reviewer.Fingerprint})
+	}
 	return Fingerprint(struct {
 		Repository           uuid.UUID
 		GitHubRepository     string

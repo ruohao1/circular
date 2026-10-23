@@ -39,8 +39,8 @@ func seed(t *testing.T, pool *pgxpool.Pool, count int) []uuid.UUID {
 	for i := range count {
 		task := uuid.New()
 		_, err := pool.Exec(ctx, `INSERT INTO tasks
-			(id, project_id, repository_id, title, description, status, external_refs)
-			VALUES ($1, $2, $3, 'Execute fixture', 'Prepared requirements', 'open', '{}')`, task, project, repository)
+			(id, project_id, repository_id, title, description, status, external_refs, completion_policy)
+			VALUES ($1, $2, $3, 'Execute fixture', 'Prepared requirements', 'open', '{}', '{"mode":"direct_completion","requirements":[]}')`, task, project, repository)
 		if err != nil {
 			t.Fatal(err)
 		}

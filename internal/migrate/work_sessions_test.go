@@ -2,13 +2,12 @@ package migrate_test
 
 import (
 	"bytes"
+	"encoding/json"
 	"testing"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/ruohao1/circular/internal/migrate"
-	"github.com/ruohao1/circular/internal/postgres"
-	"github.com/ruohao1/circular/internal/prreviews"
 	"github.com/ruohao1/circular/internal/testsupport"
 )
 
@@ -39,7 +38,7 @@ func workHistoryJSON(t *testing.T, p *pgxpool.Pool) []byte {
 	var data []byte
 	// Removing the new nullable column lets us compare every pre-existing value.
 	err := p.QueryRow(t.Context(), `SELECT jsonb_build_object(
-		'tasks',(SELECT jsonb_agg(to_jsonb(t)-'parent_task_id') FROM tasks t),
+		'tasks',(SELECT jsonb_agg(to_jsonb(t)-'parent_task_id'-'completion_policy'-'completion_contract'-'completion_session_id') FROM tasks t),
 		'runs',(SELECT jsonb_agg(to_jsonb(r)) FROM runs r),
 		'events',(SELECT jsonb_agg(to_jsonb(e)) FROM events e),
 		'workspaces',(SELECT jsonb_agg(to_jsonb(w)) FROM workspaces w),
@@ -98,12 +97,32 @@ func TestWorkSessionMigrationRequiresDrainedCoding(t *testing.T) {
 	t.Run("active PR review is exempt", func(t *testing.T) {
 		p := legacyDatabase(t, 18)
 		snapshot := testsupport.SeedPRReviewSource(t, p, uuid.Nil)
-		_, err := postgres.NewPRReviewStore(p).Launch(t.Context(), postgres.ReviewLaunch{Snapshot: snapshot, Request: prreviews.LaunchRequest{RequestKey: uuid.New(), ExpectedInputFingerprint: snapshot.InputFingerprint, Mode: "normal"}})
+		raw, err := json.Marshal(snapshot)
 		if err != nil {
+			t.Fatal(err)
+		}
+		review, run := uuid.New(), uuid.New()
+		tx, err := p.Begin(t.Context())
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer tx.Rollback(t.Context())
+		// Seed the historical schema without calling the current-schema launcher.
+		if _, err = tx.Exec(t.Context(), `INSERT INTO runs(id,task_id,agent_id,parent_run_id,backend,status,attempt,external_refs,kind) VALUES($1,$2,$3,$4,'codex','queued',2,'{}','pr_review')`, run, snapshot.TaskID, snapshot.Reviewer.AgentID, snapshot.SourceRunID); err != nil {
+			t.Fatal(err)
+		}
+		if _, err = tx.Exec(t.Context(), `INSERT INTO pr_reviews(id,project_id,repository_id,source_run_id,run_id,reviewer_id,identity_key,attempt,snapshot) VALUES($1,$2,$3,$4,$5,$6,'legacy',1,$7)`, review, snapshot.ProjectID, snapshot.RepositoryID, snapshot.SourceRunID, run, snapshot.Reviewer.AgentID, raw); err != nil {
+			t.Fatal(err)
+		}
+		if err = tx.Commit(t.Context()); err != nil {
 			t.Fatal(err)
 		}
 		if err := migrate.Up(t.Context(), p); err != nil {
 			t.Fatal(err)
+		}
+		var status string
+		if err = p.QueryRow(t.Context(), `SELECT status FROM runs WHERE id=$1`, run).Scan(&status); err != nil || status != "queued" {
+			t.Fatal("upgrade changed the active review", status, err)
 		}
 	})
 }

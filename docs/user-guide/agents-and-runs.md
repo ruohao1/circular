@@ -58,8 +58,9 @@ need; creation and dismissal status remain visible after a refresh.
 ## Start a task
 
 In [Runs](/), enter the title and description, choose a repository and an enabled
-agent, then select **Start Run**. Be concrete about the outcome and any checks the
-agent should perform. For example:
+agent, then select **Save Task**. In Task details, choose a completion policy and
+requirements, save them, then select **Start Run**. Be concrete about the outcome
+and checks the agent should perform. For example:
 
 > Add a health endpoint that returns the service version. Follow the existing
 > API conventions and run the relevant tests.
@@ -67,7 +68,8 @@ agent should perform. For example:
 You can also [import a Linear issue](/docs/connections#import-a-linear-issue)
 as a task, or prepare work through the
 [coding-agent connection](/docs/coding-agent). Imported issues open the
-launcher so you can choose an agent before starting work.
+launcher so you can choose an agent and any missing completion policy before
+starting work. See [completion requirements](/docs/pull-request-reviews#task-completion-requirements).
 
 ## Follow execution and review output
 
@@ -94,16 +96,18 @@ Open a successful run and review **Changes**. In **GitHub pull request**, select
 **Create draft pull request**. Circular publishes the captured changes to a
 dedicated branch and opens a draft pull request against the run's base branch.
 The run must belong to a connected GitHub repository and have captured changes.
-A run with no changes does not need a pull request.
+A direct-completion Task can finish without a PR. Review-required Tasks still
+need a bound PR, even when this Run has no changes.
 
 You can leave the page while publishing finishes. **Open pull request** appears
 when the draft is ready. Review it on GitHub and mark it ready for review when
 you are satisfied. Circular never merges the pull request automatically.
 
-To do this for future runs automatically, turn on
+The legacy
 [Automatically open draft pull requests](/docs/connections#automatically-open-draft-pull-requests)
-in the project's GitHub integration. This setting starts off; older completed
-runs can still be published individually from their run pages.
+setting applies only to work without a frozen completion contract. New
+policy-managed Tasks require manual publication. Older completed runs can still
+be published individually, and pending deliveries retain their recovery path.
 
 If publishing needs attention, follow the error on the run page. **Retry
 publishing** or **Check again** continues the same run's request. You do not need

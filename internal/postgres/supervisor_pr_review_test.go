@@ -5,12 +5,14 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -24,6 +26,9 @@ import (
 )
 
 func newReviewSupervisorFixture(t *testing.T, output string, exitCode int, slow ...bool) (supervisorFixture, prreviews.Review) {
+	return newReviewSupervisorSourceFixture(t, output, exitCode, false, slow...)
+}
+func newReviewSupervisorSourceFixture(t *testing.T, output string, exitCode int, external bool, slow ...bool) (supervisorFixture, prreviews.Review) {
 	t.Helper()
 	chunks := []protocolChunk{{"stdout", []byte(output)}}
 	if len(slow) > 0 && slow[0] {
@@ -35,7 +40,12 @@ func newReviewSupervisorFixture(t *testing.T, output string, exitCode int, slow 
 	if _, err := f.pool.Exec(t.Context(), `UPDATE runs SET status='cancelled' WHERE id=$1`, f.id); err != nil {
 		t.Fatal(err)
 	}
-	snap := testsupport.SeedPRReviewSource(t, f.pool, uuid.Nil)
+	var snap prreviews.LaunchSnapshot
+	if external {
+		snap = testsupport.SeedExternalPRReviewSource(t, f.pool, uuid.Nil)
+	} else {
+		snap = testsupport.SeedPRReviewSource(t, f.pool, uuid.Nil)
+	}
 	source := filepath.Join(f.base, "source")
 	commit := func() string {
 		out, err := exec.CommandContext(t.Context(), "git", "-C", source, "rev-parse", "HEAD").Output()
@@ -45,6 +55,14 @@ func newReviewSupervisorFixture(t *testing.T, output string, exitCode int, slow 
 		return strings.TrimSpace(string(out))
 	}
 	snap.PR.BaseSHA = commit()
+	if external {
+		if err := os.MkdirAll(filepath.Join(source, "src"), 0755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(source, "src", "validate.ts"), []byte("export function valid(value: number) {\n  return value > 0;\n}\n"), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
 	if err := os.WriteFile(filepath.Join(source, "file.txt"), []byte("introduced by the PR\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
@@ -320,5 +338,43 @@ func TestSupervisorReviewArtifactCrashAndCorruptionRecoverWithoutReexecution(t *
 	got, err := postgres.NewPRReviewStore(f.pool).Get(t.Context(), review.ID)
 	if err != nil || got.Report == nil || got.Assessment != prreviews.AssessmentIncomplete || state.Count("run.started") != 1 || len(state.Artifacts) != 3 {
 		t.Fatal("recovery lost report or repeated execution", got.Assessment, len(state.Artifacts), state.Types(), err)
+	}
+}
+
+func TestReviewExternalRealContainer(t *testing.T) {
+	if os.Getenv("CIRCULAR_RUN_DOCKER_TESTS") != "1" {
+		t.Skip("CIRCULAR_RUN_DOCKER_TESTS=1 enables the real external reviewer")
+	}
+	_, file, _, _ := runtime.Caller(0)
+	root := filepath.Clean(filepath.Join(filepath.Dir(file), "../.."))
+	build := exec.CommandContext(t.Context(), "docker", "build", "-f", "infra/review-fixture-workload.Dockerfile", "-t", "circular-review-fixture:test", ".")
+	build.Dir = root
+	if output, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("review fixture build: %v %s", err, output)
+	}
+	f, review := newReviewSupervisorSourceFixture(t, "", 0, true)
+	f.config.CodexImage = "circular-review-fixture:test"
+	f.config.Docker.ContainerUser = fmt.Sprintf("%d:%d", os.Getuid(), os.Getgid())
+	f.config.Docker.DockerExecutable = "docker"
+	claim := acquire(t, postgres.NewQueue(f.pool), "external-review-container")
+	if claim == nil || claim.RunID != review.RunID {
+		t.Fatal("wrong review queued", claim)
+	}
+	supervisor, err := execution.NewSupervisor(f.pool, "external-review-container", f.config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = supervisor.Execute(t.Context(), *claim, "external-review-container"); err != nil {
+		t.Fatal(err)
+	}
+	got, err := postgres.NewPRReviewStore(f.pool).Get(t.Context(), review.ID)
+	if err != nil || got.Report == nil || got.Assessment != prreviews.AssessmentFindings {
+		t.Fatal(got, err)
+	}
+	state := testsupport.Observe(t, f.pool, review.RunID)
+	assertCodexResourcesReleased(t, f, state)
+	var coding, native, artifacts int
+	if err = f.pool.QueryRow(t.Context(), `SELECT (SELECT count(*) FROM runs WHERE task_id=$1 AND kind='coding'),(SELECT count(*) FROM work_sessions WHERE task_id=$1 AND kind='native'),(SELECT count(*) FROM artifacts WHERE run_id=$2 AND kind IN ('pr_review_context','pr_review_diff','pr_review_report'))`, review.Snapshot.TaskID, review.RunID).Scan(&coding, &native, &artifacts); err != nil || coding != 0 || native != 0 || artifacts != 3 {
+		t.Fatal(coding, native, artifacts, err)
 	}
 }

@@ -35,6 +35,33 @@ type workerProcess struct {
 	err     error
 }
 
+func TestCompletionFullWorkerLifecycle(t *testing.T) {
+	first, binary := realWorkerFixture(t)
+	for _, report := range []bool{true, false} {
+		t.Run(fmt.Sprint(report), func(t *testing.T) {
+			f := first
+			if !report {
+				f = newSupervisorFixture(t, nil)
+				f.config.Image = first.config.Image
+				f.config.Docker.DockerExecutable = "docker"
+			} else if _, err := f.pool.Exec(t.Context(), `UPDATE agents SET backend_config='{"completion_report":{"result":"Fixture verified","evidence":[]}}' WHERE id=(SELECT agent_id FROM runs WHERE id=$1)`, f.id); err != nil {
+				t.Fatal(err)
+			}
+			process := startWorker(t, f, binary, "completion-acceptance")
+			snapshot := waitSnapshot(t, f, f.id, func(s testsupport.Snapshot) bool {
+				return s.Run.WorkerID == nil && s.Workspace != nil && s.Workspace.Status == "released"
+			})
+			process.stop(t, syscall.SIGTERM)
+			if snapshot.Run.Status != "succeeded" || (snapshot.Count("task.completion.reported") == 1) != report {
+				t.Fatal(snapshot.Run, snapshot.Events)
+			}
+			if stage := reconcileCompletionFixture(t, f); (stage == "completed") != report {
+				t.Fatal("task completion did not follow explicit report", stage)
+			}
+		})
+	}
+}
+
 func TestDelegationFullWorkerLifecycle(t *testing.T) {
 	// Build once; each outcome owns a separate database schema and worktree root.
 	first, binary := realWorkerFixture(t)
@@ -116,7 +143,8 @@ func TestDelegationFullWorkerLifecycle(t *testing.T) {
 				t.Fatal(runs, tasks, invocations, attempt, unreleased)
 			}
 			var distinctWorkspaces, parentDeliveries, childDeliveries int
-			if err = f.pool.QueryRow(t.Context(), `SELECT (SELECT count(DISTINCT worktree_path) FROM workspaces),(SELECT count(*) FROM github_run_deliveries WHERE run_id=$1),(SELECT count(*) FROM github_run_deliveries WHERE run_id=$2)`, f.id, child).Scan(&distinctWorkspaces, &parentDeliveries, &childDeliveries); err != nil || distinctWorkspaces != 2 || parentDeliveries != 1 || childDeliveries != 0 {
+			// Both frozen contracts require explicit publication, including the resumed parent.
+			if err = f.pool.QueryRow(t.Context(), `SELECT (SELECT count(DISTINCT worktree_path) FROM workspaces),(SELECT count(*) FROM github_run_deliveries WHERE run_id=$1),(SELECT count(*) FROM github_run_deliveries WHERE run_id=$2)`, f.id, child).Scan(&distinctWorkspaces, &parentDeliveries, &childDeliveries); err != nil || distinctWorkspaces != 2 || parentDeliveries != 0 || childDeliveries != 0 {
 				t.Fatal("workspace or publication identity", distinctWorkspaces, parentDeliveries, childDeliveries, err)
 			}
 			var overlap bool
@@ -557,7 +585,7 @@ func TestRealWorkersKeepCancellationAndContainerAuthorityRunScoped(t *testing.T)
 		t.Fatal(err)
 	}
 	defer tx.Rollback(t.Context())
-	if _, err = tx.Exec(t.Context(), `INSERT INTO tasks(id,project_id,repository_id,title,description,status,external_refs) SELECT $2,t.project_id,t.repository_id,'Independent work',t.description,'open','{}' FROM tasks t JOIN runs r ON r.task_id=t.id WHERE r.id=$1`, f.id, secondTask); err != nil {
+	if _, err = tx.Exec(t.Context(), `INSERT INTO tasks(id,project_id,repository_id,title,description,status,external_refs,completion_policy) SELECT $2,t.project_id,t.repository_id,'Independent work',t.description,'open','{}','{"mode":"direct_completion","requirements":[]}' FROM tasks t JOIN runs r ON r.task_id=t.id WHERE r.id=$1`, f.id, secondTask); err != nil {
 		t.Fatal(err)
 	}
 	var agent uuid.UUID

@@ -57,6 +57,38 @@ test("signed Linear requests execute frozen inputs, publish under app identities
     (await req.get(`${base}/external-requests/${id}`)).json();
   const receipts = async (session: string) =>
     (await req.get(`${fixture}?session=${session}`)).json();
+  const planAndStart = async (
+    session: string,
+    mode: "review_required" | "direct_completion",
+  ) => {
+    await expect
+      .poll(async () => (await incoming(session))?.status)
+      .toBe("awaiting_approval");
+    const waiting = await incoming(session);
+    expect(waiting.reason).toContain("completion policy");
+    const tasks = await (
+      await req.get(`${base}/tasks?project_id=${project.id}`)
+    ).json();
+    const task = tasks.find(
+      (t) => t.external_refs?.linear?.issue_id === waiting.issue_id,
+    );
+    expect(task).toBeTruthy();
+    const view = await (
+      await req.get(`${base}/tasks/${task.id}/completion`)
+    ).json();
+    const saved = await req.put(`${base}/tasks/${task.id}/completion-policy`, {
+      data: {
+        expected_revision: view.revision,
+        policy: { mode, requirements: [] },
+      },
+    });
+    expect(saved.ok(), await saved.text()).toBeTruthy();
+    const ready = await detail(waiting.id);
+    await post(`${base}/external-requests/${waiting.id}/start`, {
+      expected_input_fingerprint: ready.input_fingerprint,
+    });
+    return task.id;
+  };
   try {
     let connections = await (await req.get(path)).json();
     if (!connections.find((c) => c.provider === "linear").configured)
@@ -106,6 +138,19 @@ test("signed Linear requests execute frozen inputs, publish under app identities
       repository_id: "202",
     });
     await post(`${path}/github/identity/key`, { private_key: "" });
+    await control({ completion_checks: true });
+    const checkSetup = await (
+      await req.get(`${base}/repositories/${imported.id}/completion-checks`)
+    ).json();
+    expect(checkSetup.reason).toBe("");
+    expect(checkSetup.available).toHaveLength(1);
+    const checkSave = await req.put(
+      `${base}/repositories/${imported.id}/completion-checks`,
+      {
+        data: { expected_revision: 0, checks: checkSetup.available },
+      },
+    );
+    expect(checkSave.ok(), await checkSave.text()).toBeTruthy();
     await post(`${base}/integrations/linear/webhooks`, {
       public_origin: "https://receiver.example",
       signing_secret: secret,
@@ -119,7 +164,8 @@ test("signed Linear requests execute frozen inputs, publish under app identities
       project_id: project.id,
       name: "Session engineer",
       backend: "codex",
-      instructions: "Frozen agent instructions: preserve the approved model.",
+      instructions:
+        "Frozen agent instructions: preserve the approved model. Submit completion report for native fixture.",
       backend_config: { model: "gpt-6-astra", reasoning_effort: "low" },
     });
     await page.reload();
@@ -219,6 +265,7 @@ test("signed Linear requests execute frozen inputs, publish under app identities
       });
     const deliveryID = randomUUID();
     await send(payload, deliveryID);
+    const taskID = await planAndStart(session, "review_required");
     await expect
       .poll(async () => (await incoming(session))?.run_id, { timeout: 15_000 })
       .toBeTruthy();
@@ -262,6 +309,17 @@ test("signed Linear requests execute frozen inputs, publish under app identities
       body: Buffer.from(content),
       contentType: "text/plain",
     });
+    await expect
+      .poll(
+        async () =>
+          (await (await req.get(`${base}/tasks/${taskID}`)).json()).status,
+      )
+      .toBe("in_review");
+    expect(
+      (await (await req.get(`${base}/runs/${q.run_id}/github-delivery`)).json())
+        .status,
+    ).toBe("not_requested");
+    await post(`${base}/runs/${q.run_id}/github-delivery`, {});
     await expect
       .poll(async () => (await detail(q.id)).pull_request_url, {
         timeout: 25_000,
@@ -356,6 +414,7 @@ test("signed Linear requests execute frozen inputs, publish under app identities
         prompt: "hold-for-stop",
       }),
     );
+    await planAndStart(stoppedSession, "direct_completion");
     await expect
       .poll(async () => (await incoming(stoppedSession))?.status, {
         timeout: 25_000,
@@ -416,6 +475,7 @@ test("signed Linear requests execute frozen inputs, publish under app identities
         prompt: "Retain this result without publishing",
       }),
     );
+    await planAndStart(unpublished, "direct_completion");
     await expect
       .poll(async () => (await incoming(unpublished))?.status, {
         timeout: 35_000,
@@ -457,6 +517,7 @@ test("signed Linear requests execute frozen inputs, publish under app identities
     await send(outagePayload);
     expect((await receipts(outageSession)).runs).toBe(0);
     await control({ outage: false });
+    await planAndStart(outageSession, "direct_completion");
     await expect
       .poll(async () => (await incoming(outageSession))?.status, {
         timeout: 25_000,
@@ -490,6 +551,11 @@ test("signed Linear requests execute frozen inputs, publish under app identities
         .enabled,
     ).toBe(false);
   } finally {
-    await control({ outage: false, revoked: false, paused: false });
+    await control({
+      outage: false,
+      revoked: false,
+      paused: false,
+      completion_checks: false,
+    });
   }
 });

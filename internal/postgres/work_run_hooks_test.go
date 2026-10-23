@@ -222,7 +222,7 @@ func TestNativeTaskReleaseWaitsForCleanup(t *testing.T) {
 func TestUnownedCodingRunDoesNotBlockValidQueue(t *testing.T) {
 	p := database(t)
 	ids := seed(t, p, 2)
-	if _, err := p.Exec(t.Context(), `DELETE FROM work_sessions WHERE run_id=$1`, ids[0]); err != nil {
+	if _, err := p.Exec(t.Context(), `WITH cleared AS (UPDATE tasks SET completion_session_id=NULL WHERE completion_session_id IN(SELECT id FROM work_sessions WHERE run_id=$1) RETURNING id) DELETE FROM work_sessions WHERE run_id=$1 AND task_id IN(SELECT id FROM cleared)`, ids[0]); err != nil {
 		t.Fatal(err)
 	}
 	q := postgres.NewQueue(p)

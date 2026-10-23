@@ -96,6 +96,24 @@ test("save, edit, reload and launch the same Task through the real API", async (
     await expect(
       dialog.getByLabel("Planned finish", { exact: true }),
     ).toHaveValue("2099-01-03");
+    await dialog
+      .getByRole("button", { name: "Set completion policy", exact: true })
+      .click();
+    await dialog
+      .getByRole("combobox", { name: "Completion policy", exact: true })
+      .click();
+    await page
+      .getByRole("option", { name: "Direct completion", exact: true })
+      .click();
+    await dialog
+      .getByRole("button", { name: "Save completion policy", exact: true })
+      .click();
+    await expect(
+      dialog.getByRole("button", {
+        name: "Edit completion policy",
+        exact: true,
+      }),
+    ).toBeVisible();
     await dialog.getByRole("link", { name: "Start Run", exact: true }).click();
     await expect(page).toHaveURL(new RegExp(`\\/\\?taskId=${id}`));
     await expect(

@@ -6,6 +6,7 @@ COPY internal/fakeworkload ./internal/fakeworkload
 COPY internal/delegations ./internal/delegations
 COPY internal/artifacts ./internal/artifacts
 COPY internal/prreviews ./internal/prreviews
+COPY internal/completion ./internal/completion
 COPY internal/codexconfig ./internal/codexconfig
 COPY internal/runstate ./internal/runstate
 COPY cmd/circular-fake-workload ./cmd/circular-fake-workload

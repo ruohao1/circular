@@ -42,6 +42,12 @@ func TestMain(m *testing.M) {
 		}
 		os.Exit(runAtContext(context.Background(), os.Stdin, os.Stdout, os.Stderr, program, "", "/review-context"))
 	}
+	if len(os.Args) == 3 && os.Args[1] == "mcp" {
+		if err := agenttools.Run(context.Background(), os.Args[2]); err != nil {
+			os.Exit(91)
+		}
+		os.Exit(0)
+	}
 	if len(os.Args) == 4 && os.Args[1] == "mcp-review" {
 		if err := agenttools.RunReview(context.Background(), os.Args[2], os.Args[3]); err != nil {
 			os.Exit(91)
@@ -68,6 +74,8 @@ func helper() int {
 		return 90
 	}
 	switch string(prompt) {
+	case "completion-success", "completion-fail", "completion-missing":
+		return completionHelper(string(prompt))
 	case "review-git-probe":
 		return reviewGitProbe()
 	case "delegation-lock-proof":

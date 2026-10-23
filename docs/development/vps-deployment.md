@@ -35,6 +35,34 @@ Then open **http://localhost:18080**. The private login is saved in
 running while using the app, and close it with Ctrl+C. The `.local/` directory
 is ignored by git and excluded from Docker build contexts.
 
+## Completion policy upgrade (ISQ-473, not yet deployed)
+
+This branch introduces migrations 0020–0021. Use a maintenance window; do not run
+old and new writers together. The public vitrine and private console boundary
+remain unchanged.
+
+1. Pause new admissions from the console, MCP and provider request routes. Let
+   coding Runs finish or cancel them through the existing API. Release external
+   ownership through the existing recovery process; resolve holds explicitly.
+2. Verify no unreleased Work sessions remain, all coding Runs are terminal with
+   no worker/lease, and their Workspaces are released. Finish cleanup while the
+   old worker is still available. Never force-clear ownership just to migrate.
+3. Stop **all** old API, worker and webhook-receiver writers, including replicas,
+   and take a database/artifact backup. Run the migration with the new image as
+   the sole writer. Migration 0020 rejects unreleased ownership or coding cleanup
+   and rolls back; drain first and retry if it rejects the upgrade.
+4. Start matching new API, worker and receiver versions. Re-enable admissions
+   after health and private-access checks. Select each Task's completion policy
+   before its next claim and save required Repository checks for review-required
+   work. Approve the GitHub App's Actions/Checks read permissions when needed.
+
+Historical Tasks, receipts, reviews and snapshot fingerprints stay intact;
+no policy or successful completion evidence is invented for them. Existing
+pending PR deliveries retain recovery, while new policy-managed work publishes
+manually. Reopened Tasks keep their frozen contract. Rollback after new writes
+requires restoring the coordinated backup; do not simply restart old binaries
+against the upgraded data. No deployment is performed by this implementation PR.
+
 ## Host and configuration
 
 Target: `ubuntu@141.95.112.190`, SSH key `~/.ssh/imoki-lab`, deployment directory

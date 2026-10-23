@@ -185,6 +185,7 @@ export function TaskLauncherProvider({ children }: { children: ReactNode }) {
   const importedRefreshing =
     !!importedId && (imported.isFetching || draft?.imported !== imported.data);
   const canLaunch =
+    (!!draft?.partial || !!draft?.imported?.completion_policy) &&
     !importedRefreshing &&
     !!draft &&
     !!draft.description.trim() &&

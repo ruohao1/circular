@@ -47,19 +47,20 @@ func linearAgentFixtureHandler(pool *pgxpool.Pool, provider *testsupport.Provide
 			return
 		}
 		var in struct {
-			Project   string `json:"project_id"`
-			Session   string `json:"session_id"`
-			Action    string `json:"action"`
-			Prompt    string `json:"prompt"`
-			Signal    string `json:"signal"`
-			Issue     string `json:"issue_id"`
-			Humanless bool   `json:"humanless"`
-			NonIssue  bool   `json:"non_issue"`
-			Paused    *bool  `json:"paused"`
-			Restart   bool   `json:"restart"`
-			EnableGit bool   `json:"enable_git"`
-			Outage    *bool  `json:"outage"`
-			Revoked   *bool  `json:"revoked"`
+			Project          string `json:"project_id"`
+			Session          string `json:"session_id"`
+			Action           string `json:"action"`
+			Prompt           string `json:"prompt"`
+			Signal           string `json:"signal"`
+			Issue            string `json:"issue_id"`
+			Humanless        bool   `json:"humanless"`
+			NonIssue         bool   `json:"non_issue"`
+			Paused           *bool  `json:"paused"`
+			Restart          bool   `json:"restart"`
+			EnableGit        bool   `json:"enable_git"`
+			CompletionChecks *bool  `json:"completion_checks"`
+			Outage           *bool  `json:"outage"`
+			Revoked          *bool  `json:"revoked"`
 		}
 		if json.NewDecoder(http.MaxBytesReader(w, r.Body, 256<<10)).Decode(&in) != nil {
 			http.Error(w, "invalid fixture request", 400)
@@ -72,6 +73,9 @@ func linearAgentFixtureHandler(pool *pgxpool.Pool, provider *testsupport.Provide
 		}
 		if in.Paused != nil {
 			queue.paused.Store(*in.Paused)
+		}
+		if in.CompletionChecks != nil {
+			provider.CompletionChecksEnabled.Store(*in.CompletionChecks)
 		}
 		if in.Restart {
 			if e := restart(); e != nil {

@@ -58,6 +58,8 @@ type ReviewerSnapshot struct {
 	Fingerprint     string          `json:"fingerprint"`
 }
 type LaunchSnapshot struct {
+	Version          int              `json:"version,omitempty"`
+	Source           *Source          `json:"source,omitempty"`
 	SourceRunID      uuid.UUID        `json:"source_run_id"`
 	TaskID           uuid.UUID        `json:"task_id"`
 	ProjectID        uuid.UUID        `json:"project_id"`
@@ -72,13 +74,14 @@ type LaunchSnapshot struct {
 	InputFingerprint string           `json:"input_fingerprint"`
 }
 type Evidence struct {
-	SourceRunID   uuid.UUID `json:"source_run_id"`
-	ArtifactID    uuid.UUID `json:"artifact_id"`
-	EventSequence int64     `json:"event_sequence"`
-	Kind          string    `json:"kind"`
-	SHA256        string    `json:"sha256"`
-	Text          string    `json:"text"`
-	Limitation    string    `json:"limitation"`
+	WorkSessionID *uuid.UUID `json:"work_session_id,omitempty"`
+	SourceRunID   uuid.UUID  `json:"source_run_id"`
+	ArtifactID    uuid.UUID  `json:"artifact_id"`
+	EventSequence int64      `json:"event_sequence"`
+	Kind          string     `json:"kind"`
+	SHA256        string     `json:"sha256"`
+	Text          string     `json:"text"`
+	Limitation    string     `json:"limitation"`
 }
 type Context struct {
 	ReviewID     uuid.UUID      `json:"review_id"`

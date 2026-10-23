@@ -40,6 +40,9 @@ func TestDelegationCheckpointRoundTrip(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer tx.Rollback(t.Context())
+	if _, err = tx.Exec(t.Context(), `UPDATE tasks SET completion_policy='{"mode":"direct_completion","requirements":[]}' WHERE id=$1`, snap.TaskID); err != nil {
+		t.Fatal(err)
+	}
 	var agent uuid.UUID
 	if err = tx.QueryRow(t.Context(), `SELECT agent_id FROM runs WHERE id=$1`, snap.SourceRunID).Scan(&agent); err != nil {
 		t.Fatal(err)

@@ -18,6 +18,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/google/uuid"
+	"github.com/ruohao1/circular/internal/completion"
 	"github.com/ruohao1/circular/internal/delegations"
 	"github.com/ruohao1/circular/internal/prreviews"
 )
@@ -27,6 +28,7 @@ type request struct {
 	delay                                         time.Duration
 	delegation                                    *delegations.Request
 	contextSHA256                                 string
+	completionReport                              *completion.Report
 }
 
 // Run accepts only the versioned request on stdin. Output and exit codes form
@@ -122,6 +124,11 @@ func Run(ctx context.Context, stdin io.Reader, stdout, stderr io.Writer, writeOu
 			return failure("injected failure after first event")
 		}
 	}
+	if value.completionReport != nil {
+		if line(stdout, map[string]any{"type": "circular.task.completion.reported", "report": value.completionReport}) != nil {
+			return 1
+		}
+	}
 	if value.delegation != nil {
 		if line(stdout, map[string]any{"type": "circular.delegation.requested", "request": value.delegation}) != nil {
 			return 1
@@ -175,6 +182,19 @@ func parse(data []byte) (request, error) {
 		return bad("stdin must contain one JSON object")
 	}
 	var value request
+	var contract *completion.Contract
+	if raw, exists := input["completion_contract"]; exists {
+		if prreviews.DecodeStrict(raw, &contract) != nil || contract == nil || completion.ValidateContract(*contract) != nil {
+			return bad("invalid completion_contract")
+		}
+		delete(input, "completion_contract")
+	}
+	if raw, exists := input["completion_report"]; exists {
+		if contract == nil || prreviews.DecodeStrict(raw, &value.completionReport) != nil || value.completionReport == nil || completion.ValidateReport(contract.Policy, *value.completionReport) != nil {
+			return bad("invalid completion_report")
+		}
+		delete(input, "completion_report")
+	}
 	if raw, exists := input["delegation_request"]; exists {
 		candidate, err := delegations.Decode(raw)
 		if err != nil {

@@ -74,6 +74,16 @@ func CreateRun(ctx context.Context, tx pgx.Tx, in RunLaunchInput) (RunLaunchResu
 	if _, err := eligibleWorkTask(ctx, tx, task, "open", "ready"); err != nil {
 		return out, err
 	}
+	var sameReviewer bool
+	if err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM pr_review_settings s JOIN tasks t ON t.project_id=s.project_id WHERE t.id=$1 AND s.reviewer_id=$2 AND t.completion_policy->>'mode'='review_required')`, task.id, in.AgentID).Scan(&sameReviewer); err != nil {
+		return out, err
+	}
+	if sameReviewer {
+		return out, &WorkIneligibleError{Reasons: []string{"Choose a coding Agent different from the configured PR reviewer"}, Blockers: []uuid.UUID{}}
+	}
+	if _, err = freezeTaskCompletion(ctx, tx, task); err != nil {
+		return out, err
+	}
 	out.RunID = uuid.New()
 	_, e := tx.Exec(ctx, `INSERT INTO runs(id,task_id,agent_id,backend,status,attempt,external_refs,request_key) SELECT $1,$2,$3,$4,'queued',COALESCE(MAX(attempt),0)+1,$5,NULLIF($6,'') FROM runs WHERE task_id=$2`, out.RunID, in.TaskID, in.AgentID, backend, in.ExternalRefs, in.RequestKey)
 	if e != nil {

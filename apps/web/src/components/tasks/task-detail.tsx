@@ -9,6 +9,7 @@ import type {
   TaskPlanningDetail,
 } from "@/api";
 import { scheduleError, type TaskPlanningDraft } from "@/lib/task-schedules";
+import { TaskCompletion } from "./task-completion";
 import { TaskScheduleFields } from "./task-schedule-fields";
 import {
   stageLabels,
@@ -313,6 +314,7 @@ export function TaskDetail(p: TaskDetailProps) {
             </Button>
           </div>
         </form>
+        <TaskCompletion taskID={task.id} disabled={pending || p.dirty} />
         <div className="my-6 flex flex-wrap items-end gap-3 border-y py-5">
           <ResourceSelect
             id="detail-workflow"

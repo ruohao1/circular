@@ -18,8 +18,10 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/ruohao1/circular/internal/artifacts"
+	"github.com/ruohao1/circular/internal/completion"
 	git "github.com/ruohao1/circular/internal/git"
 	"github.com/ruohao1/circular/internal/integrations"
+	"github.com/ruohao1/circular/internal/postgres"
 	"github.com/ruohao1/circular/internal/testsupport"
 )
 
@@ -341,6 +343,96 @@ func TestGitHubDeliveryPublishesRetainedRunAndLinearLinkOnce(t *testing.T) {
 	}
 	if !found {
 		t.Fatal("Linear missing verified PR link", comments)
+	}
+}
+
+func TestCompletionPublicationIsManual(t *testing.T) {
+	f := newDeliveryFixture(t, false)
+	if _, err := f.service.SetGitHubRunDeliverySettings(t.Context(), f.project, true); err != nil {
+		t.Fatal(err)
+	}
+	var task, agent uuid.UUID
+	var revision int64
+	if err := f.pool.QueryRow(t.Context(), `SELECT t.id,r.agent_id,t.revision FROM runs r JOIN tasks t ON t.id=r.task_id WHERE r.id=$1`, f.run).Scan(&task, &agent, &revision); err != nil {
+		t.Fatal(err)
+	}
+	tx, err := f.pool.Begin(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback(t.Context())
+	if err = postgres.SetTaskCompletionPolicy(t.Context(), tx, task, revision, completion.Policy{Mode: "direct_completion", Requirements: []completion.Requirement{}}); err != nil {
+		t.Fatal(err)
+	}
+	launch, err := postgres.CreateRun(t.Context(), tx, postgres.RunLaunchInput{TaskID: task, AgentID: agent})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = tx.Commit(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	local, err := git.NewLocal(git.Config{RepositoryCacheRoot: f.config.RepositoryCacheRoot, WorktreeRoot: filepath.Join(f.root, "worktrees")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cache, err := local.Checkout(t.Context(), uuid.MustParse(f.repository), filepath.Join(f.root, "source"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	workspace, err := local.Provision(t.Context(), launch.RunID, cache, "main")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = local.Release(t.Context(), workspace, git.ReleaseOptions{DiscardChanges: true}); err != nil {
+		t.Fatal(err)
+	}
+	store, err := artifacts.NewLocalStore(f.config.ArtifactRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var uri string
+	var metadata []byte
+	if err = f.pool.QueryRow(t.Context(), `SELECT uri,metadata FROM artifacts WHERE run_id=$1 AND kind='diff'`, f.run).Scan(&uri, &metadata); err != nil {
+		t.Fatal(err)
+	}
+	patch, err := store.Read(t.Context(), uuid.MustParse(f.run), uri)
+	if err != nil {
+		t.Fatal(err)
+	}
+	content, err := store.Write(t.Context(), launch.RunID, "git-diff.patch", patch)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = f.pool.Exec(t.Context(), `INSERT INTO artifacts(id,run_id,kind,uri,metadata) VALUES($1,$2,'diff',$3,$4)`, artifacts.DiffID(launch.RunID), launch.RunID, content.URI, metadata); err != nil {
+		t.Fatal(err)
+	}
+	f.run, f.remote.run = launch.RunID.String(), launch.RunID.String()
+	transition(t, f.fixture, f.run, "succeeded")
+	v, err := f.service.GitHubRunDelivery(t.Context(), f.run)
+	if err != nil || v.Status != "not_requested" {
+		t.Fatal("policy-managed work automatically published", v, err)
+	}
+	f.queue(t)
+	f.process(t)
+	v, err = f.service.GitHubRunDelivery(t.Context(), f.run)
+	if err != nil || v.Status != "delivered" || !v.Draft {
+		t.Fatal("manual publication unavailable", v, err)
+	}
+}
+
+func TestCompletionHistoricalAutomaticDeliveryStillReconciles(t *testing.T) {
+	f := newDeliveryFixture(t, false)
+	if _, err := f.service.SetGitHubRunDeliverySettings(t.Context(), f.project, true); err != nil {
+		t.Fatal(err)
+	}
+	f.queue(t)
+	if _, err := f.pool.Exec(t.Context(), `UPDATE github_run_deliveries SET automatic=true WHERE run_id=$1`, f.run); err != nil {
+		t.Fatal(err)
+	}
+	f.process(t)
+	v, err := f.service.GitHubRunDelivery(t.Context(), f.run)
+	if err != nil || v.Status != "delivered" || !v.Draft {
+		t.Fatal(v, err)
 	}
 }
 

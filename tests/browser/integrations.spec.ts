@@ -3,6 +3,7 @@ import { execFileSync } from "node:child_process";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { chooseDirectCompletion } from "./fixtures/plan-completion";
 
 const base = "http://127.0.0.1:18000/api/v1";
 test.skip(
@@ -281,6 +282,7 @@ test("connect providers, import resources, launch an existing Task, and reconnec
       "Verify a task imported from Linear.",
     );
     await page.reload();
+    await chooseDirectCompletion(page);
     await page.getByRole("button", { name: "Start Run", exact: true }).click();
     await expect(page).toHaveURL(/\/runs\/[0-9a-f-]+$/);
     await expect(page.locator(".heading-actions .status")).toHaveText(

@@ -113,7 +113,7 @@ func (p *ProviderFixture) serveGitHubIdentity(w http.ResponseWriter, r *http.Req
 			w.WriteHeader(403)
 			return true
 		}
-		fixtureJSON(w, map[string]any{"id": installationID, "app_id": 123, "account": map[string]any{"login": "fixture"}, "suspended_at": suspended, "permissions": map[string]string{"contents": "write", "pull_requests": "write", "metadata": "read"}})
+		fixtureJSON(w, map[string]any{"id": installationID, "app_id": 123, "account": map[string]any{"login": "fixture"}, "suspended_at": suspended, "permissions": map[string]string{"contents": "write", "pull_requests": "write", "metadata": "read", "actions": "read", "checks": "read"}})
 		return true
 	}
 	if r.URL.Path == installationPath+"/access_tokens" && r.Method == "POST" {

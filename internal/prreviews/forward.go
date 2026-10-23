@@ -14,12 +14,17 @@ import (
 
 var ErrForwardReport = errors.New("review report could not be forwarded to the worker")
 
+type ReportPublisher interface {
+	Publish(io.Writer) error
+	PublishVerified(io.Writer, string) error
+}
+
 // ReportForwarder sends a validated canonical record to the workload's stdout
 // before the private tool acknowledges it. Docker retains that stream even if
 // the model hangs or its container exits; worker success is a separate gate.
 type ReportForwarder struct {
 	listener  net.Listener
-	spool     *Spool
+	spool     ReportPublisher
 	writer    io.Writer
 	done      chan struct{}
 	once      sync.Once
@@ -27,7 +32,7 @@ type ReportForwarder struct {
 	finishErr error
 }
 
-func StartReportForwarder(directory string, spool *Spool, writer io.Writer) (*ReportForwarder, error) {
+func StartReportForwarder(directory string, spool ReportPublisher, writer io.Writer) (*ReportForwarder, error) {
 	listener, err := net.Listen("unix", filepath.Join(directory, "report.sock"))
 	if err != nil {
 		return nil, err
@@ -49,7 +54,7 @@ func (f *ReportForwarder) serve() {
 			checksum := line[:64]
 			if _, err = hex.DecodeString(checksum); err == nil {
 				if f.delivered == "" {
-					err = f.spool.publish(f.writer, checksum)
+					err = f.spool.PublishVerified(f.writer, checksum)
 					if err == nil {
 						f.delivered = checksum
 					}

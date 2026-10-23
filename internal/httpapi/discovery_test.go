@@ -45,6 +45,10 @@ func TestProjectIncludesDiscoveryAndPreparesTaskWithoutStartingRun(t *testing.T)
 	if err := f.pool.QueryRow(t.Context(), `SELECT (SELECT count(*) FROM agents WHERE project_id=$1),(SELECT count(*) FROM runs)`, projectID).Scan(&agentCount, &runCount); err != nil || agentCount != 2 || runCount != 0 {
 		t.Fatal("preparation duplicated Agents or started a Run", err)
 	}
+	var policyReady bool
+	if err := f.pool.QueryRow(t.Context(), `SELECT completion_policy->>'mode'='direct_completion' AND completion_policy->'requirements'->0->>'key'='discovery_report' FROM tasks WHERE id=$1`, task["id"]).Scan(&policyReady); err != nil || !policyReady {
+		t.Fatal("discovery completion preset missing", err)
+	}
 	// A normal launch reuses the prepared Task and the supplied Agent.
 	run := f.create(t, "runs", map[string]any{"task_id": task["id"], "agent_id": agentID})
 	if run["backend"] != "codex" {

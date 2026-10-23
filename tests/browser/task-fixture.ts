@@ -48,6 +48,9 @@ export async function fixture(page: Page) {
       priority: "normal",
       preferred_agent_id: agents[0].id as string | null,
       revision: 1,
+      completion_policy: null as
+        | components["schemas"]["CompletionPolicy"]
+        | null,
       parent_task_id: null as string | null,
       planned_start_date: null as string | null,
       planned_finish_date: null as string | null,
@@ -321,6 +324,13 @@ export async function fixture(page: Page) {
     if (path.startsWith("/tasks/")) {
       const task = tasks.find((t) => t.id === path.split("/")[2]);
       if (!task) return json({ detail: "Missing Task" }, 404);
+      if (path.endsWith("/completion"))
+        return json({
+          policy: task.completion_policy,
+          contract: null,
+          owner_active: state.active,
+          revision: task.revision,
+        });
       if (req.method() === "PATCH") {
         if (state.writeGate) await state.writeGate;
         if (state.writeError)

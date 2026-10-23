@@ -20,7 +20,10 @@ type reviewPrepareInput struct {
 	ReviewerID string `json:"reviewer_id,omitempty" jsonschema:"Enabled PR reviewer UUID, defaults to project selection"`
 }
 type reviewLaunchInput struct {
-	RunID                    string `json:"run_id" jsonschema:"Source coding run UUID"`
+	RunID string `json:"run_id" jsonschema:"Source coding run UUID"`
+	reviewLaunchOptions
+}
+type reviewLaunchOptions struct {
 	ReviewerID               string `json:"reviewer_id,omitempty"`
 	RequestKey               string `json:"request_key" jsonschema:"Stable nonzero UUID; reuse for all retries of this launch"`
 	ExpectedInputFingerprint string `json:"expected_input_fingerprint" jsonschema:"Fingerprint from prepare_pr_review"`
@@ -73,28 +76,36 @@ func (c *client) addPRReviewMutations(server *mcp.Server) {
 		return c.record(ctx, http.MethodPost, "/projects/"+in.ProjectID+"/integrations/github/pr-reviews", "settings", body)
 	})
 	add(server, "launch_pr_review", "Start additional model work to review a delivered PR and publish eligible feedback. Call prepare_pr_review first. Reuse the same request_key and parameters for retries. For an explicit new attempt use a new UUID key, mode=again and previous_review_id. The reviewer must differ from the source coder.", false, false, true, func(ctx context.Context, in reviewLaunchInput) (object, error) {
-		key, err := uuid.Parse(in.RequestKey)
+		body, err := reviewLaunchBody(in.reviewLaunchOptions)
 		if err != nil {
-			return nil, errors.New("request_key must be a nonzero UUID")
-		}
-		var previous uuid.UUID
-		if in.PreviousReviewID != "" {
-			previous, _ = uuid.Parse(in.PreviousReviewID)
-		}
-		value := prreviews.LaunchRequest{RequestKey: key, ExpectedInputFingerprint: in.ExpectedInputFingerprint, Mode: in.Mode, PreviousReviewID: previous}
-		if err = value.Validate(); err != nil {
 			return nil, err
-		}
-		body := object{"request_key": in.RequestKey, "expected_input_fingerprint": in.ExpectedInputFingerprint, "mode": in.Mode}
-		if in.ReviewerID != "" {
-			body["reviewer_id"] = in.ReviewerID
-		}
-		if in.PreviousReviewID != "" {
-			body["previous_review_id"] = in.PreviousReviewID
 		}
 		return c.record(ctx, http.MethodPost, "/runs/"+in.RunID+"/pr-reviews", "review", body)
 	})
 	add(server, "retry_pr_review_publication", "Retry or reconcile GitHub feedback for this same review. Does not start a model run. An uncertain write is checked for an existing receipt and never blindly posted again.", false, false, true, func(ctx context.Context, in reviewInput) (object, error) {
 		return c.record(ctx, http.MethodPost, "/pr-reviews/"+in.ReviewID+"/publication/retry", "review", object{})
 	})
+}
+
+func reviewLaunchBody(in reviewLaunchOptions) (object, error) {
+	key, err := uuid.Parse(in.RequestKey)
+	if err != nil {
+		return nil, errors.New("request_key must be a nonzero UUID")
+	}
+	var previous uuid.UUID
+	if in.PreviousReviewID != "" {
+		previous, _ = uuid.Parse(in.PreviousReviewID)
+	}
+	value := prreviews.LaunchRequest{RequestKey: key, ExpectedInputFingerprint: in.ExpectedInputFingerprint, Mode: in.Mode, PreviousReviewID: previous}
+	if err = value.Validate(); err != nil {
+		return nil, err
+	}
+	body := object{"request_key": in.RequestKey, "expected_input_fingerprint": in.ExpectedInputFingerprint, "mode": in.Mode}
+	if in.ReviewerID != "" {
+		body["reviewer_id"] = in.ReviewerID
+	}
+	if in.PreviousReviewID != "" {
+		body["previous_review_id"] = in.PreviousReviewID
+	}
+	return body, nil
 }

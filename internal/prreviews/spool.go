@@ -105,9 +105,9 @@ func (s *Spool) Submit(raw json.RawMessage) (string, error) {
 	return report.SHA256, nil
 }
 func (s *Spool) Publish(writer io.Writer) error {
-	return s.publish(writer, "")
+	return s.PublishVerified(writer, "")
 }
-func (s *Spool) publish(writer io.Writer, expectedSHA string) error {
+func (s *Spool) PublishVerified(writer io.Writer, expectedSHA string) error {
 	return s.locked(func(root *os.Root) error {
 		if _, err := root.Lstat("report.json"); errors.Is(err, os.ErrNotExist) {
 			if expectedSHA != "" {

@@ -116,13 +116,24 @@ func (c *client) request(ctx context.Context, method, address string, body any) 
 	}
 	if res.StatusCode < 200 || res.StatusCode >= 300 {
 		var problem struct {
-			Detail json.RawMessage `json:"detail"`
+			Detail   json.RawMessage `json:"detail"`
+			Code     string          `json:"code"`
+			Blockers []struct {
+				Code string `json:"code"`
+			} `json:"blockers"`
 		}
 		message := http.StatusText(res.StatusCode)
 		if json.Unmarshal(data, &problem) == nil && len(problem.Detail) > 0 {
 			if json.Unmarshal(problem.Detail, &message) != nil {
 				message = string(problem.Detail)
 			}
+		}
+		if problem.Code == "completion_blocked" {
+			codes := []string{problem.Code}
+			for _, blocker := range problem.Blockers {
+				codes = append(codes, blocker.Code)
+			}
+			message = strings.Join(codes, ", ") + ": " + message
 		}
 		if len(message) > 2000 {
 			message = message[:2000] + "…"

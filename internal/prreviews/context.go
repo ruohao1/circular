@@ -14,7 +14,7 @@ import (
 )
 
 func ValidateContext(value Context) error {
-	if value.RunID == uuid.Nil || value.ReviewID == uuid.Nil || value.Snapshot.SourceRunID == uuid.Nil || value.Snapshot.TaskID == uuid.Nil || value.Snapshot.ProjectID == uuid.Nil || value.Snapshot.RepositoryID == uuid.Nil || value.RunID == value.Snapshot.SourceRunID || !CommitPattern.MatchString(value.MergeBaseSHA) || !DigestPattern.MatchString(value.DiffSHA256) || len(value.Files) > MaxFiles {
+	if value.RunID == uuid.Nil || value.ReviewID == uuid.Nil || value.Snapshot.ValidateSource() != nil || value.Snapshot.TaskID == uuid.Nil || value.Snapshot.ProjectID == uuid.Nil || value.Snapshot.RepositoryID == uuid.Nil || value.RunID == value.Snapshot.SourceRunID || !CommitPattern.MatchString(value.MergeBaseSHA) || !DigestPattern.MatchString(value.DiffSHA256) || len(value.Files) > MaxFiles {
 		return ErrSourceInvalid
 	}
 	sealed, err := SealSnapshot(value.Snapshot)
@@ -171,9 +171,11 @@ func WriteContext(directory string, value Context, diff []byte) (result error) {
 			return ErrSourceInvalid
 		}
 		_, writeErr := file.Write(content)
+		// The isolated reviewer may use another UID; do not inherit the host umask.
+		modeErr := file.Chmod(0444)
 		syncErr := file.Sync()
 		closeErr := file.Close()
-		if errors.Join(writeErr, syncErr, closeErr) != nil {
+		if errors.Join(writeErr, modeErr, syncErr, closeErr) != nil {
 			return ErrSourceInvalid
 		}
 	}

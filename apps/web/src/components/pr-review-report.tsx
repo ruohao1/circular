@@ -123,13 +123,23 @@ export function PRReviewReport({ reviewID }: { reviewID: string }) {
         </CardHeader>
         <CardContent className="space-y-5">
           <div className="flex flex-wrap gap-3 text-xs">
-            <Link
-              className="underline underline-offset-4"
-              to="/runs/$runId"
-              params={{ runId: snapshot.source_run_id }}
-            >
-              Source coding run
-            </Link>
+            {snapshot.source?.work_session_id ? (
+              <Link
+                to="/tasks"
+                search={{ taskId: snapshot.task_id }}
+                className="underline underline-offset-4"
+              >
+                Source Task · external work
+              </Link>
+            ) : (
+              <Link
+                className="underline underline-offset-4"
+                to="/runs/$runId"
+                params={{ runId: snapshot.source_run_id }}
+              >
+                Source coding run
+              </Link>
+            )}
             <a
               className="inline-flex items-center gap-1 underline underline-offset-4"
               href={snapshot.pr.url}
@@ -226,11 +236,15 @@ export function PRReviewReport({ reviewID }: { reviewID: string }) {
             {!active && (
               <>
                 <ReviewLaunchButton
-                  sourceRunID={snapshot.source_run_id}
+                  {...(snapshot.source?.work_session_id
+                    ? { taskID: snapshot.task_id }
+                    : { sourceRunID: snapshot.source_run_id })}
                   label="Review latest commit"
                 />
                 <ReviewLaunchButton
-                  sourceRunID={snapshot.source_run_id}
+                  {...(snapshot.source?.work_session_id
+                    ? { taskID: snapshot.task_id }
+                    : { sourceRunID: snapshot.source_run_id })}
                   mode="again"
                   previousReviewID={value.id}
                   label="Review again"

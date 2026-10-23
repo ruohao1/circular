@@ -1,6 +1,40 @@
 import { expect, test } from "@playwright/test";
 import { installPRReviewFixture } from "./fixtures/pr-reviews";
 
+test("external work reviews link the Task and launch a new Task review", async ({
+  page,
+}) => {
+  const f = await installPRReviewFixture(page);
+  f.review.snapshot.version = 2;
+  f.review.snapshot.source = {
+    work_session_id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+  };
+  f.review.snapshot.source_run_id = "00000000-0000-0000-0000-000000000000";
+  await page.goto(`/runs/${f.reviewRunID}`);
+  const report = page.getByRole("region", { name: "PR review report" });
+  await expect(
+    report.getByRole("link", {
+      name: "Source Task · external work",
+      exact: true,
+    }),
+  ).toHaveAttribute("href", `/tasks?taskId=${f.review.snapshot.task_id}`);
+  await report
+    .getByRole("button", { name: "Review again", exact: true })
+    .click();
+  const request = page.waitForRequest(
+    (r) =>
+      r.method() === "POST" &&
+      r.url().includes(`/tasks/${f.review.snapshot.task_id}/pr-reviews`),
+  );
+  await page
+    .getByRole("dialog")
+    .getByRole("button", { name: "Start review", exact: true })
+    .click();
+  await request;
+  await expect.poll(() => f.launches.length).toBe(1);
+  expect(f.errors).toEqual([]);
+});
+
 test("an open completed report observes independent delivery and later PR changes", async ({
   page,
 }) => {

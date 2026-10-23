@@ -9,7 +9,9 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/ruohao1/circular/internal/agentproposals"
 	"github.com/ruohao1/circular/internal/codexconfig"
+	"github.com/ruohao1/circular/internal/completion"
 	"github.com/ruohao1/circular/internal/delegations"
+	"github.com/ruohao1/circular/internal/prreviews"
 )
 
 type proposalResult struct {
@@ -58,6 +60,19 @@ func Run(ctx context.Context, directory string) error {
 			return err
 		}
 		AddDelegation(server, delegation, targets)
+	} else if !os.IsNotExist(err) {
+		return err
+	}
+
+	completionDir := filepath.Join(directory, "completion")
+	if _, err := os.Lstat(completionDir); err == nil {
+		result, err := completion.OpenSpool(completionDir)
+		if err != nil {
+			return err
+		}
+		addCompletion(server, result, func(ctx context.Context, checksum string) error {
+			return prreviews.ForwardReport(ctx, completionDir, checksum)
+		})
 	} else if !os.IsNotExist(err) {
 		return err
 	}

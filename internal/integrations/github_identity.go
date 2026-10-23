@@ -39,10 +39,11 @@ type PublisherIdentity struct {
 type GitHubPurpose string
 
 const (
-	GitHubClone       GitHubPurpose = "clone"
-	GitHubPublish     GitHubPurpose = "publish"
-	GitHubReviewRead  GitHubPurpose = "review_read"
-	GitHubReviewWrite GitHubPurpose = "review_write"
+	GitHubCompletionRead GitHubPurpose = "completion_read"
+	GitHubClone          GitHubPurpose = "clone"
+	GitHubPublish        GitHubPurpose = "publish"
+	GitHubReviewRead     GitHubPurpose = "review_read"
+	GitHubReviewWrite    GitHubPurpose = "review_write"
 )
 
 type githubInstallationToken struct {
@@ -219,14 +220,6 @@ func (s *Service) SaveGitHubIdentity(ctx context.Context, project string, value 
 	if err := lockApp(ctx, tx, "github"); err != nil {
 		return IdentityStatus{}, err
 	}
-	var previous string
-	err = tx.QueryRow(ctx, `SELECT i.account_id FROM integration_identity_bindings b JOIN provider_identities i ON i.id=b.identity_id WHERE b.project_id=$1 AND b.provider='github' FOR UPDATE OF b`, project).Scan(&previous)
-	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
-		return IdentityStatus{}, err
-	}
-	if previous != "" && previous != installationID {
-		return IdentityStatus{}, ErrIdentityConflict
-	}
 	if !s.environmentApp("github") {
 		var encrypted []byte
 		if err := tx.QueryRow(ctx, `SELECT credentials FROM integration_apps WHERE provider='github' FOR UPDATE`).Scan(&encrypted); err != nil {
@@ -260,6 +253,15 @@ func (s *Service) SaveGitHubIdentity(ctx context.Context, project string, value 
 	if err != nil {
 		return IdentityStatus{}, err
 	}
+	// Lock the identity before its binding, matching completion and other identity writers.
+	var previous string
+	err = tx.QueryRow(ctx, `SELECT i.account_id FROM integration_identity_bindings b JOIN provider_identities i ON i.id=b.identity_id WHERE b.project_id=$1 AND b.provider='github' FOR UPDATE OF b`, project).Scan(&previous)
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return IdentityStatus{}, err
+	}
+	if previous != "" && previous != installationID {
+		return IdentityStatus{}, ErrIdentityConflict
+	}
 	if _, err := tx.Exec(ctx, `INSERT INTO integration_identity_bindings(project_id,provider,identity_id) VALUES($1,'github',$2) ON CONFLICT(project_id,provider) DO UPDATE SET enabled=true,updated_at=now()`, project, identityID); err != nil {
 		return IdentityStatus{}, err
 	}
@@ -275,6 +277,9 @@ func (s *Service) withGitHubRepository(ctx context.Context, project, repositoryI
 		return err
 	}
 	if !bound {
+		if purpose == GitHubCompletionRead {
+			return ErrIdentityUnavailable
+		}
 		return s.withToken(ctx, project, "github", func(token string) error { return use(token, PublisherIdentity{Mode: "user", Provider: "github"}) })
 	}
 	identity, err := s.Identity(ctx, project, "github")
@@ -303,6 +308,10 @@ func (s *Service) withGitHubRepository(ctx context.Context, project, repositoryI
 	case GitHubPublish:
 		permissions["contents"] = "write"
 		permissions["pull_requests"] = "write"
+	case GitHubCompletionRead:
+		permissions["pull_requests"] = "read"
+		permissions["actions"] = "read"
+		permissions["checks"] = "read"
 	case GitHubReviewRead:
 		permissions["pull_requests"] = "read"
 	case GitHubReviewWrite:

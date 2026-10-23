@@ -19,7 +19,7 @@ func RunBackground(ctx context.Context, pool *pgxpool.Pool, config Config) error
 		return err
 	}
 	var workers sync.WaitGroup
-	for _, process := range []func(context.Context) (bool, error){service.ProcessIntegrationWebhook, service.ProcessLinearActivity, service.ProcessExternalRequest, service.ProcessLinearUpdate, service.ProcessGitHubRunDelivery, service.ProcessPRReviewLaunch, service.ProcessPRReviewPublication, service.ProcessPRReviewFreshness} {
+	for _, process := range []func(context.Context) (bool, error){service.ProcessIntegrationWebhook, service.ProcessLinearActivity, service.ProcessExternalRequest, service.ProcessLinearUpdate, service.ProcessGitHubRunDelivery, service.ProcessPRReviewLaunch, service.ProcessPRReviewPublication, service.ProcessPRReviewFreshness, service.ProcessTaskCompletion, service.ProcessTaskCompletionFreshness} {
 		workers.Go(func() {
 			for ctx.Err() == nil {
 				worked, err := process(ctx)

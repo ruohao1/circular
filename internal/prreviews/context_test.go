@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 
 	"github.com/google/uuid"
@@ -69,5 +70,24 @@ func TestContextBundleIsImmutableAndRejectsCorruptionAndSymlinks(t *testing.T) {
 	}
 	if _, err := ReadContext(link); err == nil {
 		t.Fatal("linked directory read")
+	}
+}
+
+func TestReviewContextReadableUnderPrivateUmask(t *testing.T) {
+	old := syscall.Umask(0077)
+	defer syscall.Umask(old)
+	value, diff := validContext(t)
+	dir := filepath.Join(t.TempDir(), value.RunID.String())
+	if err := WriteContext(dir, value, diff); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"context.json", "diff.patch"} {
+		info, err := os.Stat(filepath.Join(dir, name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if info.Mode().Perm() != 0444 {
+			t.Fatal("container user cannot read trusted bundle", name, info.Mode().Perm())
+		}
 	}
 }

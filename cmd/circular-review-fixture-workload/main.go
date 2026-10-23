@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ruohao1/circular/internal/completion"
 	"github.com/ruohao1/circular/internal/prreviews"
 )
 
@@ -21,11 +22,12 @@ func main() {
 }
 func run() error {
 	var input struct {
-		Purpose string `json:"purpose"`
-		Prompt  string `json:"prompt"`
-		Model   string `json:"model"`
-		Effort  string `json:"reasoning_effort"`
-		Digest  string `json:"review_context_sha256"`
+		Purpose  string               `json:"purpose"`
+		Prompt   string               `json:"prompt"`
+		Model    string               `json:"model"`
+		Effort   string               `json:"reasoning_effort"`
+		Digest   string               `json:"review_context_sha256"`
+		Contract *completion.Contract `json:"completion_contract"`
 	}
 	if err := json.NewDecoder(io.LimitReader(os.Stdin, 16<<20)).Decode(&input); err != nil {
 		return err
@@ -51,6 +53,26 @@ func run() error {
 		}
 		event["item"] = map[string]any{"type": "agent_message", "id": "fixture-result", "text": "Fixture completed using " + input.Model + " / " + input.Effort + ". Captured approved instructions in input-proof.json."}
 		_ = json.NewEncoder(os.Stdout).Encode(event)
+		if strings.Contains(input.Prompt, "Submit completion report for native fixture.") {
+			if input.Contract == nil {
+				return fmt.Errorf("missing fixture completion contract")
+			}
+			directory, err := os.MkdirTemp("/tmp", "completion-fixture-")
+			if err != nil {
+				return err
+			}
+			defer os.RemoveAll(directory)
+			spool, err := completion.NewSpool(directory, *input.Contract)
+			if err != nil {
+				return err
+			}
+			if err = spool.Submit(completion.Report{Result: "Captured approved inputs and changed the validation fixture.", Evidence: []completion.Evidence{}}); err != nil {
+				return err
+			}
+			if err = spool.Publish(os.Stdout); err != nil {
+				return err
+			}
+		}
 		fmt.Fprintln(os.Stdout, `{"type":"turn.completed","usage":{"input_tokens":20,"output_tokens":10}}`)
 		return nil
 	}

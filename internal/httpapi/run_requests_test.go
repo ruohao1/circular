@@ -50,6 +50,7 @@ func TestLaunchKeysSerializeRetriesAndRejectConflictingPayloads(t *testing.T) {
 	other := f.create(t, "agents", map[string]any{"name": "Other", "project_id": project["id"]})
 	repository := f.create(t, "repositories", map[string]any{"project_id": project["id"], "name": "Source", "clone_url": "/fixture"})
 	task := f.create(t, "tasks", map[string]any{"title": "One launch", "description": "Prepared requirements", "repository_id": repository["id"], "project_id": project["id"]})
+	f.directCompletion(t, task["id"].(string))
 	values := map[string]any{"task_id": task["id"], "agent_id": agent["id"], "request_key": "first-intent", "external_refs": map[string]any{"source": "MCP"}}
 	raw, _ := json.Marshal(values)
 	var first map[string]any

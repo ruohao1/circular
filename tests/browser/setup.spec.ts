@@ -522,6 +522,30 @@ test("configure resources in setup, recover from errors, and launch the first Ru
     await page
       .getByLabel("Description", { exact: true })
       .fill("Verify the configured Repository and Agent with a complete Run.");
+    await page.getByRole("button", { name: "Save Task", exact: true }).click();
+    const completion = page.getByRole("region", {
+      name: "Task completion",
+      exact: true,
+    });
+    await completion
+      .getByRole("button", { name: "Set completion policy", exact: true })
+      .click();
+    await completion
+      .getByRole("combobox", { name: "Completion policy", exact: true })
+      .click();
+    await page
+      .getByRole("option", { name: "Direct completion", exact: true })
+      .click();
+    await completion
+      .getByRole("button", { name: "Save completion policy", exact: true })
+      .click();
+    await expect(
+      completion.getByRole("button", {
+        name: "Edit completion policy",
+        exact: true,
+      }),
+    ).toBeVisible();
+    await page.getByRole("link", { name: "Start Run", exact: true }).click();
     await page.getByRole("button", { name: "Start Run", exact: true }).click();
     await expect(page).toHaveURL(/\/runs\/[0-9a-f-]+$/);
     await expect(page.locator(".heading-actions .status")).toHaveText(
@@ -564,7 +588,7 @@ test("configure resources in setup, recover from errors, and launch the first Ru
       page.getByRole("button", { name: "Add repository", exact: true }),
     ).toBeVisible();
     await expect(
-      page.getByRole("button", { name: "Start Run", exact: true }),
+      page.getByRole("button", { name: "Save Task", exact: true }),
     ).toBeDisabled();
     await page
       .getByRole("button", { name: "Add repository", exact: true })

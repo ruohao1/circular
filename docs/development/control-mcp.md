@@ -141,7 +141,7 @@ restriction on this MCP connection, not an authorization layer on the HTTP API.
 | `list_github_accounts`                                                         | List installed GitHub accounts and creation permissions for a project. Use `next_page` to continue.                                                                         |
 | `create_github_repository`                                                     | Create an actual GitHub repository with a README and attach it to the project. Private by default; retain the same `request_key` and parameters when retrying.              |
 | `get_github_publishing`, `get_run_pull_request`                                | Inspect project publishing settings and a run's delivery status and PR link.                                                                                                |
-| `set_github_publishing`, `publish_run_pull_request`                            | Opt future successful runs into automatic draft PRs, or publish an existing successful run. Publication is asynchronous; retry with the same run ID.                        |
+| `set_github_publishing`, `publish_run_pull_request`                            | Control legacy automatic drafts, or manually publish a successful Run; policy-managed Tasks always require manual publication. Publication is asynchronous; retry with the same run ID.                        |
 | `create_task`, `prepare_discovery`                                             | Prepare work without starting execution. Discovery returns its supplied agent ID.                                                                                           |
 | `start_run`, `cancel_run`                                                      | Queue actual execution or cancel queued/active work. A launch requires a stable `request_key`.                                                                              |
 | `propose_agent`, `create_proposed_agent`, `dismiss_agent_proposal`             | Save a recommendation for review, create the reviewed agent, or dismiss it. Agent creation does not start execution.                                                        |
@@ -280,9 +280,51 @@ publication retains its existing authorization. See
 [Codex backend](codex-backend.md#bounded-specialist-delegation) for limits,
 checkpoint semantics, rollout and recovery diagnostics.
 
+## Task completion and external work
+
+`get_task_completion` is read-only and returns the frozen policy, accepted report,
+bound PR, observation age, required checks, latest independent review and stable
+blocker codes. `prepare_task_pr_review` and `list_task_pr_reviews` are also
+available read-only. Preparation verifies inputs but starts no model work.
+For a completed Task, the verdict describes the accepted historical result
+(`next_stage=completed`, `merge_readiness=not_applicable`); observation expiry or
+a later GitHub reconnect does not invalidate it. Reopening requires fresh tracked
+work. Completed Tasks retain their evidence and review history without refresh,
+rebinding or new-review controls.
+
+Full control additionally exposes `refresh_task_completion`,
+`bind_task_pull_request` and `launch_task_pr_review`. Bind only a positive PR
+number with the current Task revision and completion session ID; the server
+resolves its Repository and provider identity. Rebinding clears earlier readiness.
+Prepare a review first, then launch with its fingerprint and a stable request
+key. Retry an uncertain launch with identical parameters. These Task review
+tools support both native and tracked external coding work; the existing Run
+review tools remain compatible.
+
+Plan a policy and keyed requirements through Task details or
+`PUT /api/v1/tasks/{id}/completion-policy` before first work. The API requires an
+expected Task revision and refuses edits after the first claim freezes the
+contract. Repository CI configuration is also explicit and revision-checked.
+`move_task` to Done refreshes provider evidence and applies the shared guard;
+`completion_blocked` errors include actionable blocker codes. It never releases
+an active owner or trusts client-supplied check results.
+
+The in-run coding-only `submit_task_result` tool accepts a result and evidence
+for the frozen requirement keys, plus an optional PR number. It accepts no Task,
+Project or session identity. The server binds it to the current invocation;
+native completion waits for terminal success and safe cleanup. Discovery uses
+the explicit direct-completion `discovery_report` preset; delegated children use
+the direct `handoff` preset. Parent continuation follows delegation outcome and
+still requires the parent's final-invocation completion report.
+
+ISQ-474 adds external claim/heartbeat/finish tools using `WorkFinishInput.Report`.
+ISQ-478 adds Linear workflow status sync through guarded `MoveTask`. ISQ-476 can
+document a fixed client skill/plugin after that lifecycle exists. This release
+does not claim those external lifecycle tools are already present.
+
 ## Task planning tools
 
-Full control exposes 46 tools; read-only exposes 24. `list_task_planning` returns
+`list_task_planning` returns
 bounded groups (up to 50 Tasks per stage by default, at most 100) with totals,
 Run summaries and revision-bound cursors. Supply a status when continuing a group's
 cursor, retaining Project and all filters. Default groups exclude cancelled;
