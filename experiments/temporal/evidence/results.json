@@ -1,0 +1,581 @@
+{
+  "evaluated_at": "2026-10-26",
+  "source_commit": "195eaf02dcbb74ec08b1a07f30e5d6732cd50137",
+  "decision": "Defer production adoption. Separate cleanup recovery replaces in-Activity polling with durable waits, but grows compared adapter functions from 70 to 210 lines and removes no production coordination code.",
+  "versions": {
+    "go": "1.27.1",
+    "sdk": "1.50.0",
+    "temporal_cli": "1.9.1",
+    "temporal_server": "1.32.0",
+    "docker_server": "29.8.2",
+    "postgres": "17-alpine",
+    "temporal_image": "temporalio/temporal@sha256:ad4c82c97bd12b417d1ea942610dbcd511afb250c4d5ed26c694009533df447e"
+  },
+  "evaluation": {
+    "command": "go -C experiments/temporal test -race -json -count=1 -timeout=240s ./...",
+    "services": [
+      "disposable PostgreSQL",
+      "persistent Temporal development server",
+      "real Docker fake-backend success",
+      "Docker CLI simulator fault cases"
+    ],
+    "packages": [
+      {
+        "package": "github.com/ruohao1/circular/experiments/temporal",
+        "outcome": "pass",
+        "elapsed_seconds": 162.09
+      }
+    ],
+    "tests_passed": 37,
+    "tests_failed": [],
+    "tests_skipped": [
+      "TestActivityWorkerProcess",
+      "TestSplitActivityWorkerProcess"
+    ],
+    "variants": [
+      "RunWorkflow: whole-Supervisor execution and cleanup recovery",
+      "SplitWorkflow: same execution with separate recovery claim, retention and release",
+      "CleanupWorkflow: separate recovery only"
+    ]
+  },
+  "evaluation_test_results": [
+    {
+      "test": "TestManagedRunLifecycleAndRepeatedDelivery",
+      "outcome": "pass"
+    },
+    {
+      "test": "TestAdmissionIsAtomicAndReconnectsToTheSameRun",
+      "outcome": "pass"
+    },
+    {
+      "test": "TestRetentionFailurePreservesOutputAndFencesTheOldOwner",
+      "outcome": "pass"
+    },
+    {
+      "test": "TestCleanupFailureKeepsOriginalBackendFailure",
+      "outcome": "pass"
+    },
+    {
+      "test": "TestAPICancellationRetainsOutputAndCleansResources",
+      "outcome": "pass"
+    },
+    {
+      "test": "TestDockerCLIHelper",
+      "outcome": "pass"
+    },
+    {
+      "test": "TestReceiptBeforeClaimNeverStartsTheAgent",
+      "outcome": "pass"
+    },
+    {
+      "test": "TestReconcileWaitsForTheLiveLease",
+      "outcome": "pass"
+    },
+    {
+      "test": "TestInitRefusesOrdinarySchema",
+      "outcome": "pass"
+    },
+    {
+      "test": "TestLiveAdmissionRecoversLostAcknowledgementAndReplays",
+      "outcome": "pass"
+    },
+    {
+      "test": "TestLiveCancellationUsesExistingAPIPolicyAndShieldedCleanup",
+      "outcome": "pass"
+    },
+    {
+      "test": "TestActivityWorkerProcess",
+      "outcome": "skip"
+    },
+    {
+      "test": "TestLiveWorkerLossNeverRepeatsAgentInvocation/partial_provisioning",
+      "outcome": "pass"
+    },
+    {
+      "test": "TestLiveWorkerLossNeverRepeatsAgentInvocation/uncertain_start",
+      "outcome": "pass"
+    },
+    {
+      "test": "TestLiveWorkerLossNeverRepeatsAgentInvocation/retention",
+      "outcome": "pass"
+    },
+    {
+      "test": "TestLiveWorkerLossNeverRepeatsAgentInvocation/cleanup",
+      "outcome": "pass"
+    },
+    {
+      "test": "TestLiveWorkerLossNeverRepeatsAgentInvocation",
+      "outcome": "pass"
+    },
+    {
+      "test": "TestLiveRealDockerFakeBackend",
+      "outcome": "pass"
+    },
+    {
+      "test": "TestLiveReceiptPreventsRestartWhenHistoryIsMissing",
+      "outcome": "pass"
+    },
+    {
+      "test": "TestSplitRetentionAndReleaseAreSeparateAndIdempotent",
+      "outcome": "pass"
+    },
+    {
+      "test": "TestSplitActivitiesFenceAnExpiredCleanupOwner",
+      "outcome": "pass"
+    },
+    {
+      "test": "TestSplitRecoveryCapPreservesOutputForOperatorAttention",
+      "outcome": "pass"
+    },
+    {
+      "test": "TestSplitClaimResultLossKeepsTheExistingOwnerUntilExpiry",
+      "outcome": "pass"
+    },
+    {
+      "test": "TestSplitActivityWorkerProcess",
+      "outcome": "skip"
+    },
+    {
+      "test": "TestLiveSplitWorkerLossNeverRepeatsAgentInvocation/partial_provisioning",
+      "outcome": "pass"
+    },
+    {
+      "test": "TestLiveSplitWorkerLossNeverRepeatsAgentInvocation/uncertain_start",
+      "outcome": "pass"
+    },
+    {
+      "test": "TestLiveSplitWorkerLossNeverRepeatsAgentInvocation/retention",
+      "outcome": "pass"
+    },
+    {
+      "test": "TestLiveSplitWorkerLossNeverRepeatsAgentInvocation/cleanup",
+      "outcome": "pass"
+    },
+    {
+      "test": "TestLiveSplitWorkerLossNeverRepeatsAgentInvocation",
+      "outcome": "pass"
+    },
+    {
+      "test": "TestLiveSplitCancellationKeepsRetainedOutput",
+      "outcome": "pass"
+    },
+    {
+      "test": "TestLiveSplitLeaseWaitUsesARecordedTimer",
+      "outcome": "pass"
+    },
+    {
+      "test": "TestLiveSplitRecoveryActivitiesSurviveWorkerLoss/retain",
+      "outcome": "pass"
+    },
+    {
+      "test": "TestLiveSplitRecoveryActivitiesSurviveWorkerLoss/release",
+      "outcome": "pass"
+    },
+    {
+      "test": "TestLiveSplitRecoveryActivitiesSurviveWorkerLoss",
+      "outcome": "pass"
+    },
+    {
+      "test": "TestSplitWorkflowUsesDurableLeaseWaitAndRetriesOnlyCleanup",
+      "outcome": "pass"
+    },
+    {
+      "test": "TestSplitWorkflowBoundsRecoveryAfterRetentionFailure",
+      "outcome": "pass"
+    },
+    {
+      "test": "TestSplitWorkflowBoundsWaitingForAnUnavailableOwner",
+      "outcome": "pass"
+    },
+    {
+      "test": "TestSplitWorkflowRetriesClaimDeliveryWithoutRepeatingCoding",
+      "outcome": "pass"
+    },
+    {
+      "test": "TestWorkflowDoesNotRetryExecutionAndPreservesPrimaryFailure",
+      "outcome": "pass"
+    }
+  ],
+  "existing_go_suite": {
+    "command": "go test -race -json -count=1 -timeout=300s ./...",
+    "umask": "077",
+    "packages": [
+      {
+        "package": "github.com/ruohao1/circular/cmd/circular-codex-auth",
+        "outcome": "pass",
+        "elapsed_seconds": 1.034
+      },
+      {
+        "package": "github.com/ruohao1/circular/internal/agentproposals",
+        "outcome": "pass",
+        "elapsed_seconds": 1.04
+      },
+      {
+        "package": "github.com/ruohao1/circular/cmd/circular-worker-go",
+        "outcome": "pass",
+        "elapsed_seconds": 1.09
+      },
+      {
+        "package": "github.com/ruohao1/circular/internal/agenttools",
+        "outcome": "pass",
+        "elapsed_seconds": 1.227
+      },
+      {
+        "package": "github.com/ruohao1/circular/internal/codexauth",
+        "outcome": "fail",
+        "elapsed_seconds": 1.177
+      },
+      {
+        "package": "github.com/ruohao1/circular/internal/artifacts",
+        "outcome": "pass",
+        "elapsed_seconds": 1.34
+      },
+      {
+        "package": "github.com/ruohao1/circular/internal/completion",
+        "outcome": "pass",
+        "elapsed_seconds": 1.1179999999999999
+      },
+      {
+        "package": "github.com/ruohao1/circular/internal/delegations",
+        "outcome": "pass",
+        "elapsed_seconds": 1.068
+      },
+      {
+        "package": "github.com/ruohao1/circular/internal/fakeworkload",
+        "outcome": "pass",
+        "elapsed_seconds": 1.111
+      },
+      {
+        "package": "github.com/ruohao1/circular/internal/backends",
+        "outcome": "pass",
+        "elapsed_seconds": 2.044
+      },
+      {
+        "package": "github.com/ruohao1/circular/internal/codexlogin",
+        "outcome": "pass",
+        "elapsed_seconds": 1.873
+      },
+      {
+        "package": "github.com/ruohao1/circular/internal/agents",
+        "outcome": "pass",
+        "elapsed_seconds": 3.234
+      },
+      {
+        "package": "github.com/ruohao1/circular/internal/runstate",
+        "outcome": "pass",
+        "elapsed_seconds": 1.015
+      },
+      {
+        "package": "github.com/ruohao1/circular/internal/webhooks",
+        "outcome": "pass",
+        "elapsed_seconds": 1.037
+      },
+      {
+        "package": "github.com/ruohao1/circular/internal/worker",
+        "outcome": "pass",
+        "elapsed_seconds": 1.04
+      },
+      {
+        "package": "github.com/ruohao1/circular/internal/prreviews",
+        "outcome": "pass",
+        "elapsed_seconds": 1.1
+      },
+      {
+        "package": "github.com/ruohao1/circular/internal/execution",
+        "outcome": "pass",
+        "elapsed_seconds": 3.5789999999999997
+      },
+      {
+        "package": "github.com/ruohao1/circular/internal/controlmcp",
+        "outcome": "pass",
+        "elapsed_seconds": 7.821
+      },
+      {
+        "package": "github.com/ruohao1/circular/internal/git",
+        "outcome": "pass",
+        "elapsed_seconds": 10.62
+      },
+      {
+        "package": "github.com/ruohao1/circular/internal/runtimes",
+        "outcome": "pass",
+        "elapsed_seconds": 19.369
+      },
+      {
+        "package": "github.com/ruohao1/circular/internal/migrate",
+        "outcome": "pass",
+        "elapsed_seconds": 19.624
+      },
+      {
+        "package": "github.com/ruohao1/circular/internal/codexworkload",
+        "outcome": "pass",
+        "elapsed_seconds": 25.894
+      },
+      {
+        "package": "github.com/ruohao1/circular/internal/httpapi",
+        "outcome": "pass",
+        "elapsed_seconds": 42.624
+      },
+      {
+        "package": "github.com/ruohao1/circular/internal/integrations",
+        "outcome": "pass",
+        "elapsed_seconds": 103.443
+      },
+      {
+        "package": "github.com/ruohao1/circular/internal/postgres",
+        "outcome": "pass",
+        "elapsed_seconds": 182.797
+      }
+    ],
+    "tests_passed": 1489,
+    "tests_failed": [
+      "TestRejectsUnsafeCredentialPaths"
+    ],
+    "tests_skipped": [
+      "TestWorktreeProcessHelper",
+      "TestRealDockerReviewCanInspectPinnedGitWithoutSharedCache",
+      "TestRealContainerProducesRetainedOutputThroughGoResourceModules",
+      "TestDelegationDockerIsolation",
+      "TestRealDockerRunsExistingFakeProtocol",
+      "TestRealDockerTemporaryStorageCanBeReleasedAfterRecovery",
+      "TestRealDockerCredentialMountIsSeparateAndSurvivesRelease",
+      "TestRealDockerPreservesFastNonzeroExit",
+      "TestRealDockerRejectsImageVolumesBeforeExecution",
+      "TestRealDockerConcurrentRunsHaveIsolatedResources",
+      "TestRealDockerImmediateStopIsStable/0",
+      "TestRealDockerImmediateStopIsStable/1",
+      "TestRealDockerImmediateStopIsStable/2",
+      "TestRealDockerReviewSourceAndContextAreReadOnly",
+      "TestRealContainerOutputIsRetainedByGoCleanup",
+      "TestReviewExternalRealContainer",
+      "TestCompletionFullWorkerLifecycle",
+      "TestDelegationFullWorkerLifecycle",
+      "TestDelegationRecoveryProcessClaimBoundaries",
+      "TestRealWorkerPersistsSuccessAndFailureThroughHTTP/none",
+      "TestRealWorkerPersistsSuccessAndFailureThroughHTTP/before_events",
+      "TestRealWorkerPersistsSuccessAndFailureThroughHTTP/after_first_event",
+      "TestRealWorkerSignalsRetainOutputAndCrashRecoveryNeverReexecutes/terminated",
+      "TestRealWorkerSignalsRetainOutputAndCrashRecoveryNeverReexecutes/killed",
+      "TestRealWorkersKeepCancellationAndContainerAuthorityRunScoped"
+    ]
+  },
+  "credential_package_rerun": {
+    "command": "umask 022; go test -race -json -count=1 ./internal/codexauth",
+    "packages": [
+      {
+        "package": "github.com/ruohao1/circular/internal/codexauth",
+        "outcome": "pass",
+        "elapsed_seconds": 2.145
+      }
+    ],
+    "tests_passed": 12,
+    "tests_failed": [],
+    "tests_skipped": []
+  },
+  "baseline_failure_explanation": "TestRejectsUnsafeCredentialPaths creates a 0644 test file, but umask 077 makes it 0600. The existing fixture therefore does not create its intended unsafe file. The unchanged package passes under umask 022. The full root suite was not repeated after changing umask.",
+  "static_checks": [
+    "go -C experiments/temporal vet ./... passed"
+  ],
+  "process_loss_observations": [
+    {
+      "test": "TestLiveWorkerLossNeverRepeatsAgentInvocation/partial_provisioning",
+      "observation": "live_test.go:193: SIGKILL at partial_provisioning: Run=failed, backend starts=0, verified artifacts=2, Workspace=released"
+    },
+    {
+      "test": "TestLiveWorkerLossNeverRepeatsAgentInvocation/uncertain_start",
+      "observation": "live_test.go:193: SIGKILL at uncertain_start: Run=failed, backend starts=1, verified artifacts=2, Workspace=released"
+    },
+    {
+      "test": "TestLiveWorkerLossNeverRepeatsAgentInvocation/retention",
+      "observation": "live_test.go:193: SIGKILL at retention: Run=failed, backend starts=1, verified artifacts=2, Workspace=released"
+    },
+    {
+      "test": "TestLiveWorkerLossNeverRepeatsAgentInvocation/cleanup",
+      "observation": "live_test.go:193: SIGKILL at cleanup: Run=succeeded, backend starts=1, verified artifacts=2, Workspace=released"
+    },
+    {
+      "test": "TestLiveSplitWorkerLossNeverRepeatsAgentInvocation/partial_provisioning",
+      "observation": "split_live_test.go:73: SIGKILL at partial_provisioning: Run=failed, backend starts=0, verified artifacts=2, Workspace=released"
+    },
+    {
+      "test": "TestLiveSplitWorkerLossNeverRepeatsAgentInvocation/uncertain_start",
+      "observation": "split_live_test.go:73: SIGKILL at uncertain_start: Run=failed, backend starts=1, verified artifacts=2, Workspace=released"
+    },
+    {
+      "test": "TestLiveSplitWorkerLossNeverRepeatsAgentInvocation/retention",
+      "observation": "split_live_test.go:73: SIGKILL at retention: Run=failed, backend starts=1, verified artifacts=2, Workspace=released"
+    },
+    {
+      "test": "TestLiveSplitWorkerLossNeverRepeatsAgentInvocation/cleanup",
+      "observation": "split_live_test.go:73: SIGKILL at cleanup: Run=succeeded, backend starts=1, verified artifacts=2, Workspace=released"
+    },
+    {
+      "test": "TestLiveSplitRecoveryActivitiesSurviveWorkerLoss/retain",
+      "observation": "split_live_test.go:193: SIGKILL in new retain Activity: Run=failed, backend starts=1, verified artifacts=2, Workspace=released"
+    },
+    {
+      "test": "TestLiveSplitRecoveryActivitiesSurviveWorkerLoss/release",
+      "observation": "split_live_test.go:193: SIGKILL in new release Activity: Run=succeeded, backend starts=1, verified artifacts=2, Workspace=released"
+    }
+  ],
+  "history_exports": [
+    {
+      "file": "admission-history.json",
+      "events": 17,
+      "sha256": "5feaefe543e07e979bcf0d2d4f0140acee867cc85be43ae2856f03f1ed39ad43",
+      "raw_local_path": "/tmp/circular-temporal-evidence-20261026-split-final/admission-history.json",
+      "replayed": true
+    },
+    {
+      "file": "cancellation-history.json",
+      "events": 22,
+      "sha256": "360f001bf221c5683c12fbd07314a60b1770e7dbc06ca0c0fe245c4ad197a587",
+      "raw_local_path": "/tmp/circular-temporal-evidence-20261026-split-final/cancellation-history.json",
+      "replayed": true
+    },
+    {
+      "file": "cleanup-history.json",
+      "events": 19,
+      "sha256": "e2abb25b7ee33084d92ed84bad0d92231e78b192862f1eb4f83f88a9d4b7a997",
+      "raw_local_path": "/tmp/circular-temporal-evidence-20261026-split-final/cleanup-history.json",
+      "replayed": true
+    },
+    {
+      "file": "partial_provisioning-history.json",
+      "events": 19,
+      "sha256": "aef64b46620811a542cc27ee38d208ec391b842093c34ba03ef2525170ebd989",
+      "raw_local_path": "/tmp/circular-temporal-evidence-20261026-split-final/partial_provisioning-history.json",
+      "replayed": true
+    },
+    {
+      "file": "real-docker-history.json",
+      "events": 17,
+      "sha256": "d81ff6ec0ded1cbbafaba25609efbacad31735fba7292fe4fdb2003eb6db779b",
+      "raw_local_path": "/tmp/circular-temporal-evidence-20261026-split-final/real-docker-history.json",
+      "replayed": true
+    },
+    {
+      "file": "retention-history.json",
+      "events": 19,
+      "sha256": "113b04303923a9f0275ed38cf363ed94e05ad156473773e9c670132a18b084ba",
+      "raw_local_path": "/tmp/circular-temporal-evidence-20261026-split-final/retention-history.json",
+      "replayed": true
+    },
+    {
+      "file": "split-activity-release-history.json",
+      "events": 43,
+      "sha256": "fe9fa61385921f8e284d449e65cba7c9f1301675292ed566f5de847e3a8d03ad",
+      "raw_local_path": "/tmp/circular-temporal-evidence-20261026-split-final/split-activity-release-history.json",
+      "replayed": true
+    },
+    {
+      "file": "split-activity-retain-history.json",
+      "events": 37,
+      "sha256": "b5b581253ad559fbe4b227e272c2b2fa401d0da3ec678ea409564ca70be13764",
+      "raw_local_path": "/tmp/circular-temporal-evidence-20261026-split-final/split-activity-retain-history.json",
+      "replayed": true
+    },
+    {
+      "file": "split-cancellation-history.json",
+      "events": 22,
+      "sha256": "948c5eaa9023da94422be5ca08cfd5b810d5c74e939b349b8e123ba8a95ebe99",
+      "raw_local_path": "/tmp/circular-temporal-evidence-20261026-split-final/split-cancellation-history.json",
+      "replayed": true
+    },
+    {
+      "file": "split-cleanup-history.json",
+      "events": 31,
+      "sha256": "f88094064a7ba36d224997ede25ef324e6e2c6fdea563ad768ab24fb3013c444",
+      "raw_local_path": "/tmp/circular-temporal-evidence-20261026-split-final/split-cleanup-history.json",
+      "replayed": true
+    },
+    {
+      "file": "split-lease-timer-history.json",
+      "events": 34,
+      "sha256": "0142d6241a4c793973de5c7828da49ebd57eba607ad7ea0c4e3d9357b4f30a3e",
+      "raw_local_path": "/tmp/circular-temporal-evidence-20261026-split-final/split-lease-timer-history.json",
+      "replayed": true
+    },
+    {
+      "file": "split-partial_provisioning-history.json",
+      "events": 31,
+      "sha256": "8f6f90848eff4f83b9c04e03498073d8da05f6cb154d21cb02a009067006ca0a",
+      "raw_local_path": "/tmp/circular-temporal-evidence-20261026-split-final/split-partial_provisioning-history.json",
+      "replayed": true
+    },
+    {
+      "file": "split-retention-history.json",
+      "events": 31,
+      "sha256": "5c8e8fe743c84ce3d5e19c63f53ef5e5ff5bec1c5f09b7969d59ef8b2393d042",
+      "raw_local_path": "/tmp/circular-temporal-evidence-20261026-split-final/split-retention-history.json",
+      "replayed": true
+    },
+    {
+      "file": "split-uncertain_start-history.json",
+      "events": 31,
+      "sha256": "a01117bd0a95a7305c1da125b8655462d2b99b23c0872d9fe0ba91894355c272",
+      "raw_local_path": "/tmp/circular-temporal-evidence-20261026-split-final/split-uncertain_start-history.json",
+      "replayed": true
+    },
+    {
+      "file": "uncertain_start-history.json",
+      "events": 19,
+      "sha256": "da28923d6d9c6971c93c704d29e7b11f6dac04bb9ad86bbf60fb31c0b6e551fb",
+      "raw_local_path": "/tmp/circular-temporal-evidence-20261026-split-final/uncertain_start-history.json",
+      "replayed": true
+    }
+  ],
+  "limitations": [
+    "Initial execution still uses the complete Supervisor. The split concerns cleanup recovery only.",
+    "Fault cases use the existing Docker CLI simulator and real fakeworkload code; the separate success case uses an actual container.",
+    "Most crash cases advance their disposable Run lease timestamp before recovery. The timer case waits for a live three-second lease to expire.",
+    "Lost cleanup claim responses are modeled by discarding a committed return value; transport failure after claim commit was not injected.",
+    "Both worker subprocess helper tests intentionally skip outside subprocess mode.",
+    "Production operating cost, distributed-host/storage loss, version migration, network partitions, termination and provider workflows were not tested.",
+    "The broader real-Docker/browser suites were not enabled. The prior full root suite had one umask-sensitive credential fixture failure; the unchanged package passed its umask-022 rerun."
+  ],
+  "initial_evaluation": {
+    "command": "go -C experiments/temporal test -race -json -count=1 -timeout=180s ./...",
+    "services": [
+      "disposable PostgreSQL",
+      "persistent Temporal development server",
+      "real Docker fake-backend success",
+      "Docker CLI simulator fault cases"
+    ],
+    "packages": [
+      {
+        "package": "github.com/ruohao1/circular/experiments/temporal",
+        "outcome": "pass",
+        "elapsed_seconds": 61.38
+      }
+    ],
+    "tests_passed": 19,
+    "tests_failed": [],
+    "tests_skipped": [
+      "TestActivityWorkerProcess"
+    ]
+  },
+  "durable_timer_observations": [
+    "split_live_test.go:127: live lease: 1 persisted timer, 2 short claim Activities"
+  ],
+  "source_comparison": "source-comparison.json",
+  "review": {
+    "finding": "No blocking findings in cleanup split.",
+    "followup": "Added SDK retry and real PostgreSQL modeled-loss checks for cleanup claim responses.",
+    "independently_run": "Dependency-free race tests only; parent ran external-service checks."
+  },
+  "publication_verification": {
+    "checked_at": "2026-10-27",
+    "command": "go -C experiments/temporal test -race -json -count=1 -timeout=240s ./...",
+    "outcome": "pass",
+    "tests_passed": 37,
+    "worker_crash_cases": 10,
+    "replayed_histories": 15,
+    "helper_skips": [
+      "TestActivityWorkerProcess",
+      "TestSplitActivityWorkerProcess"
+    ],
+    "elapsed_seconds": 131.99,
+    "go_vet": "passed",
+    "go_mod_verify": "passed"
+  }
+}

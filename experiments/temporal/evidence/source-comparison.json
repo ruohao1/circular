@@ -1,0 +1,106 @@
+{
+  "method": "Physical source spans of named Go functions, measured with go/parser after gofmt. Includes shared-code calls and function bodies. Excludes comments before declarations, DTOs, tests, existing Execute/heartbeat and production implementations reused by both paths.",
+  "original_functions": [
+    {
+      "file": "experiments/temporal/activities.go",
+      "name": "Activities.Reconcile",
+      "First": 50,
+      "Last": 98,
+      "Lines": 49,
+      "Loops": 1
+    },
+    {
+      "file": "experiments/temporal/workflow.go",
+      "name": "RunWorkflow",
+      "First": 12,
+      "Last": 32,
+      "Lines": 21,
+      "Loops": 0
+    }
+  ],
+  "split_functions": [
+    {
+      "file": "experiments/temporal/split_activities.go",
+      "name": "cleanupState.done",
+      "First": 26,
+      "Last": 26,
+      "Lines": 1,
+      "Loops": 0
+    },
+    {
+      "file": "experiments/temporal/split_activities.go",
+      "name": "SplitActivities.state",
+      "First": 27,
+      "Last": 32,
+      "Lines": 6,
+      "Loops": 0
+    },
+    {
+      "file": "experiments/temporal/split_activities.go",
+      "name": "SplitActivities.ClaimCleanup",
+      "First": 35,
+      "Last": 75,
+      "Lines": 41,
+      "Loops": 0
+    },
+    {
+      "file": "experiments/temporal/split_activities.go",
+      "name": "SplitActivities.Retain",
+      "First": 78,
+      "Last": 122,
+      "Lines": 45,
+      "Loops": 0
+    },
+    {
+      "file": "experiments/temporal/split_activities.go",
+      "name": "SplitActivities.Release",
+      "First": 124,
+      "Last": 131,
+      "Lines": 8,
+      "Loops": 0
+    },
+    {
+      "file": "experiments/temporal/split_activities.go",
+      "name": "SplitActivities.useClaim",
+      "First": 134,
+      "Last": 188,
+      "Lines": 55,
+      "Loops": 1
+    },
+    {
+      "file": "experiments/temporal/split_workflow.go",
+      "name": "SplitWorkflow",
+      "First": 23,
+      "Last": 39,
+      "Lines": 17,
+      "Loops": 0
+    },
+    {
+      "file": "experiments/temporal/split_workflow.go",
+      "name": "CleanupWorkflow",
+      "First": 42,
+      "Last": 78,
+      "Lines": 37,
+      "Loops": 1
+    }
+  ],
+  "original_function_lines": 70,
+  "split_function_lines": 210,
+  "production_coordination_lines_removed": 0,
+  "production_code_changes": false,
+  "source_sha256": {
+    "experiments/temporal/activities.go": "942eea065246cb6926246843031560bbfabc6297bf58596cdb41b34d2fef7950",
+    "experiments/temporal/split_activities.go": "7f65f282f15f09089cc5d198ea9eed84d01cdcb3a5215c418f9adcaa256a170f",
+    "experiments/temporal/split_workflow.go": "5dac27a22f814a56a9e99bb12563ec37fa4411dacd123111c2661b15767c1f0f",
+    "experiments/temporal/workflow.go": "a6e9bd29bb3ff0930b0836443c2756f4723ffd9ee41979e1962de72c82f7c6fc"
+  },
+  "retained_responsibilities": [
+    "PostgreSQL Queue.Acquire and expired-owner recovery",
+    "Run/Work-session ownership and invocation fences",
+    "Database lease heartbeats during external operations",
+    "Immutable artifact publication and verification",
+    "Exact container/worktree release and cleanup recovery cap",
+    "Independent recovery for Workflow termination or exhausted cleanup"
+  ],
+  "additional_function_lines": 140
+}
