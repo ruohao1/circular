@@ -44,6 +44,7 @@ func seed(t *testing.T, pool *pgxpool.Pool, count int) []uuid.UUID {
 		if err != nil {
 			t.Fatal(err)
 		}
+		testsupport.ApproveTask(t, pool, task)
 		launched, err := workTx(t, pool, func(tx pgx.Tx) (postgres.RunLaunchResult, error) {
 			out, err := postgres.CreateRun(ctx, tx, postgres.RunLaunchInput{TaskID: task, AgentID: agent})
 			if err == nil {

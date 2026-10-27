@@ -15,6 +15,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/ruohao1/circular/internal/completion"
 	"github.com/ruohao1/circular/internal/postgres"
+	"github.com/ruohao1/circular/internal/testsupport"
 )
 
 func completionView(t *testing.T, f planningFixture, id uuid.UUID) completion.View {
@@ -283,6 +284,7 @@ func TestCompletionReportAtSerializedLimit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	testsupport.ApproveTask(t, f.p, id)
 	claim := externalClaim(id)
 	claim.ExpectedRevision = 2
 	if _, err := claimWork(t, f, claim); err != nil {

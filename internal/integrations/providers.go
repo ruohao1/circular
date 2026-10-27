@@ -26,7 +26,11 @@ type account struct {
 }
 
 func (s *Service) authorizeURL(provider, state, challenge string) string {
-	values := url.Values{"client_id": {s.app(provider).ClientID}, "redirect_uri": {s.CallbackURL(provider)}, "state": {state}, "code_challenge": {challenge}, "code_challenge_method": {"S256"}}
+	return s.authorizeURLForCallback(provider, state, challenge, s.CallbackURL(provider))
+}
+
+func (s *Service) authorizeURLForCallback(provider, state, challenge, callback string) string {
+	values := url.Values{"client_id": {s.app(provider).ClientID}, "redirect_uri": {callback}, "state": {state}, "code_challenge": {challenge}, "code_challenge_method": {"S256"}}
 	if provider == "github" {
 		return s.config.GitHubURL + "/login/oauth/authorize?" + values.Encode()
 	}
@@ -37,6 +41,10 @@ func (s *Service) authorizeURL(provider, state, challenge string) string {
 }
 
 func (s *Service) token(ctx context.Context, provider, code, verifier, refresh string) (tokenSet, error) {
+	return s.tokenForCallback(ctx, provider, code, verifier, refresh, s.CallbackURL(provider))
+}
+
+func (s *Service) tokenForCallback(ctx context.Context, provider, code, verifier, refresh, callback string) (tokenSet, error) {
 	app := s.app(provider)
 	values := url.Values{"client_id": {app.ClientID}}
 	if app.ClientSecret != "" {
@@ -48,7 +56,7 @@ func (s *Service) token(ctx context.Context, provider, code, verifier, refresh s
 	} else {
 		values.Set("grant_type", "authorization_code")
 		values.Set("code", code)
-		values.Set("redirect_uri", s.CallbackURL(provider))
+		values.Set("redirect_uri", callback)
 		values.Set("code_verifier", verifier)
 	}
 	endpoint := s.config.LinearAPIURL + "/oauth/token"

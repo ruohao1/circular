@@ -64,7 +64,7 @@ func (p *ProviderFixture) serveReview(w http.ResponseWriter, r *http.Request) bo
 			w.WriteHeader(403)
 			return true
 		}
-		fixtureJSON(w, map[string]any{"id": 7, "login": "fixture", "html_url": "https://github.com/fixture"})
+		fixtureJSON(w, map[string]any{"id": 7, "login": "fixture", "type": "User", "html_url": "https://github.com/fixture"})
 	case "/repositories/" + v.GitHubRepositoryID:
 		fixtureJSON(w, map[string]any{"id": json.Number(v.GitHubRepositoryID), "full_name": v.RepositoryName, "default_branch": v.BaseRef, "private": true, "clone_url": "https://github.com/" + v.RepositoryName + ".git", "html_url": "https://github.com/" + v.RepositoryName})
 	case "/user/installations":

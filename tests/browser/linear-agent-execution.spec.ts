@@ -1,3 +1,4 @@
+import { approveProposal } from "./fixtures/approval";
 import { expect, test } from "@playwright/test";
 import { createHmac, randomUUID } from "node:crypto";
 test.skip(
@@ -65,24 +66,30 @@ test("signed Linear requests execute frozen inputs, publish under app identities
       .poll(async () => (await incoming(session))?.status)
       .toBe("awaiting_approval");
     const waiting = await incoming(session);
-    expect(waiting.reason).toContain("completion policy");
-    const tasks = await (
-      await req.get(`${base}/tasks?project_id=${project.id}`)
+    expect(waiting.reason).toContain("/proposals/");
+    const proposals = await (
+      await req.get(`${base}/projects/${project.id}/task-proposals`)
     ).json();
-    const task = tasks.find(
-      (t) => t.external_refs?.linear?.issue_id === waiting.issue_id,
+    const proposal = proposals.find(
+      (p) =>
+        p.source.linear?.issue_id === waiting.issue_id &&
+        p.status === "pending",
     );
-    expect(task).toBeTruthy();
-    const view = await (
-      await req.get(`${base}/tasks/${task.id}/completion`)
-    ).json();
-    const saved = await req.put(`${base}/tasks/${task.id}/completion-policy`, {
+    expect(proposal).toBeTruthy();
+    const revised = await req.patch(`${base}/task-proposals/${proposal.id}`, {
       data: {
-        expected_revision: view.revision,
-        policy: { mode, requirements: [] },
+        expected_revision: proposal.revision,
+        expected_task_revision: proposal.expected_task_revision,
+        draft: {
+          ...proposal.draft,
+          purpose: "Verify Linear execution",
+          acceptance_criteria: ["The request completes with retained evidence"],
+          completion_policy: { mode, requirements: [] },
+        },
       },
     });
-    expect(saved.ok(), await saved.text()).toBeTruthy();
+    expect(revised.ok(), await revised.text()).toBeTruthy();
+    const task = await approveProposal(req, await revised.json());
     const ready = await detail(waiting.id);
     await post(`${base}/external-requests/${waiting.id}/start`, {
       expected_input_fingerprint: ready.input_fingerprint,

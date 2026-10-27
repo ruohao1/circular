@@ -6,6 +6,7 @@ import (
 	"errors"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/ruohao1/circular/internal/completion"
 	"github.com/ruohao1/circular/internal/delegations"
 	"github.com/ruohao1/circular/internal/runstate"
 	"time"
@@ -36,7 +37,7 @@ func (s *Resources) SuspendForDelegation(ctx context.Context, parentID uuid.UUID
 		return record, err
 	}
 	var fingerprint string
-	err = tx.QueryRow(ctx, `SELECT id,parent_run_id,target_agent_id,child_task_id,child_run_id,request_key,status,input_fingerprint FROM delegations WHERE parent_run_id=$1 AND request_key IS NOT NULL`, parentID).Scan(&record.ID, &record.ParentRunID, &record.TargetAgentID, &record.ChildTaskID, &record.ChildRunID, &record.RequestKey, &record.Status, &fingerprint)
+	err = tx.QueryRow(ctx, `SELECT id,parent_run_id,target_agent_id,child_task_id,child_run_id,request_key,status,input_fingerprint,proposal_id FROM delegations WHERE parent_run_id=$1 AND request_key IS NOT NULL`, parentID).Scan(&record.ID, &record.ParentRunID, &record.TargetAgentID, &record.ChildTaskID, &record.ChildRunID, &record.RequestKey, &record.Status, &fingerprint, &record.ProposalID)
 	if err == nil {
 		if request.RequestKey != record.RequestKey || request.Fingerprint() != fingerprint {
 			return record, ErrDelegationConflict
@@ -143,32 +144,20 @@ func (s *Resources) SuspendForDelegation(ctx context.Context, parentID uuid.UUID
 	if workspace == nil || workspace.Status != "ready" || workspace.ContainerID == nil {
 		return reject()
 	}
-	record = delegations.Record{ID: uuid.New(), ParentRunID: parentID, TargetAgentID: request.AgentID, RequestKey: request.RequestKey, Status: "waiting"}
-	childTask := uuid.New()
-	if _, err = tx.Exec(ctx, `INSERT INTO tasks(id,project_id,repository_id,title,description,status,external_refs,parent_task_id,completion_policy) VALUES($1,$2,$3,$4,$5,'open','{}',$6,'{"mode":"direct_completion","requirements":[{"key":"handoff","description":"Describe the child result and evidence the parent needs to continue"}]}')`, childTask, project, input.RepositoryID, request.Objective.Title, request.Objective.Description, task); err != nil {
-		return record, err
-	}
-	child, err := CreateRun(ctx, tx, RunLaunchInput{TaskID: childTask, AgentID: request.AgentID, RequestKey: record.ID.String(), ExternalRefs: json.RawMessage(`{}`)})
+	record = delegations.Record{ID: uuid.New(), ParentRunID: parentID, TargetAgentID: request.AgentID, RequestKey: request.RequestKey, Status: "awaiting_approval"}
+	proposal, err := CreateTaskProposal(ctx, tx, TaskProposalInput{ProjectID: project, RequestKey: "delegation:" + parentID.String(), Proposer: "native delegation", Draft: ProposalDraft{Title: request.Objective.Title, Purpose: "Assist the parent Task: " + input.TaskTitle, Description: request.Objective.Description, AcceptanceCriteria: []string{"Describe the child result and evidence the parent needs to continue"}, RepositoryID: &input.RepositoryID, ParentTaskID: &task, PreferredAgentID: &request.AgentID, CompletionPolicy: completion.Policy{Mode: "direct_completion", Requirements: []completion.Requirement{{Key: "handoff", Description: "Describe the child result and evidence the parent needs to continue"}}}}}, nil)
 	if err != nil {
 		return record, err
 	}
-	if _, err = tx.Exec(ctx, `UPDATE runs SET parent_run_id=$2 WHERE id=$1`, child.RunID, parentID); err != nil {
-		return record, err
-	}
-	record.ChildTaskID, record.ChildRunID = &childTask, &child.RunID
-	frozen := ProvisioningContext{Invocation: 1, RunID: child.RunID, WorkspaceID: WorkspaceID(child.RunID), RepositoryID: input.RepositoryID, Kind: runstate.Coding, CloneURL: input.CloneURL, BaseRef: checkpoint.SourceCommit, Backend: backend, TaskTitle: request.Objective.Title, TaskDescription: request.Objective.Description, Instructions: instructions, BackendConfig: config, SourceRunID: parentID, SourceCheckpoint: &checkpoint}
-	if err = tx.QueryRow(ctx, `SELECT completion_contract FROM tasks WHERE id=$1`, childTask).Scan(&frozen.CompletionContract); err != nil {
-		return record, err
-	}
-	if err = SaveInvocationInput(ctx, tx, frozen); err != nil {
-		return record, err
-	}
+	record.ProposalID = &proposal.ID
+	frozen := ProvisioningContext{Invocation: 1, RepositoryID: input.RepositoryID, Kind: runstate.Coding, CloneURL: input.CloneURL, BaseRef: checkpoint.SourceCommit, Backend: backend, TaskTitle: request.Objective.Title, TaskDescription: request.Objective.Description, Instructions: instructions, BackendConfig: config, SourceRunID: parentID, SourceCheckpoint: &checkpoint}
+	intent, _ := json.Marshal(frozen)
 	objective, _ := json.Marshal(request.Objective)
 	saved, _ := json.Marshal(checkpoint)
-	if _, err = tx.Exec(ctx, `INSERT INTO delegations(id,parent_run_id,target_agent_id,child_task_id,child_run_id,objective,depth,status,request_key,input_fingerprint,objective_json,checkpoint) VALUES($1,$2,$3,$4,$5,$6,1,'waiting',$7,$8,$9,$10)`, record.ID, parentID, request.AgentID, childTask, child.RunID, request.Objective.Description, request.RequestKey, request.Fingerprint(), objective, saved); err != nil {
+	if _, err = tx.Exec(ctx, `INSERT INTO delegations(id,parent_run_id,target_agent_id,objective,depth,status,request_key,input_fingerprint,objective_json,checkpoint,proposal_id,execution_intent) VALUES($1,$2,$3,$4,1,'awaiting_approval',$5,$6,$7,$8,$9,$10)`, record.ID, parentID, request.AgentID, request.Objective.Description, request.RequestKey, request.Fingerprint(), objective, saved, proposal.ID, intent); err != nil {
 		return record, err
 	}
-	if err = r.event("delegation.created", "worker", map[string]any{"delegation_id": record.ID, "child_run_id": child.RunID, "child_task_id": childTask, "target_agent_id": request.AgentID}); err != nil {
+	if err = r.event("delegation.awaiting_approval", "worker", map[string]any{"delegation_id": record.ID, "proposal_id": proposal.ID, "target_agent_id": request.AgentID}); err != nil {
 		return record, err
 	}
 	if _, err = tx.Exec(ctx, `UPDATE workspaces SET container_id=NULL WHERE run_id=$1`, parentID); err != nil {
@@ -181,7 +170,7 @@ func (s *Resources) SuspendForDelegation(ctx context.Context, parentID uuid.UUID
 	if err = r.executionTransition(runstate.WaitingForInput, nil); err != nil {
 		return record, err
 	}
-	if err = r.event("run.suspended", "worker", map[string]any{"reason": "delegation", "delegation_id": record.ID, "child_run_id": child.RunID}); err != nil {
+	if err = r.event("run.suspended", "worker", map[string]any{"reason": "delegation", "delegation_id": record.ID, "proposal_id": proposal.ID}); err != nil {
 		return record, err
 	}
 	if _, err = tx.Exec(ctx, `UPDATE runs SET worker_id=NULL,lease_expires_at=NULL WHERE id=$1`, parentID); err != nil {

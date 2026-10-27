@@ -47,6 +47,7 @@ func TestDelegationCheckpointRoundTrip(t *testing.T) {
 	if err = tx.QueryRow(t.Context(), `SELECT agent_id FROM runs WHERE id=$1`, snap.SourceRunID).Scan(&agent); err != nil {
 		t.Fatal(err)
 	}
+	testsupport.ApproveTaskTx(t, tx, snap.TaskID)
 	run, err := postgres.CreateRun(t.Context(), tx, postgres.RunLaunchInput{TaskID: snap.TaskID, AgentID: agent})
 	if err != nil {
 		t.Fatal(err)

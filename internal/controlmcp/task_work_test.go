@@ -33,6 +33,7 @@ func taskWorkMCP(t *testing.T) (*pgxpool.Pool, controlmcp.Config, string, string
 			t.Fatal(err)
 		}
 	}
+	testsupport.ApproveTask(t, pool, uuid.MustParse(task))
 	handler, err := httpapi.New(pool, httpapi.Config{ArtifactRoot: t.TempDir()})
 	if err != nil {
 		t.Fatal(err)

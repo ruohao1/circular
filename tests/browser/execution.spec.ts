@@ -1,3 +1,4 @@
+import { createResource } from "./fixtures/approval";
 import { expect, test } from "@playwright/test";
 import { execFileSync } from "node:child_process";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
@@ -34,11 +35,8 @@ for (const scenario of ["success", "cancel", "failure"] as const) {
     // A bundle is readable across host/container UIDs without disabling Git's
     // ownership checks for a host-owned .git directory.
     if (compose) git("bundle", "create", "fixture.bundle", "--all");
-    const post = async (path: string, data: object) => {
-      const response = await request.post(`${base}/${path}`, { data });
-      expect(response.status()).toBe(201);
-      return response.json();
-    };
+    const post = (path: string, data: object) =>
+      createResource(request, path, data);
     try {
       const project = await post("projects", {
         name: `${process.env.CIRCULAR_E2E_PREFIX}${scenario}`,

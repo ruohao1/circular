@@ -56,6 +56,7 @@ function WorkspaceNavigation({ onNavigate }: { onNavigate?(): void }) {
     select: (state) => state.location.pathname,
   });
   const items = [
+ {to:"/proposals" as const,label:"Proposals",icon:ListTodo,active:pathname.startsWith("/proposals")},
     {
       to: "/" as const,
       label: "Overview",

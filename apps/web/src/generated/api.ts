@@ -57,6 +57,70 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/approval-auth/github/callback": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["completeApprovalLogin"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/approval-auth/github/start": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["startApprovalLogin"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/approval-auth/logout": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["endApprovalSession"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/approval-auth/session": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["getApprovalSession"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/backends/codex/models": {
         parameters: {
             query?: never;
@@ -777,6 +841,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/projects/{project_id}/task-proposals": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["listTaskProposals"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/projects/{project_id}/task-timeline": {
         parameters: {
             query?: never;
@@ -1073,6 +1153,54 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/task-proposals": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["createTaskProposal"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/task-proposals/{proposal_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["getTaskProposal"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch: operations["reviseTaskProposal"];
+        trace?: never;
+    };
+    "/api/v1/task-proposals/{proposal_id}/decision": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["decideTaskProposal"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/tasks": {
         parameters: {
             query?: never;
@@ -1106,6 +1234,22 @@ export interface paths {
         options?: never;
         head?: never;
         patch: operations["updateTaskPlanning"];
+        trace?: never;
+    };
+    "/api/v1/tasks/{task_id}/approval": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["getTaskApproval"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
         trace?: never;
     };
     "/api/v1/tasks/{task_id}/completion": {
@@ -1456,6 +1600,19 @@ export interface components {
                 [key: string]: unknown;
             };
         };
+        ApprovalLogin: {
+            return_path: string;
+        };
+        ApprovalSession: {
+            configured: boolean;
+            csrf_token: string;
+            user: {
+                /** Format: date-time */
+                expires_at: string;
+                login: string;
+                user_id: string;
+            } | null;
+        };
         /** ArtifactRead */
         ArtifactRead: {
             /**
@@ -1690,9 +1847,10 @@ export interface components {
             id: string;
             /** Format: uuid */
             parent_run_id: string;
+            proposal_id: string | null;
             request_key: string;
             /** @enum {string} */
-            status: "waiting" | "continuing" | "completed" | "cancelled" | "rejected";
+            status: "awaiting_approval" | "waiting" | "continuing" | "completed" | "cancelled" | "rejected";
             /** Format: uuid */
             target_agent_id: string;
         };
@@ -2467,6 +2625,10 @@ export interface components {
          * @enum {string}
          */
         RunStatus: "queued" | "provisioning" | "running" | "waiting_for_approval" | "waiting_for_input" | "finalizing" | "succeeded" | "failed" | "cancelled";
+        TaskApproval: {
+            approved: boolean;
+            proposal: components["schemas"]["TaskProposalCreate"];
+        };
         /** TaskCreate */
         TaskCreate: {
             /**
@@ -2650,6 +2812,84 @@ export interface components {
         };
         /** @enum {string} */
         TaskPriority: "none" | "low" | "normal" | "high" | "urgent";
+        TaskProposal: {
+            /** Format: date-time */
+            created_at: string;
+            decision: components["schemas"]["TaskProposalDecision"] | null;
+            draft: components["schemas"]["TaskProposalDraft"];
+            expected_task_revision: number;
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            project_id: string;
+            proposer: string;
+            review_url: string;
+            revision: number;
+            source: {
+                [key: string]: unknown;
+            };
+            /** @enum {string} */
+            status: "pending" | "approved" | "rejected";
+            target_task_id: string | null;
+            task_id: string | null;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        TaskProposalCreate: {
+            draft: components["schemas"]["TaskProposalDraft"];
+            expected_task_revision?: number;
+            /** Format: uuid */
+            project_id: string;
+            proposer?: string;
+            request_key: string;
+            target_task_id?: string | null;
+        };
+        TaskProposalDecision: {
+            approver_id: string;
+            approver_login: string;
+            /** Format: date-time */
+            created_at: string;
+            /** @enum {string} */
+            decision: "approved" | "rejected";
+            reason: string;
+            revision: number;
+        };
+        TaskProposalDecisionInput: {
+            /** @enum {string} */
+            decision: "approved" | "rejected";
+            expected_revision: number;
+            reason?: string;
+        };
+        TaskProposalDraft: {
+            acceptance_criteria: string[];
+            completion_policy: components["schemas"]["CompletionPolicy"] | {
+                /** @constant */
+                mode: "unresolved";
+                requirements: components["schemas"]["CompletionRequirement"][];
+            };
+            description: string;
+            open_questions: string[];
+            parent_task_id: string | null;
+            planned_finish_date: string | null;
+            planned_start_date: string | null;
+            preferred_agent_id: string | null;
+            prerequisite_task_ids: string[];
+            /** @enum {string} */
+            priority: "none" | "low" | "normal" | "high" | "urgent";
+            purpose: string;
+            repository_id: string | null;
+            sources: {
+                label: string;
+                /** Format: uri */
+                url: string;
+            }[];
+            title: string;
+        };
+        TaskProposalRevise: {
+            draft: components["schemas"]["TaskProposalDraft"];
+            expected_revision: number;
+            expected_task_revision?: number;
+        };
         /** TaskRead */
         TaskRead: {
             completion_contract?: components["schemas"]["CompletionContract"] | null;
@@ -3093,6 +3333,221 @@ export interface operations {
             };
             /** @description Invalid or out-of-scope targets */
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    completeApprovalLogin: {
+        parameters: {
+            query?: {
+                code?: string;
+                state?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Return to the private review page */
+            303: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    startApprovalLogin: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ApprovalLogin"];
+            };
+        };
+        responses: {
+            /** @description Result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        url: string;
+                    };
+                };
+            };
+            /** @description Separate browser sign-in required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Origin or CSRF check failed */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Record not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Revision or policy conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Invalid proposal */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Approval sign-in is not configured */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    endApprovalSession: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        signed_out: boolean;
+                    };
+                };
+            };
+            /** @description Separate browser sign-in required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Origin or CSRF check failed */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Record not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Revision or policy conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Invalid proposal */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Approval sign-in is not configured */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    getApprovalSession: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApprovalSession"];
+                };
+            };
+            /** @description Separate browser sign-in required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Origin or CSRF check failed */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Record not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Revision or policy conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Invalid proposal */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Approval sign-in is not configured */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -3975,6 +4430,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["TaskRead"];
+                };
+            };
+            /** @description Scope needs user approval; no Task scope was changed */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TaskProposal"];
                 };
             };
             /** @description Request origin is not allowed */
@@ -5546,6 +6010,15 @@ export interface operations {
                     "application/json": components["schemas"]["TaskRead"];
                 };
             };
+            /** @description Scope needs user approval; no Task scope was changed */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TaskProposal"];
+                };
+            };
             /** @description Access denied */
             403: {
                 headers: {
@@ -6240,6 +6713,70 @@ export interface operations {
             };
             /** @description Invalid input */
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    listTaskProposals: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TaskProposal"][];
+                };
+            };
+            /** @description Separate browser sign-in required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Origin or CSRF check failed */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Record not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Revision or policy conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Invalid proposal */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Approval sign-in is not configured */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -7333,6 +7870,272 @@ export interface operations {
             };
         };
     };
+    createTaskProposal: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TaskProposalCreate"];
+            };
+        };
+        responses: {
+            /** @description Result */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TaskProposal"];
+                };
+            };
+            /** @description Separate browser sign-in required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Origin or CSRF check failed */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Record not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Revision or policy conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Invalid proposal */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Approval sign-in is not configured */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    getTaskProposal: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                proposal_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TaskProposal"];
+                };
+            };
+            /** @description Separate browser sign-in required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Origin or CSRF check failed */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Record not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Revision or policy conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Invalid proposal */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Approval sign-in is not configured */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    reviseTaskProposal: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                proposal_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TaskProposalRevise"];
+            };
+        };
+        responses: {
+            /** @description Result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TaskProposal"];
+                };
+            };
+            /** @description Separate browser sign-in required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Origin or CSRF check failed */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Record not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Revision or policy conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Invalid proposal */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Approval sign-in is not configured */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    decideTaskProposal: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                proposal_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TaskProposalDecisionInput"];
+            };
+        };
+        responses: {
+            /** @description Result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TaskProposal"];
+                };
+            };
+            /** @description Separate browser sign-in required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Origin or CSRF check failed */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Record not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Revision or policy conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Invalid proposal */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Approval sign-in is not configured */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
     list_tasks_api_v1_tasks_get: {
         parameters: {
             query?: {
@@ -7384,6 +8187,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["TaskRead"];
+                };
+            };
+            /** @description Scope needs user approval; no Task scope was changed */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TaskProposal"];
                 };
             };
             /** @description Validation Error */
@@ -7497,6 +8309,15 @@ export interface operations {
                     "application/json": components["schemas"]["TaskPlanningMutation"];
                 };
             };
+            /** @description Scope needs user approval; no Task scope was changed */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TaskProposal"];
+                };
+            };
             /** @description Scoped resource not found */
             404: {
                 headers: {
@@ -7520,6 +8341,70 @@ export interface operations {
             };
             /** @description Invalid input */
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    getTaskApproval: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                task_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TaskApproval"];
+                };
+            };
+            /** @description Separate browser sign-in required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Origin or CSRF check failed */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Record not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Revision or policy conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Invalid proposal */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Approval sign-in is not configured */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -7599,6 +8484,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["CompletionView"];
+                };
+            };
+            /** @description Scope needs user approval; no Task scope was changed */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TaskProposal"];
                 };
             };
             /** @description Resource not found */

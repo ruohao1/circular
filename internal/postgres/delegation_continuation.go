@@ -22,7 +22,7 @@ func settleDelegation(ctx context.Context, tx pgx.Tx, parent uuid.UUID, status r
 	if status == runstate.Cancelled {
 		lifecycle = "cancelled"
 	}
-	_, err := tx.Exec(ctx, `UPDATE delegations SET status=$2,updated_at=CURRENT_TIMESTAMP WHERE parent_run_id=$1 AND request_key IS NOT NULL AND status IN ('waiting','continuing')`, parent, lifecycle)
+	_, err := tx.Exec(ctx, `UPDATE delegations SET status=$2,updated_at=CURRENT_TIMESTAMP WHERE parent_run_id=$1 AND request_key IS NOT NULL AND status IN ('awaiting_approval','waiting','continuing')`, parent, lifecycle)
 	return err
 }
 
@@ -55,18 +55,24 @@ func claimOrphanedDelegation(ctx context.Context, tx pgx.Tx, owner string, now t
 func claimContinuation(ctx context.Context, tx pgx.Tx, owner string, now time.Time) (*worker.Claim, error) {
 	var id, delegation uuid.UUID
 	var result delegations.Result
-	err := tx.QueryRow(ctx, `SELECT p.id,d.id,c.id,c.status,COALESCE(c.error,'')
+	var stored []byte
+	err := tx.QueryRow(ctx, `SELECT p.id,d.id,COALESCE(c.id,'00000000-0000-0000-0000-000000000000'::uuid),COALESCE(c.status,''),COALESCE(c.error,''),d.result
 		FROM runs p JOIN delegations d ON d.parent_run_id=p.id AND d.request_key IS NOT NULL
-		JOIN runs c ON c.id=d.child_run_id LEFT JOIN workspaces w ON w.run_id=c.id
+		LEFT JOIN runs c ON c.id=d.child_run_id LEFT JOIN workspaces w ON w.run_id=c.id
 		WHERE p.status='waiting_for_input' AND p.invocation=1 AND p.worker_id IS NULL AND d.status='waiting'
 		AND EXISTS(SELECT 1 FROM work_sessions s WHERE s.run_id=p.id AND s.task_id=p.task_id AND s.released_at IS NULL)
-		AND c.status IN ('succeeded','failed','cancelled') AND c.worker_id IS NULL AND (w.id IS NULL OR w.status='released')
-		ORDER BY p.created_at,p.id FOR UPDATE OF p SKIP LOCKED LIMIT 1`).Scan(&id, &delegation, &result.ChildRunID, &result.Status, &result.Error)
+		AND ((c.status IN ('succeeded','failed','cancelled') AND c.worker_id IS NULL AND (w.id IS NULL OR w.status='released')) OR (d.child_run_id IS NULL AND d.result->>'outcome' IN ('approval_rejected','admission_rejected')))
+		ORDER BY p.created_at,p.id FOR UPDATE OF p SKIP LOCKED LIMIT 1`).Scan(&id, &delegation, &result.ChildRunID, &result.Status, &result.Error, &stored)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
 	}
 	if err != nil {
 		return nil, err
+	}
+	if result.ChildRunID == uuid.Nil {
+		if json.Unmarshal(stored, &result) != nil || result.Validate() != nil {
+			return nil, ErrResourceConflict
+		}
 	}
 	rows, err := tx.Query(ctx, `SELECT kind,uri,metadata->>'sha256',(metadata->>'size_bytes')::bigint FROM artifacts WHERE run_id=$1 AND kind IN ('diff','delegation_report')`, result.ChildRunID)
 	if err != nil {
@@ -121,11 +127,11 @@ func (r *RunResources) ContinuationContext() (ProvisioningContext, delegations.C
 		return input, checkpoint, result, ErrResourceState
 	}
 	var source, outcome []byte
-	var child uuid.UUID
+	var child *uuid.UUID
 	if err := r.tx.QueryRow(r.ctx, `SELECT checkpoint,result,child_run_id FROM delegations WHERE parent_run_id=$1 AND request_key IS NOT NULL AND status='continuing'`, r.id).Scan(&source, &outcome, &child); err != nil {
 		return input, checkpoint, result, err
 	}
-	if json.Unmarshal(source, &checkpoint) != nil || json.Unmarshal(outcome, &result) != nil || checkpoint.Validate(r.id) != nil || result.Validate() != nil || result.ChildRunID != child {
+	if json.Unmarshal(source, &checkpoint) != nil || json.Unmarshal(outcome, &result) != nil || checkpoint.Validate(r.id) != nil || result.Validate() != nil || (child == nil && result.ChildRunID != uuid.Nil || child != nil && result.ChildRunID != *child) {
 		return input, checkpoint, result, ErrResourceConflict
 	}
 	input, err := readInvocation(r.ctx, r.tx, r.id, 1)

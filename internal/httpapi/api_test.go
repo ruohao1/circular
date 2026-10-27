@@ -19,6 +19,7 @@ import (
 	"github.com/ruohao1/circular/contracts"
 	"github.com/ruohao1/circular/internal/artifacts"
 	"github.com/ruohao1/circular/internal/httpapi"
+	"github.com/ruohao1/circular/internal/postgres"
 	"github.com/ruohao1/circular/internal/testsupport"
 )
 
@@ -57,7 +58,7 @@ func (f fixture) request(t *testing.T, method, path, body string, status int) js
 	if err != nil {
 		t.Fatal(err)
 	}
-	if response.StatusCode != status {
+	if response.StatusCode != status && !(status == 0 && (response.StatusCode == 200 || response.StatusCode == 202)) {
 		t.Fatalf("%s %s: %d, expected %d: %s", method, path, response.StatusCode, status, data)
 	}
 	return data
@@ -74,6 +75,29 @@ func decode(t *testing.T, raw []byte) map[string]any {
 
 func (f fixture) create(t *testing.T, kind string, body map[string]any) map[string]any {
 	t.Helper()
+	// Resource fixtures are seeded independently; proposal tests exercise creation.
+	if kind == "tasks" {
+		id := uuid.New()
+		value := func(key, fallback string) any {
+			if v, ok := body[key]; ok {
+				return v
+			}
+			return fallback
+		}
+		refs := body["external_refs"]
+		if refs == nil {
+			refs = map[string]any{}
+		}
+		raw, _ := json.Marshal(refs)
+		_, err := f.pool.Exec(t.Context(), `INSERT INTO tasks(id,project_id,title,description,repository_id,parent_task_id,status,priority,preferred_agent_id,planned_start_date,planned_finish_date,external_refs,completion_policy) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::text::date,$11::text::date,$12,'{"mode":"direct_completion","requirements":[]}')`, id, body["project_id"], body["title"], value("description", ""), body["repository_id"], body["parent_task_id"], value("status", "open"), value("priority", "none"), body["preferred_agent_id"], body["planned_start_date"], body["planned_finish_date"], raw)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if text, _ := body["description"].(string); strings.TrimSpace(text) != "" {
+			testsupport.ApproveTask(t, f.pool, id)
+		}
+		return decode(t, f.request(t, "GET", "/api/v1/tasks/"+id.String(), "", 200))
+	}
 	raw, err := json.Marshal(body)
 	if err != nil {
 		t.Fatal(err)
@@ -134,8 +158,8 @@ func TestResourceCreationPreservesDefaultsScopeAndExecutionProjection(t *testing
 	if task["status"] != "open" || task["description"] != "" {
 		t.Fatal(task)
 	}
-	f.request(t, "PATCH", "/api/v1/tasks/"+task["id"].(string), `{"expected_revision":1,"description":"Prepared requirements"}`, 200)
-	f.request(t, "PUT", "/api/v1/tasks/"+task["id"].(string)+"/completion-policy", `{"expected_revision":2,"policy":{"mode":"direct_completion","requirements":[]}}`, 200)
+	f.approveMutation(t, "PATCH", "/api/v1/tasks/"+task["id"].(string), `{"expected_revision":1,"description":"Prepared requirements"}`)
+	f.approveMutation(t, "PUT", "/api/v1/tasks/"+task["id"].(string)+"/completion-policy", `{"expected_revision":2,"policy":{"mode":"direct_completion","requirements":[]}}`)
 	run := f.create(t, "runs", map[string]any{"task_id": task["id"], "agent_id": agent["id"]})
 	if run["attempt"] != float64(1) || run["status"] != "queued" || run["worker_id"] != nil {
 		t.Fatal(run)
@@ -295,4 +319,26 @@ func (f fixture) directCompletion(t *testing.T, task string) {
 	if _, err := f.pool.Exec(t.Context(), `UPDATE tasks SET completion_policy='{"mode":"direct_completion","requirements":[]}' WHERE id=$1`, task); err != nil {
 		t.Fatal(err)
 	}
+	testsupport.ApproveTask(t, f.pool, uuid.MustParse(task))
+}
+
+// approveMutation tests the proposal response explicitly before supplying a fixture decision.
+func (f fixture) approveMutation(t *testing.T, method, path, body string) json.RawMessage {
+	t.Helper()
+	raw := f.request(t, method, path, body, 0)
+	if !bytes.Contains(raw, []byte(`"draft"`)) {
+		return raw
+	}
+	var p postgres.TaskProposal
+	if err := json.Unmarshal(raw, &p); err != nil {
+		t.Fatal(err)
+	}
+	id := testsupport.ApproveProposal(t, f.pool, p.ID)
+	return f.request(t, "GET", "/api/v1/tasks/"+id.String(), "", 200)
+}
+
+func (f fixture) approvePlanning(t *testing.T, path, body string) json.RawMessage {
+	t.Helper()
+	f.approveMutation(t, "PATCH", path, body)
+	return f.request(t, "GET", path+"/planning", "", 200)
 }

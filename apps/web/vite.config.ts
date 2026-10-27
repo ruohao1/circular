@@ -18,5 +18,18 @@ export default defineConfig({
       "fumadocs-mdx",
     ],
   },
-  server: { host: "0.0.0.0", port: 5173 },
+  preview: {
+    headers: {
+      "Content-Security-Policy": "frame-ancestors 'none'",
+      "X-Frame-Options": "DENY",
+    },
+  },
+  server: {
+    headers: {
+      "Content-Security-Policy": "frame-ancestors 'none'",
+      "X-Frame-Options": "DENY",
+    },
+    host: "0.0.0.0",
+    port: 5173,
+  },
 });

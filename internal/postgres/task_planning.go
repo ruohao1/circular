@@ -68,7 +68,7 @@ func TaskPlanningCapabilities(ctx context.Context, tx pgx.Tx, taskID uuid.UUID) 
 	if err != nil {
 		return TaskEditCapabilities{}, err
 	}
-	out := TaskEditCapabilities{ContentEditable: !source && !active && !owned, RepositoryEditable: !source && !hasRuns && !hasWork, DependenciesEditable: !owned}
+	out := TaskEditCapabilities{ContentEditable: (!source || trustedProposalSource(ctx)) && !active && !owned, RepositoryEditable: !source && !hasRuns && !hasWork, DependenciesEditable: !owned}
 	reason := func(s string) *string { return &s }
 	if owned {
 		out.DependenciesLockReason = reason("active_work")

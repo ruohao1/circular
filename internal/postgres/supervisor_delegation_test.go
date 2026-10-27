@@ -53,7 +53,7 @@ func TestDelegationSuspensionKeepsWorkspace(t *testing.T) {
 				}
 				return
 			}
-			if err != nil || children != 1 || snapshot.Run.Status != "waiting_for_input" || snapshot.Run.WorkerID != nil || snapshot.Workspace.Status != "suspended" || snapshot.Workspace.ContainerID != nil {
+			if err != nil || children != 0 || snapshot.Run.Status != "waiting_for_input" || snapshot.Run.WorkerID != nil || snapshot.Workspace.Status != "suspended" || snapshot.Workspace.ContainerID != nil {
 				t.Fatal(err, children, snapshot)
 			}
 			if _, err = os.Stat(filepath.Join(f.config.Git.WorktreeRoot, f.id.String())); err != nil {
@@ -111,6 +111,7 @@ func TestDelegationContinuationVerifiesFrozenInputsAndWorkspace(t *testing.T) {
 			if err = os.WriteFile(options["output_script"], script, 0600); err != nil {
 				t.Fatal(err)
 			}
+			approvePendingDelegation(t, f)
 			child := acquire(t, q, "continuation-owner")
 			if child.RunID == f.id {
 				t.Fatal("parent resumed before child")
@@ -272,6 +273,7 @@ func TestDelegationRecoveryExecutionFaults(t *testing.T) {
 				t.Fatal(err)
 			}
 			delegationDockerOption(t, f, "output", codexMessage+codexUsage)
+			approvePendingDelegation(t, f)
 			child := acquire(t, q, "fault-owner")
 			if child == nil || child.RunID == f.id {
 				t.Fatal(child)

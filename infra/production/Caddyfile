@@ -32,7 +32,8 @@ http://:8080 {
 	encode zstd gzip
 	header {
 		X-Content-Type-Options nosniff
-		X-Frame-Options SAMEORIGIN
+		X-Frame-Options DENY
+		Content-Security-Policy "frame-ancestors 'none'"
 		Referrer-Policy no-referrer
 		Cache-Control no-store
 	}

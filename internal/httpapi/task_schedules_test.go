@@ -56,7 +56,12 @@ func TestTaskScheduleAtomicPatch(t *testing.T) {
 	page := planningRead(t, f, project, "")
 	patch := func(body string, want int) map[string]any {
 		t.Helper()
-		raw := f.request(t, "PATCH", "/api/v1/tasks/"+id, body, want)
+		var raw json.RawMessage
+		if want == 200 {
+			raw = f.approvePlanning(t, "/api/v1/tasks/"+id, body)
+		} else {
+			raw = f.request(t, "PATCH", "/api/v1/tasks/"+id, body, want)
+		}
 		var out map[string]any
 		if err := json.Unmarshal(raw, &out); err != nil {
 			t.Fatal(err)

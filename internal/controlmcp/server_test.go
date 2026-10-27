@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/ruohao1/circular/internal/artifacts"
 	"github.com/ruohao1/circular/internal/controlmcp"
@@ -107,7 +108,7 @@ func TestControlMCPWorkflowUsesPublicAPIAndPreservesRunIntent(t *testing.T) {
 	}
 	client := connect(t, config)
 	listed, err := client.ListTools(t.Context(), nil)
-	if err != nil || len(listed.Tools) != 58 {
+	if err != nil || len(listed.Tools) != 63 {
 		t.Fatal("missing tool surface", err, listed)
 	}
 	project := call(t, client, "create_project", object{"name": "MCP project"})["project"].(object)
@@ -138,7 +139,8 @@ func TestControlMCPWorkflowUsesPublicAPIAndPreservesRunIntent(t *testing.T) {
 	if discovery["agent_id"] == nil {
 		t.Fatal("missing discovery Agent", discovery)
 	}
-	task := call(t, client, "create_task", object{"project_id": projectID, "repository_id": repo["id"], "title": "Exercise MCP", "description": "Verify control without a model call"})["task"].(object)
+	testsupport.ApproveProposal(t, pool, uuid.MustParse(discovery["proposal"].(object)["id"].(string)))
+	task := createApprovedTask(t, pool, client, object{"project_id": projectID, "repository_id": repo["id"], "title": "Exercise MCP", "description": "Verify control without a model call"})
 	policyRequest := httptest.NewRequest(http.MethodPut, "/api/v1/tasks/"+task["id"].(string)+"/completion-policy", strings.NewReader(`{"expected_revision":1,"policy":{"mode":"direct_completion","requirements":[]}}`))
 	policyRequest.Header.Set("Content-Type", "application/json")
 	policyResponse := httptest.NewRecorder()
@@ -265,7 +267,7 @@ func TestReadOnlyAndInvalidInputsNeverReachMutationEndpoints(t *testing.T) {
 	defer api.Close()
 	client := connect(t, controlmcp.Config{APIURL: api.URL, ReadOnly: true})
 	list, err := client.ListTools(t.Context(), nil)
-	if err != nil || len(list.Tools) != 29 {
+	if err != nil || len(list.Tools) != 32 {
 		t.Fatal(err, list)
 	}
 	for _, tool := range list.Tools {
@@ -327,4 +329,26 @@ func TestControlMCPRejectsOldAPIAndBoundsHTTPFailures(t *testing.T) {
 			t.Fatal("invalid URL accepted", address)
 		}
 	}
+}
+
+func createApprovedTask(t *testing.T, pool *pgxpool.Pool, client *mcp.ClientSession, input object) object {
+	t.Helper()
+	if input["description"] == nil {
+		input["description"] = "Exercise this fixture"
+	}
+	proposal := call(t, client, "create_task", input)["proposal"].(object)
+	if proposal["status"] != "pending" {
+		t.Fatal(proposal)
+	}
+	id := testsupport.ApproveProposal(t, pool, uuid.MustParse(proposal["id"].(string)))
+	return call(t, client, "get_task", object{"task_id": id.String()})["task"].(object)
+}
+func approveTaskEdit(t *testing.T, pool *pgxpool.Pool, client *mcp.ClientSession, input object) object {
+	t.Helper()
+	proposal := call(t, client, "update_task", input)
+	if proposal["status"] != "pending" {
+		t.Fatal(proposal)
+	}
+	id := testsupport.ApproveProposal(t, pool, uuid.MustParse(proposal["id"].(string)))
+	return call(t, client, "get_task_planning", object{"task_id": id.String()})
 }

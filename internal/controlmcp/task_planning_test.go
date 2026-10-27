@@ -27,7 +27,7 @@ func TestTaskPlanningMCP(t *testing.T) {
 	project := call(t, client, "create_project", object{"name": "Planning"})["project"].(object)["id"]
 	repo := call(t, client, "add_repository", object{"project_id": project, "name": "Source", "clone_url": "/fixture"})["repository"].(object)
 	agent := call(t, client, "create_agent", object{"project_id": project, "name": "Engineer", "instructions": "Test", "backend": "fake"})["agent"].(object)
-	task := call(t, client, "create_task", object{"project_id": project, "title": "A", "priority": "high", "repository_id": repo["id"], "preferred_agent_id": agent["id"]})["task"].(object)
+	task := createApprovedTask(t, pool, client, object{"project_id": project, "title": "A", "priority": "high", "repository_id": repo["id"], "preferred_agent_id": agent["id"]})
 	if task["priority"] != "high" {
 		t.Fatal(task)
 	}
@@ -35,7 +35,7 @@ func TestTaskPlanningMCP(t *testing.T) {
 	if detail["task"].(object)["id"] != task["id"] || detail["console_url"] == nil {
 		t.Fatal(detail)
 	}
-	patch := call(t, client, "update_task", object{"task_id": task["id"], "expected_revision": 1, "title": "Changed", "repository_id": nil, "preferred_agent_id": nil})
+	patch := approveTaskEdit(t, pool, client, object{"task_id": task["id"], "expected_revision": 1, "title": "Changed", "repository_id": nil, "preferred_agent_id": nil})
 	if patch["task"].(object)["priority"] != "high" || patch["task"].(object)["repository_id"] != nil || patch["task"].(object)["preferred_agent_id"] != nil {
 		t.Fatal("omission reset priority", patch)
 	}
@@ -110,8 +110,8 @@ func TestTaskPlanningMCPDependenciesAndParent(t *testing.T) {
 	defer api.Close()
 	client := connect(t, controlmcp.Config{APIURL: api.URL})
 	project := call(t, client, "create_project", object{"name": "Dependencies"})["project"].(object)["id"]
-	parent := call(t, client, "create_task", object{"project_id": project, "title": "Parent"})["task"].(object)["id"]
-	child := call(t, client, "create_task", object{"project_id": project, "title": "Child", "parent_task_id": parent})["task"].(object)
+	parent := createApprovedTask(t, pool, client, object{"project_id": project, "title": "Parent"})["id"]
+	child := createApprovedTask(t, pool, client, object{"project_id": project, "title": "Child", "parent_task_id": parent})
 	if child["parent_task_id"] != parent {
 		t.Fatal(child)
 	}
@@ -121,7 +121,7 @@ func TestTaskPlanningMCPDependenciesAndParent(t *testing.T) {
 		{"prerequisite_task_ids": []any{}},
 	} {
 		fields["task_id"], fields["expected_revision"] = child["id"], i+1
-		call(t, client, "update_task", fields)
+		approveTaskEdit(t, pool, client, fields)
 		result := call(t, client, "get_task_planning", object{"task_id": child["id"]})
 		want := 1
 		if i == 2 {

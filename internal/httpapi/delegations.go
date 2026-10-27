@@ -15,7 +15,7 @@ import (
 
 func delegationLink(ctx context.Context, tx pgx.Tx, id uuid.UUID) (*delegations.Record, error) {
 	var link delegations.Record
-	err := tx.QueryRow(ctx, `SELECT id,parent_run_id,target_agent_id,child_task_id,child_run_id,request_key,status FROM delegations WHERE request_key IS NOT NULL AND (parent_run_id=$1 OR child_run_id=$1)`, id).Scan(&link.ID, &link.ParentRunID, &link.TargetAgentID, &link.ChildTaskID, &link.ChildRunID, &link.RequestKey, &link.Status)
+	err := tx.QueryRow(ctx, `SELECT id,parent_run_id,target_agent_id,child_task_id,child_run_id,request_key,status,proposal_id FROM delegations WHERE request_key IS NOT NULL AND (parent_run_id=$1 OR child_run_id=$1)`, id).Scan(&link.ID, &link.ParentRunID, &link.TargetAgentID, &link.ChildTaskID, &link.ChildRunID, &link.RequestKey, &link.Status, &link.ProposalID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
 	}

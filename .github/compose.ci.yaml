@@ -4,6 +4,11 @@ services:
   postgres:
     ports: !override ["127.0.0.1:5433:5432"]
   api:
+    environment:
+      CIRCULAR_APPROVER_GITHUB_IDS: "101"
+      CIRCULAR_GITHUB_CLIENT_ID: fixture-github
+      CIRCULAR_GITHUB_CLIENT_SECRET: fixture-secret
+      CIRCULAR_INTEGRATIONS_ENCRYPTION_KEY: Zml4dHVyZS1maXh0dXJlLWZpeHR1cmUtZml4dHVyZS0=
     ports: !override ["127.0.0.1:8000:8000"]
   web:
     ports: !override ["127.0.0.1:5173:5173"]

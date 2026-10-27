@@ -241,6 +241,12 @@ func (s *PRReviewStore) Launch(ctx context.Context, command ReviewLaunch) (prrev
 		}
 	}
 	if reviewID == uuid.Nil || request.Mode == "again" || !sameSource || !currentAttempt {
+		if err = RequireTaskApproval(ctx, tx, snapshot.TaskID); err != nil {
+			if errors.Is(err, ErrTaskApprovalRequired) {
+				return zero, errors.Join(prreviews.ErrSourceInvalid, err)
+			}
+			return zero, err
+		}
 		reviewID = uuid.New()
 		runID := uuid.New()
 		var runAttempt int

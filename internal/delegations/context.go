@@ -20,7 +20,8 @@ import (
 )
 
 type Result struct {
-	ChildRunID uuid.UUID          `json:"child_run_id"`
+	Outcome    string             `json:"outcome,omitempty"`
+	ChildRunID uuid.UUID          `json:"child_run_id,omitzero"`
 	Status     runstate.Status    `json:"status"`
 	Error      string             `json:"error"`
 	Report     *artifacts.Content `json:"report"`
@@ -34,6 +35,12 @@ type Context struct {
 }
 
 func (r Result) Validate() error {
+	if r.Outcome != "" {
+		if (r.Outcome != "approval_rejected" && r.Outcome != "admission_rejected") || r.ChildRunID != uuid.Nil || r.Status != "" || r.Report != nil || r.Patch != nil || strings.TrimSpace(r.Error) == "" || !utf8.ValidString(r.Error) || strings.ContainsRune(r.Error, 0) || utf8.RuneCountInString(r.Error) > 4000 {
+			return ErrInvalid
+		}
+		return nil
+	}
 	if r.ChildRunID == uuid.Nil || !r.Status.Terminal() || !utf8.ValidString(r.Error) || strings.ContainsRune(r.Error, 0) || utf8.RuneCountInString(r.Error) > 4000 {
 		return ErrInvalid
 	}

@@ -64,7 +64,11 @@ func Run(ctx context.Context, stdin io.Reader, stdout, stderr io.Writer, writeOu
 			_ = line(stderr, map[string]any{"protocol_version": 1, "error": map[string]string{"code": "invalid_input", "message": "invalid delegation context"}})
 			return 2
 		}
-		content += "\nChild outcome: " + string(bundle.Result.Status)
+		outcome := string(bundle.Result.Status)
+		if bundle.Result.Outcome != "" {
+			outcome = bundle.Result.Outcome
+		}
+		content += "\nChild outcome: " + outcome
 		if bundle.Result.Error != "" {
 			content += "\nChild error: " + bundle.Result.Error
 		}

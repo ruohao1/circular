@@ -17,9 +17,6 @@ func completedReview(t *testing.T) (fixture, prreviews.Review) {
 	f.connect(t, "github")
 	snapshot := testsupport.SeedPRReviewSource(t, f.pool, uuid.MustParse(f.project))
 	f.provider.SetReviewPR(snapshot.PR, "open")
-	if _, err := f.pool.Exec(t.Context(), `UPDATE tasks SET external_refs=jsonb_set(external_refs::jsonb,'{linear,account_id}','"20000000-0000-4000-8000-000000000004"')::json WHERE id=$1`, snapshot.TaskID); err != nil {
-		t.Fatal(err)
-	}
 	prepared, err := f.service.PreparePRReview(t.Context(), snapshot.SourceRunID.String(), snapshot.Reviewer.AgentID.String())
 	if err != nil {
 		t.Fatal(err)

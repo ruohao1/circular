@@ -43,6 +43,7 @@ func (r *RunResources) RenewLease() error {
 // ProvisioningContext binds the claimed attempt to its Task, Agent and
 // Repository. The Backend is the Run's selection, not the Agent's current one.
 type ProvisioningContext struct {
+	TaskApprovalContext              json.RawMessage      `json:"task_approval_context,omitempty"`
 	CompletionContract               *completion.Contract `json:"completion_contract,omitempty"`
 	SourceRunID                      uuid.UUID
 	SourceCheckpoint                 *delegations.Checkpoint
@@ -95,11 +96,12 @@ func (r *RunResources) ProvisioningContext() (ProvisioningContext, error) {
 		inputs.BackendConfig = snapshot.Reviewer.BackendConfig
 		return inputs, nil
 	}
-	if err := r.tx.QueryRow(r.ctx, `SELECT t.completion_contract FROM tasks t JOIN runs r ON r.task_id=t.id WHERE r.id=$1`, r.id).Scan(&inputs.CompletionContract); err != nil {
+	if err := r.tx.QueryRow(r.ctx, `SELECT t.completion_contract,NULLIF(t.approval_context,'{}'::jsonb) FROM tasks t JOIN runs r ON r.task_id=t.id WHERE r.id=$1`, r.id).Scan(&inputs.CompletionContract, &inputs.TaskApprovalContext); err != nil {
 		return inputs, err
 	}
 	if input, linked, err := r.externalProvisioningContext(); linked || err != nil {
 		input.CompletionContract = inputs.CompletionContract
+		input.TaskApprovalContext = inputs.TaskApprovalContext
 		return input, err
 	}
 	err := r.tx.QueryRow(r.ctx, `SELECT repositories.id,repositories.clone_url,repositories.default_branch,

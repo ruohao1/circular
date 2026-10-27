@@ -85,6 +85,11 @@ func ClaimExternalWork(ctx context.Context, tx pgx.Tx, in ExternalWorkClaim, now
 
 func eligibleWorkTask(ctx context.Context, tx pgx.Tx, task planningTask, stages ...string) (json.RawMessage, error) {
 	invalid := &WorkIneligibleError{Reasons: []string{}, Blockers: []uuid.UUID{}}
+	if err := RequireTaskApproval(ctx, tx, task.id); errors.Is(err, ErrTaskApprovalRequired) {
+		invalid.Reasons = append(invalid.Reasons, err.Error())
+	} else if err != nil {
+		return nil, err
+	}
 	if !slices.Contains(stages, task.status) {
 		invalid.Reasons = append(invalid.Reasons, "stage must be "+strings.Join(stages, " or "))
 	}

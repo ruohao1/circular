@@ -21,7 +21,7 @@ func TestCodexAgentRegistrationAndRunPreserveModelConfiguration(t *testing.T) {
 		testsupport.AssertJSON(t, agent["backend_config"], config)
 		repository := f.create(t, "repositories", map[string]any{"project_id": project["id"], "name": "Source Use configured Codex agent" + uuid.NewString(), "clone_url": "/fixture"})
 		task := f.create(t, "tasks", map[string]any{"project_id": project["id"], "title": "Use configured Codex agent", "repository_id": repository["id"], "description": "Prepared requirements"})
-		f.request(t, "PUT", "/api/v1/tasks/"+task["id"].(string)+"/completion-policy", `{"expected_revision":1,"policy":{"mode":"direct_completion","requirements":[]}}`, 200)
+		f.approveMutation(t, "PUT", "/api/v1/tasks/"+task["id"].(string)+"/completion-policy", `{"expected_revision":1,"policy":{"mode":"direct_completion","requirements":[]}}`)
 		run := f.create(t, "runs", map[string]any{"task_id": task["id"], "agent_id": agent["id"]})
 		if run["backend"] != "codex" || run["status"] != "queued" {
 			t.Fatal("Run did not preserve the Codex backend", run)

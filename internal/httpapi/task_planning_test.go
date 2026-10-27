@@ -206,13 +206,13 @@ func TestTaskPlanningUpdateAndMoveHTTP(t *testing.T) {
 	if detail["content_editable"] != true || detail["repository_editable"] != true || detail["content_lock_reason"] != nil {
 		t.Fatal(detail)
 	}
-	updated := decode(t, f.request(t, "PATCH", path, `{"expected_revision":1,"title":"  New title  ","priority":"urgent","preferred_agent_id":"`+agent+`"}`, 200))
+	updated := decode(t, f.approvePlanning(t, path, `{"expected_revision":1,"title":"  New title  ","priority":"urgent","preferred_agent_id":"`+agent+`"}`))
 	saved := updated["task"].(map[string]any)
 	if saved["title"] != "New title" || saved["priority"] != "urgent" || saved["revision"] != float64(2) || saved["repository_id"] == nil {
 		t.Fatal(updated)
 	}
 	f.request(t, "PATCH", path, `{"expected_revision":1,"title":"stale"}`, 409)
-	cleared := decode(t, f.request(t, "PATCH", path, `{"expected_revision":2,"repository_id":null,"preferred_agent_id":null}`, 200))
+	cleared := decode(t, f.approvePlanning(t, path, `{"expected_revision":2,"repository_id":null,"preferred_agent_id":null}`))
 	saved = cleared["task"].(map[string]any)
 	if saved["repository_id"] != nil || saved["preferred_agent_id"] != nil || saved["priority"] != "urgent" {
 		t.Fatal(saved)
@@ -225,7 +225,7 @@ func TestTaskPlanningUpdateAndMoveHTTP(t *testing.T) {
 	if e := json.Unmarshal(f.request(t, "GET", "/api/v1/tasks?project_id="+project, "", 200), &legacy); e != nil || len(legacy) != 1 {
 		t.Fatal(legacy, e)
 	}
-	restored := decode(t, f.request(t, "PATCH", path, fmt.Sprintf(`{"expected_revision":4,"repository_id":%q}`, detail["task"].(map[string]any)["repository_id"]), 200))
+	restored := decode(t, f.approvePlanning(t, path, fmt.Sprintf(`{"expected_revision":4,"repository_id":%q}`, detail["task"].(map[string]any)["repository_id"])))
 	f.request(t, "POST", path+"/move", fmt.Sprintf(`{"expected_revision":5,"expected_board_revision":%v,"status":"ready","placement":"end"}`, restored["board_revision"]), 200)
 	f.create(t, "runs", map[string]any{"task_id": task, "agent_id": agent})
 	f.request(t, "PATCH", path, `{"expected_revision":7,"description":"changed while active"}`, 409)

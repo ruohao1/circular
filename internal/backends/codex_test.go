@@ -65,7 +65,8 @@ func TestCodexSubscriptionDefaultHasNoAPIKeyOrFallback(t *testing.T) {
 func TestCodexPrepare(t *testing.T) {
 	invocation, err := (Codex{AuthMode: "api_key", APIKey: testCodexKey}).Prepare(Input{
 		RunID: uuid.New(), TaskTitle: "Fix encoding", TaskDescription: "Preserve Unicode",
-		Instructions: "Run the relevant checks", Config: json.RawMessage(`{"model":"gpt-5.4"}`),
+		TaskApprovalContext: json.RawMessage(`{"purpose":"Preserve user data","acceptance_criteria":["Unicode round trips"]}`),
+		Instructions:        "Run the relevant checks", Config: json.RawMessage(`{"model":"gpt-5.4"}`),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -86,6 +87,9 @@ func TestCodexPrepare(t *testing.T) {
 	prompt, ok := request["prompt"].(string)
 	if !ok || !strings.Contains(prompt, "Agent instructions:\nRun the relevant checks") || !strings.Contains(prompt, "Task:\nFix encoding\n\nPreserve Unicode") {
 		t.Fatalf("task context missing from prompt: %q", prompt)
+	}
+	if !strings.Contains(prompt, "Preserve user data") || !strings.Contains(prompt, "Unicode round trips") {
+		t.Fatal("approved scope missing from invocation")
 	}
 	if strings.Contains(prompt, testCodexKey) {
 		t.Fatal("API key must not enter task prompt")

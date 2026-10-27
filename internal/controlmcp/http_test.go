@@ -81,9 +81,9 @@ func TestHTTPTransportUsesPublicAPIWithSeparateAccessModes(t *testing.T) {
 				}
 				t.Cleanup(func() { _ = client.Close() })
 				listed, err := client.ListTools(t.Context(), nil)
-				wantTools := 58
+				wantTools := 63
 				if readOnly {
-					wantTools = 29
+					wantTools = 32
 				}
 				if err != nil || len(listed.Tools) != wantTools {
 					t.Fatalf("missing HTTP tool surface: %v %+v", err, listed)

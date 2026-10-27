@@ -237,8 +237,15 @@ func (a *api) updateTaskPlanning(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer rollback(r.Context(), tx)
-	out, err := postgres.UpdateTaskPlanning(r.Context(), tx, id, revision, patch)
+	out, proposal, err := postgres.UpdateTaskPlanningOrPropose(r.Context(), tx, id, revision, patch)
 	if planningError(w, err) {
+		return
+	}
+	if proposal != nil {
+		if dbError(w, tx.Commit(r.Context()), "Task proposal") {
+			return
+		}
+		a.proposalResponse(w, 202, *proposal)
 		return
 	}
 	task, err := record(r.Context(), tx, "tasks", "TaskRead", "WHERE t.id=$1", id)

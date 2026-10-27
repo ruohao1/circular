@@ -12,6 +12,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/ruohao1/circular/internal/postgres"
+	"github.com/ruohao1/circular/internal/testsupport"
 )
 
 func TestNativeLaunchReportsExternalOwner(t *testing.T) {
@@ -20,6 +21,7 @@ func TestNativeLaunchReportsExternalOwner(t *testing.T) {
 	if _, err := f.pool.Exec(t.Context(), `UPDATE tasks SET status='ready',description='Ready requirements' WHERE id=$1`, task); err != nil {
 		t.Fatal(err)
 	}
+	testsupport.ApproveTask(t, f.pool, uuid.MustParse(task))
 	tx, err := f.pool.Begin(t.Context())
 	if err != nil {
 		t.Fatal(err)

@@ -99,7 +99,7 @@ func TestReviewTransitionsNeverQueueCodingDelivery(t *testing.T) {
 	if _, err = pool.Exec(t.Context(), `INSERT INTO linear_run_update_settings(project_id,enabled) VALUES($1,true)`, snapshot.ProjectID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = pool.Exec(t.Context(), `INSERT INTO integrations(id,project_id,provider,config,enabled) VALUES($1,$2,'linear','{"account_id":"linear-workspace","account_url":"https://linear.app/fixture"}',true)`, uuid.New(), snapshot.ProjectID); err != nil {
+	if _, err = pool.Exec(t.Context(), `INSERT INTO integrations(id,project_id,provider,config,enabled) VALUES($1,$2,'linear','{"account_id":"20000000-0000-4000-8000-000000000004","account_url":"https://linear.app/fixture"}',true)`, uuid.New(), snapshot.ProjectID); err != nil {
 		t.Fatal(err)
 	}
 	for _, status := range []string{"running", "succeeded"} {
@@ -141,5 +141,21 @@ func TestReviewContextIsLeaseFencedAndSnapshotBound(t *testing.T) {
 	expire(t, pool, review.RunID)
 	if err = store.WithRun(t.Context(), review.RunID, func(r *postgres.RunResources) error { _, err := r.ReviewContext(); return err }); !errors.Is(err, postgres.ErrLeaseLost) {
 		t.Fatal("stale context read", err)
+	}
+}
+
+func TestReviewLaunchRequiresCurrentScopeApproval(t *testing.T) {
+	pool := testsupport.Database(t)
+	snapshot := testsupport.SeedPRReviewSource(t, pool, uuid.Nil)
+	if _, err := pool.Exec(t.Context(), `DELETE FROM task_proposal_decisions WHERE task_id=$1`, snapshot.TaskID); err != nil {
+		t.Fatal(err)
+	}
+	_, err := postgres.NewPRReviewStore(pool).Launch(t.Context(), postgres.ReviewLaunch{Snapshot: snapshot, Request: prreviews.LaunchRequest{RequestKey: uuid.New(), ReviewerID: snapshot.Reviewer.AgentID, ExpectedInputFingerprint: snapshot.InputFingerprint, Mode: "normal"}})
+	if !errors.Is(err, postgres.ErrTaskApprovalRequired) {
+		t.Fatal("unapproved historical Task started a review", err)
+	}
+	var reviews int
+	if err = pool.QueryRow(t.Context(), `SELECT count(*) FROM runs WHERE kind='pr_review'`).Scan(&reviews); err != nil || reviews != 0 {
+		t.Fatal(reviews, err)
 	}
 }

@@ -254,6 +254,11 @@ func TestDelegationRetainsParentWorkSession(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	approvePendingDelegation(t, f.supervisorFixture)
+	record, err = f.store.SuspendForDelegation(t.Context(), f.id, f.request, f.checkpoint)
+	if err != nil {
+		t.Fatal(err)
+	}
 	parked := nativeWorkView(t, planning, f.id)
 	child := nativeWorkView(t, planning, *record.ChildRunID)
 	var parentTask uuid.UUID

@@ -28,10 +28,12 @@ import { cn } from "@/lib/utils";
 import { ConsoleOverview } from "@/pages/overview";
 import { RequestPage } from "@/pages/request";
 import { RunsPage } from "@/pages/runs";
+import { ProposalsPage, ProposalPage } from "@/pages/proposals";
 import { TasksPage } from "@/pages/tasks";
 import { AgentsPage, AgentPage } from "@/pages/agents";
 import { parseTaskPlanningSearch } from "@/lib/task-planning";
 import {
+  MutationCache,
   QueryClient,
   QueryClientProvider,
   useMutation,
@@ -54,7 +56,7 @@ import {
 import { ArrowLeft, Download, Files, LoaderCircle } from "lucide-react";
 import React, { useEffect, useState } from "react";
 import ReactDOM from "react-dom/client";
-import { api, type Run } from "./api";
+import { api, TaskProposalRequired, type Run } from "./api";
 import "./index.css";
 import type { ConnectionNotice } from "./pages/integrations";
 import { SetupPage, type SetupSection } from "./pages/setup";
@@ -66,7 +68,20 @@ import {
 } from "./use-project";
 import { useRunEvents } from "./use-run-events";
 
-const queryClient = new QueryClient();
+const queryClient = new QueryClient({
+  mutationCache: new MutationCache({
+    onError: (error) => {
+      if (error instanceof TaskProposalRequired)
+        void router.navigate({
+          to: "/proposals/$proposalId",
+          params: { proposalId: error.proposal.id },
+          search: { revision: error.proposal.revision },
+          // The draft is now durable in the proposal, so it is safe to leave.
+          ignoreBlocker: true,
+        });
+    },
+  }),
+});
 const terminal = (status: string) =>
   ["succeeded", "failed", "cancelled"].includes(status);
 
@@ -185,7 +200,7 @@ function RunDetail() {
         <span className="sr-only">Loading Run…</span>
       </div>
     );
-  const { run, task, agent, workspace, artifacts, usage } = snapshot;
+  const { run, task, agent, workspace, artifacts, usage, delegation } = snapshot;
   const output = outputFrom(stream.events);
   return (
     <>
@@ -246,6 +261,14 @@ function RunDetail() {
             </Button>
           </div>
         </div>
+        {delegation?.status === "awaiting_approval" && delegation.proposal_id && (
+          <div className="rounded-lg border p-4">
+            <p>The parent is waiting for a decision on proposed child work. Its checkpoint is retained.</p>
+            <Link to="/proposals/$proposalId" params={{ proposalId: delegation.proposal_id }} search={{ revision: undefined }} className="underline">
+              Review child proposal
+            </Link>
+          </div>
+        )}
         {(run.error || cancel.error) && (
           <ErrorAlert>{run.error || cancel.error?.message}</ErrorAlert>
         )}
@@ -525,6 +548,23 @@ const tasksRoute = createRoute({
   search: { middlewares: [stripSearchParams({view:"list",scale:"week",q:"",status:"",priority:"",repository_id:"",preferred_agent_id:"",taskId:""})] },
   component: TasksPage,
 });
+const proposalsRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/proposals",
+  component: ProposalsPage,
+  validateSearch: (search: Record<string, unknown>) => ({
+    login_error: search.login_error === 1 || search.login_error === "1" ? 1 : undefined,
+  }),
+});
+const proposalRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/proposals/$proposalId",
+  component: ProposalPage,
+  validateSearch: (search: Record<string, unknown>) => ({
+    revision: Number.isSafeInteger(Number(search.revision)) && Number(search.revision) > 0
+      ? Number(search.revision) : undefined,
+  }),
+});
 const runRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/runs/$runId",
@@ -679,6 +719,8 @@ const router = createRouter({
     requestRoute,
     runsRoute,
     tasksRoute,
+    proposalsRoute,
+    proposalRoute,
     agentsRoute,
     agentRoute,
     runRoute,

@@ -20,6 +20,11 @@ func parkedDelegation(t *testing.T) (admissionFixture, uuid.UUID) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	approvePendingDelegation(t, f.supervisorFixture)
+	record, err = f.store.SuspendForDelegation(t.Context(), f.id, f.request, f.checkpoint)
+	if err != nil {
+		t.Fatal(err)
+	}
 	return f, *record.ChildRunID
 }
 

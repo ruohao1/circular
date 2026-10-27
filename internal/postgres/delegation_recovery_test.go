@@ -125,6 +125,7 @@ func TestDelegationCancelRaces(t *testing.T) {
 		if _, err = tx.Exec(t.Context(), `UPDATE tasks SET completion_policy='{"mode":"direct_completion","requirements":[]}' WHERE id=$1`, snapshot.TaskID); err != nil {
 			t.Fatal(err)
 		}
+		testsupport.ApproveTaskTx(t, tx, snapshot.TaskID)
 		launched, err := postgres.CreateRun(t.Context(), tx, postgres.RunLaunchInput{TaskID: snapshot.TaskID, AgentID: agent})
 		if err != nil {
 			t.Fatal(err)
@@ -192,7 +193,7 @@ func TestDelegationRecoveryAtHandoffBoundaries(t *testing.T) {
 			t.Fatal(err)
 		}
 		replay, err := f.store.SuspendForDelegation(t.Context(), f.id, f.request, f.checkpoint)
-		if err != nil || first.ID != replay.ID || first.ChildRunID == nil {
+		if err != nil || first.ID != replay.ID || first.ProposalID == nil || first.ChildRunID != nil {
 			t.Fatal("acknowledgement replay", replay, err)
 		}
 	})

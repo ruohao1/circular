@@ -91,10 +91,15 @@ func (a *api) setCompletionPolicy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer rollback(r.Context(), tx)
-	if planningError(w, postgres.SetTaskCompletionPolicy(r.Context(), tx, id, input.ExpectedRevision, *input.Policy)) {
+	proposal, err := postgres.SetTaskCompletionPolicyOrPropose(r.Context(), tx, id, input.ExpectedRevision, *input.Policy)
+	if proposalError(w, err) {
 		return
 	}
 	if dbError(w, tx.Commit(r.Context()), "Task") {
+		return
+	}
+	if proposal != nil {
+		a.proposalResponse(w, 202, *proposal)
 		return
 	}
 	v, err := a.integrations.InspectTaskCompletion(r.Context(), id)

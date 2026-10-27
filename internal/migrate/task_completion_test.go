@@ -17,7 +17,7 @@ func TestCompletionUpgrade(t *testing.T) {
 		if err := migrate.Up(t.Context(), p); err != nil {
 			t.Fatal(err)
 		}
-		if err := p.QueryRow(t.Context(), `SELECT to_jsonb(t)-'completion_policy'-'completion_contract'-'completion_session_id' FROM tasks t WHERE id=$1`, task).Scan(&after); err != nil || string(before) != string(after) {
+		if err := p.QueryRow(t.Context(), `SELECT to_jsonb(t)-'completion_policy'-'completion_contract'-'completion_session_id'-'approval_context' FROM tasks t WHERE id=$1`, task).Scan(&after); err != nil || string(before) != string(after) {
 			t.Fatal("history changed", err)
 		}
 		var untouched bool

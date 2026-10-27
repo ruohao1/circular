@@ -1,5 +1,15 @@
 import type { components } from "./generated/api";
 
+export type TaskProposal = components["schemas"]["TaskProposal"];
+export type TaskProposalDraft = components["schemas"]["TaskProposalDraft"];
+export type TaskProposalCreate = components["schemas"]["TaskProposalCreate"];
+export type ApprovalSession = components["schemas"]["ApprovalSession"];
+export class TaskProposalRequired extends Error {
+  constructor(public proposal: TaskProposal) {
+    super("This scope needs approval. Opening its review page.");
+  }
+}
+
 export type ExternalRequest = components["schemas"]["ExternalRequest"];
 export type ExternalRequestDetail =
   components["schemas"]["ExternalRequestDetail"];
@@ -10,7 +20,8 @@ export type PRReviewLaunch = components["schemas"]["PRReviewLaunch"];
 export type PRReviewSettings = components["schemas"]["PRReviewSettingsRead"];
 export type TaskCompletionView = components["schemas"]["CompletionView"];
 export type CompletionPolicy = components["schemas"]["CompletionPolicy"];
-export type CompletionCheckSetup = components["schemas"]["CompletionCheckSetup"];
+export type CompletionCheckSetup =
+  components["schemas"]["CompletionCheckSetup"];
 export type Project = components["schemas"]["ProjectRead"];
 export type Repository = components["schemas"]["RepositoryRead"];
 export type Agent = components["schemas"]["AgentRead"];
@@ -95,6 +106,7 @@ async function request<T>(
   credentials?: RequestCredentials,
   method = "POST",
   signal?: AbortSignal,
+  headers?: Record<string, string>,
 ): Promise<T> {
   const response = await fetch(`${apiUrl}${path}`, {
     credentials,
@@ -103,7 +115,7 @@ async function request<T>(
       ? {}
       : {
           method,
-          headers: { "Content-Type": "application/json" },
+          headers: { "Content-Type": "application/json", ...headers },
           body: JSON.stringify(body),
         }),
   });
@@ -117,7 +129,10 @@ async function request<T>(
       typeof error.code === "string" ? error.code : undefined,
     );
   }
-  return response.json() as Promise<T>;
+  const value = await response.json();
+  if (response.status === 202 && value?.draft && value?.review_url)
+    throw new TaskProposalRequired(value as TaskProposal);
+  return value as T;
 }
 
 const connectionsPath = (project: string) =>
@@ -126,6 +141,55 @@ const query = (values: Record<string, string>) =>
   new URLSearchParams(values).toString();
 
 export const api = {
+  taskProposals: (project: string) =>
+    request<TaskProposal[]>(
+      `/projects/${encodeURIComponent(project)}/task-proposals`,
+    ),
+  taskProposal: (id: string) =>
+    request<TaskProposal>(`/task-proposals/${encodeURIComponent(id)}`),
+  proposeTask: (input: TaskProposalCreate) =>
+    request<TaskProposal>("/task-proposals", input),
+  reviseTaskProposal: (id: string, input: Schema["TaskProposalRevise"]) =>
+    request<TaskProposal>(
+      `/task-proposals/${encodeURIComponent(id)}`,
+      input,
+      undefined,
+      "PATCH",
+    ),
+  taskApproval: (id: string) =>
+    request<Schema["TaskApproval"]>(
+      `/tasks/${encodeURIComponent(id)}/approval`,
+    ),
+  approvalSession: () =>
+    request<ApprovalSession>("/approval-auth/session", undefined, "include"),
+  startApprovalLogin: (return_path: string) =>
+    request<{ url: string }>(
+      "/approval-auth/github/start",
+      { return_path },
+      "include",
+    ),
+  endApprovalSession: (csrf: string) =>
+    request<{ signed_out: boolean }>(
+      "/approval-auth/logout",
+      {},
+      "include",
+      "POST",
+      undefined,
+      { "X-Circular-CSRF": csrf },
+    ),
+  decideTaskProposal: (
+    id: string,
+    input: Schema["TaskProposalDecisionInput"],
+    csrf: string,
+  ) =>
+    request<TaskProposal>(
+      `/task-proposals/${encodeURIComponent(id)}/decision`,
+      input,
+      "include",
+      "POST",
+      undefined,
+      { "X-Circular-CSRF": csrf },
+    ),
   webhookSettings: (provider: Provider) =>
     request<Schema["WebhookSettings"]>(`/integrations/${provider}/webhooks`),
   saveWebhookSettings: (

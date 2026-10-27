@@ -9,6 +9,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/ruohao1/circular/internal/completion"
 	"github.com/ruohao1/circular/internal/postgres"
+	"github.com/ruohao1/circular/internal/testsupport"
 )
 
 func completionPolicy(t *testing.T, f planningFixture, id uuid.UUID, mode string) {
@@ -20,6 +21,7 @@ func completionPolicy(t *testing.T, f planningFixture, id uuid.UUID, mode string
 	if err != nil {
 		t.Fatal(err)
 	}
+	testsupport.ApproveTask(t, f.p, id)
 }
 func completionChecks(t *testing.T, f planningFixture, revision int64, name string) completion.CheckConfig {
 	t.Helper()

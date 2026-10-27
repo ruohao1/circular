@@ -8,7 +8,9 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/ruohao1/circular/internal/postgres"
+	"github.com/ruohao1/circular/internal/testsupport"
 	"reflect"
+	"slices"
 	"sync"
 	"testing"
 	"time"
@@ -37,6 +39,12 @@ func planningSeed(t *testing.T) planningFixture {
 	return f
 }
 func (f planningFixture) task(t *testing.T, title, status, refs string) uuid.UUID {
+	t.Helper()
+	id := f.unapprovedTask(t, title, status, refs)
+	testsupport.ApproveTask(t, f.p, id)
+	return id
+}
+func (f planningFixture) unapprovedTask(t *testing.T, title, status, refs string) uuid.UUID {
 	t.Helper()
 	id := uuid.New()
 	_, e := f.p.Exec(t.Context(), `INSERT INTO tasks(id,project_id,repository_id,title,description,status,external_refs,completion_policy) VALUES($1,$2,$3,$4,'original',$5,$6,'{"mode":"direct_completion","requirements":[]}')`, id, f.project, f.repo, title, status, refs)
@@ -419,7 +427,8 @@ func TestTaskPlanningLaunchRace(t *testing.T) {
 				t.Fatal(e)
 			}
 			e = <-done
-			if launchFirst && !errors.Is(e, postgres.ErrTaskPlanningConflict) || !launchFirst && e != nil {
+			var ineligible *postgres.WorkIneligibleError
+			if launchFirst && !errors.Is(e, postgres.ErrTaskPlanningConflict) || !launchFirst && (!errors.As(e, &ineligible) || !slices.Contains(ineligible.Reasons, postgres.ErrTaskApprovalRequired.Error())) {
 				t.Fatal(e)
 			}
 			var title string

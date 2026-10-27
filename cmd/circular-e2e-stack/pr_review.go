@@ -106,9 +106,7 @@ func reviewFixtureHandler(pool *pgxpool.Pool, provider *testsupport.ProviderFixt
 			if err == nil {
 				_, err = pool.Exec(r.Context(), `UPDATE github_run_deliveries SET base_commit=$2,commit_sha=$3 WHERE run_id=$1`, snapshot.SourceRunID, base, head)
 			}
-			if err == nil {
-				_, err = pool.Exec(r.Context(), `UPDATE tasks SET external_refs=jsonb_set(external_refs::jsonb,'{linear,account_id}','"20000000-0000-4000-8000-000000000004"') WHERE id=$1`, snapshot.TaskID)
-			}
+
 			if err != nil {
 				http.Error(w, err.Error(), 500)
 				return

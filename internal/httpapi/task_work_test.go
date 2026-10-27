@@ -23,6 +23,10 @@ func workJSON(t *testing.T, f fixture, method, path string, input any, status in
 		}
 		body = string(raw)
 	}
+	if method == "PUT" && strings.HasSuffix(path, "/completion-policy") && status == 200 {
+		f.approveMutation(t, method, path, body)
+		return decode(t, f.request(t, "GET", strings.TrimSuffix(path, "-policy"), "", 200))
+	}
 	return decode(t, f.request(t, method, path, body, status))
 }
 func workMove(t *testing.T, f fixture, task, stage string) {
@@ -163,7 +167,7 @@ func TestTaskWorkAdmissionAndCredentialErrors(t *testing.T) {
 	path := "/api/v1/tasks/" + task + "/work"
 	prerequisite := f.create(t, "tasks", map[string]any{"project_id": project, "title": "Unfinished prerequisite"})["id"].(string)
 	state := decode(t, f.request(t, "GET", "/api/v1/tasks/"+task, "", 200))
-	updated := workJSON(t, f, "PATCH", "/api/v1/tasks/"+task, map[string]any{"expected_revision": state["revision"], "prerequisite_task_ids": []string{prerequisite}}, 200)
+	updated := decode(t, f.approvePlanning(t, "/api/v1/tasks/"+task, fmt.Sprintf(`{"expected_revision":%v,"prerequisite_task_ids":[%q]}`, state["revision"], prerequisite)))
 	claim["expected_revision"] = updated["task"].(map[string]any)["revision"]
 	view := workJSON(t, f, "GET", path, nil, 200)
 	dependency := view["prerequisites"].([]any)[0].(map[string]any)

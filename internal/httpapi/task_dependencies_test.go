@@ -37,7 +37,7 @@ func TestTaskPrerequisitePatchSemantics(t *testing.T) {
 	for _, value := range []string{"null", `["bad"]`, `[null]`, `["00000000-0000-0000-0000-000000000000"]`} {
 		f.request(t, "PATCH", path, `{"expected_revision":1,"prerequisite_task_ids":`+value+`}`, 422)
 	}
-	f.request(t, "PATCH", path, fmt.Sprintf(`{"expected_revision":1,"prerequisite_task_ids":[%q]}`, other["id"]), 200)
+	f.approvePlanning(t, path, fmt.Sprintf(`{"expected_revision":1,"prerequisite_task_ids":[%q]}`, other["id"]))
 	f.request(t, "PATCH", path, `{"expected_revision":1,"prerequisite_task_ids":[]}`, 409)
 	var detail struct {
 		IDs      []string `json:"prerequisite_task_ids"`
@@ -46,5 +46,5 @@ func TestTaskPrerequisitePatchSemantics(t *testing.T) {
 	if err := json.Unmarshal(f.request(t, "GET", path+"/planning", "", 200), &detail); err != nil || len(detail.IDs) != 1 || detail.IDs[0] != other["id"] || !detail.Editable {
 		t.Fatal(detail, err)
 	}
-	f.request(t, "PATCH", path, `{"expected_revision":2,"prerequisite_task_ids":[]}`, 200)
+	f.approvePlanning(t, path, `{"expected_revision":2,"prerequisite_task_ids":[]}`)
 }

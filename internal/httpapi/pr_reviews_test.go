@@ -29,7 +29,7 @@ func TestPRReviewHTTPDefaultsAndCannotForgePurpose(t *testing.T) {
 	agent := f.create(t, "agents", map[string]any{"project_id": project["id"], "name": "Coder"})
 	repository := f.create(t, "repositories", map[string]any{"project_id": project["id"], "name": "Source Source task" + uuid.NewString(), "clone_url": "/fixture"})
 	task := f.create(t, "tasks", map[string]any{"project_id": project["id"], "title": "Source task", "repository_id": repository["id"], "description": "Prepared requirements"})
-	f.request(t, "PUT", "/api/v1/tasks/"+task["id"].(string)+"/completion-policy", `{"expected_revision":1,"policy":{"mode":"direct_completion","requirements":[]}}`, 200)
+	f.approveMutation(t, "PUT", "/api/v1/tasks/"+task["id"].(string)+"/completion-policy", `{"expected_revision":1,"policy":{"mode":"direct_completion","requirements":[]}}`)
 	run := f.create(t, "runs", map[string]any{"task_id": task["id"], "agent_id": agent["id"], "kind": "pr_review"})
 	if run["kind"] != "coding" {
 		t.Fatal("forged review purpose")

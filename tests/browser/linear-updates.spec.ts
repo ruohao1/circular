@@ -1,3 +1,4 @@
+import { createResource } from "./fixtures/approval";
 import {
   expect,
   test,
@@ -21,9 +22,7 @@ test.skip(
 );
 
 async function create(request: APIRequestContext, path: string, data: object) {
-  const response = await request.post(`${base}/${path}`, { data });
-  expect(response.status(), await response.text()).toBe(201);
-  return response.json();
+  return createResource(request, path, data);
 }
 
 async function selectProject(page: Page, name: string) {
@@ -124,8 +123,8 @@ test("publish imported run progress and results only after opting in", async ({
     await page
       .getByRole("button", { name: "Import TST-1", exact: true })
       .click();
-    await expect(page).toHaveURL(/taskId=[0-9a-f-]+$/);
     await chooseDirectCompletion(page);
+    await page.getByRole("link", { name: "Start Run", exact: true }).click();
     await page.getByRole("button", { name: "Start Run", exact: true }).click();
     await expect(page).toHaveURL(/\/runs\/[0-9a-f-]+$/);
     const runId = page.url().split("/").at(-1)!;
