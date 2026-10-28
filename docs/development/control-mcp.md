@@ -317,10 +317,132 @@ the explicit direct-completion `discovery_report` preset; delegated children use
 the direct `handoff` preset. Parent continuation follows delegation outcome and
 still requires the parent's final-invocation completion report.
 
-ISQ-474 adds external claim/heartbeat/finish tools using `WorkFinishInput.Report`.
-ISQ-478 adds Linear workflow status sync through guarded `MoveTask`. ISQ-476 can
-document a fixed client skill/plugin after that lifecycle exists. This release
-does not claim those external lifecycle tools are already present.
+External clients now use the work-reporting tools below. ISQ-478 remains the
+Linear workflow status sync follow-on; ISQ-476 standardizes client skills/plugins.
+Owner/Gantt presentation and recovery controls remain ISQ-477.
+
+## Report work from an existing coding client
+
+The current client does the coding. Circular records its work; this workflow does
+not call `start_run` or create a replacement coding Run. The API and MCP remain
+inside the existing trusted private boundary. A client name/version is display
+metadata, not an authenticated user identity. Full control retains administrator
+powers; session credentials restrict owner reports, not the instance's admins.
+
+1. Call `list_task_planning` with `project_id` and `status: "ready"`. Reuse its
+   filters and `next_cursor` for later pages; restart on a board revision conflict.
+2. Call `get_task_work` for a candidate. Its `work` contains Project guidance,
+   Task description/revision, Repository, prerequisite stages, current ownership,
+   completion policy/evidence and board revision. Resolve unclear requirements
+   with the user before claiming. Inspection is advisory: claim admission checks
+   all conditions again in the shared service transaction.
+3. Generate and securely retain a session UUID and a 256-bit random secret **before
+   the first claim**. Send `claim_task_work` with `task_id`, `session_id`,
+   `session_secret`, `expected_revision`, `client_name`, and optional `client_version`.
+   The response's `work` returns the session, credential and current revisions.
+   A new claim moves the Task to In Progress. Preserve the original claim payload
+   even though the returned Task revision changes.
+4. While working, call `heartbeat_task_work` about every 30 seconds with the saved
+   `session_id`, `session_secret`, and an increasing positive integer `sequence`.
+   Retrying the same/older sequence returns current state without advancing contact.
+   After 120 seconds without accepted contact, the session needs attention; it
+   still owns the Task. Silence never permits another agent to take over.
+5. Finish with `finish_task_work`: the credential, a retained random `operation_id`,
+   `outcome` (`succeeded`, `failed`, or `cancelled`), and a nonblank `summary`.
+   Success requires `report.result` equal to that summary and an evidence item for
+   every frozen requirement key. Evidence links are HTTPS references. An optional
+   `pull_request_number` is only a reference, not verified merge or CI evidence.
+6. A valid successful direct-completion report moves the Task to Done. A valid
+   review-required report moves it to In Review; use the existing PR binding,
+   evidence refresh and independent review workflow before final completion.
+   Failure/cancellation releases the attempt without declaring completion. Missing
+   or invalid evidence rejects the finish and preserves the active claim.
+
+All six tools return their result under `work`. `get_work_session` takes a
+`session_id` and reads safe session/contact/outcome facts and lifecycle receipts,
+even after the Task is reopened. Read-only connections expose the two inspection
+tools and omit all four writes. The HTTP adapter also rejects those writes.
+
+Generate the credential with a cryptographic RNG, not a model-generated string.
+For example, this writes a new file outside the checkout, refuses to overwrite
+an existing claim, and does not print the secret:
+
+```python
+import json, os, secrets, uuid
+from pathlib import Path
+
+task_id = str(uuid.UUID("<Task UUID>"))
+directory = Path.home() / ".local/state/circular"
+directory.mkdir(parents=True, exist_ok=True, mode=0o700)
+path = directory / (task_id + ".json")
+credential = {"session_id": str(uuid.uuid4()), "session_secret": secrets.token_hex(32)}
+with os.fdopen(os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600), "w") as file:
+    json.dump(credential, file)
+```
+
+Keep the full original claim, heartbeat sequence, and finish/release operation
+payloads with that private state before sending them. Resume from it after a client
+restart. Never commit credentials or place them in URLs, logs or issue comments.
+Circular stores only the secret digest. Inspection and errors never recover a
+secret; only an accepted claim response echoes the secret supplied by that caller.
+The MCP server adds no background heartbeats and stores no credential cache.
+
+Example finish payload (use the requirement keys from the Task's frozen policy):
+
+```json
+{
+  "session_id": "<retained session UUID>",
+  "session_secret": "<retained 64 lowercase hex characters>",
+  "operation_id": "<retained random UUID for this finish>",
+  "outcome": "succeeded",
+  "summary": "Implemented the change and validated it",
+  "report": {
+    "result": "Implemented the change and validated it",
+    "evidence": [{"key": "tests", "detail": "All relevant tests passed"}]
+  }
+}
+```
+
+Retry an uncertain claim with the **same** session ID, secret, original revision,
+and metadata. Retry a finish/release with the **same** operation ID and exact
+arguments; retry a heartbeat with the same sequence. A successful replay returns
+the saved receipt and current state without another session or repeated stage
+transition. It cannot restore an old owner or complete a reopened Task. Changing
+arguments under an accepted identity returns `work_replay_conflict`.
+
+Work errors contain stable codes and a reload action/path. `task_owned` includes
+the current owner's safe summary. `task_not_ready` includes preparation reasons
+and blocking prerequisite IDs. `task_revision_conflict` requires a fresh read for
+a new intent. `invalid_completion_report` and `completion_blocked` explain missing
+evidence. `work_credential_invalid` requires the saved credential;
+`work_claim_lost` means stop reporting for that session and ask the user to resolve
+ownership. Do not automatically create a new identity or release a competing owner.
+
+`release_task_work` is **explicit user recovery**, not an agent's workaround for a
+conflict. Pass the Task ID, `expected_session_id` from inspection, a retained
+`operation_id`, and the user's nonblank reason. An old expected session cannot
+release its replacement. Releasing an external claim blocks further Circular
+reports but cannot stop the client's local edits. Releasing native work requests
+cancellation and returns `pending_cleanup: true` while ownership must remain.
+Release does not mark Done or Ready; a new attempt needs explicit preparation.
+
+The corresponding private HTTP routes are:
+
+| Tool | HTTP route |
+| --- | --- |
+| `get_task_work` | `GET /api/v1/tasks/{task_id}/work` |
+| `get_work_session` | `GET /api/v1/work-sessions/{session_id}` |
+| `claim_task_work` | `POST /api/v1/tasks/{task_id}/work/claim` |
+| `heartbeat_task_work` | `POST /api/v1/work-sessions/{session_id}/heartbeat` |
+| `finish_task_work` | `POST /api/v1/work-sessions/{session_id}/finish` |
+| `release_task_work` | `POST /api/v1/tasks/{task_id}/work/release` |
+
+HTTP bodies omit the resource ID already present in the path. First claim returns
+201; exact replay returns 200. Writes require JSON, reject duplicate/unknown fields,
+limit the whole body to 128 KiB, and enforce existing origin checks. All work
+responses are `Cache-Control: no-store`. MCP keeps its existing output limits and
+never follows redirects or blindly retries. Upgrade the API and MCP together; an
+older API has no work routes and rejects these calls without starting a Run.
 
 ## Task planning tools
 
