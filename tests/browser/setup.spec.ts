@@ -3,6 +3,7 @@ import { execFileSync } from "node:child_process";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
+import { reviewCurrentProposal } from "./fixtures/approval";
 
 const compose = process.env.CIRCULAR_E2E_COMPOSE === "1";
 const base = `http://127.0.0.1:${compose ? "8000" : "18000"}/api/v1`;
@@ -221,6 +222,8 @@ test("supplied discovery agent prepares the selected repository without starting
   await page
     .getByRole("button", { name: "Explore repository", exact: true })
     .click();
+  await reviewCurrentProposal(page);
+  await page.getByRole("link", { name: "Start Run", exact: true }).click();
   await expect(page).toHaveURL(/\/?\?taskId=/);
   await expect(
     page.getByRole("heading", { name: "Repository discovery", exact: true }),
@@ -523,22 +526,11 @@ test("configure resources in setup, recover from errors, and launch the first Ru
       .getByLabel("Description", { exact: true })
       .fill("Verify the configured Repository and Agent with a complete Run.");
     await page.getByRole("button", { name: "Save Task", exact: true }).click();
+    await reviewCurrentProposal(page);
     const completion = page.getByRole("region", {
       name: "Task completion",
       exact: true,
     });
-    await completion
-      .getByRole("button", { name: "Set completion policy", exact: true })
-      .click();
-    await completion
-      .getByRole("combobox", { name: "Completion policy", exact: true })
-      .click();
-    await page
-      .getByRole("option", { name: "Direct completion", exact: true })
-      .click();
-    await completion
-      .getByRole("button", { name: "Save completion policy", exact: true })
-      .click();
     await expect(
       completion.getByRole("button", {
         name: "Edit completion policy",

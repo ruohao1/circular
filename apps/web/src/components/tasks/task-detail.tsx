@@ -9,6 +9,7 @@ import type {
   TaskPlanningDetail,
 } from "@/api";
 import { scheduleError, type TaskPlanningDraft } from "@/lib/task-schedules";
+import { TaskApproval } from "./task-approval";
 import { TaskCompletion } from "./task-completion";
 import { TaskScheduleFields } from "./task-schedule-fields";
 import {
@@ -314,6 +315,7 @@ export function TaskDetail(p: TaskDetailProps) {
             </Button>
           </div>
         </form>
+        <TaskApproval key={task.id+":"+task.revision} taskID={task.id} />
         <TaskCompletion taskID={task.id} disabled={pending || p.dirty} />
         <div className="my-6 flex flex-wrap items-end gap-3 border-y py-5">
           <ResourceSelect

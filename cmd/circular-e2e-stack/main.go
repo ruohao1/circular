@@ -126,7 +126,8 @@ func run(parent context.Context) error {
 	go func() { _ = providerServer.Serve(providerListener) }()
 	providerURL := "http://127.0.0.1:18001"
 	connections := integrations.Config{
-		APIURL: "http://127.0.0.1:18000", WebURL: "http://127.0.0.1:15173",
+		ApproverGitHubIDs: []string{"101", "7"},
+		APIURL:            "http://127.0.0.1:18000", WebURL: "http://127.0.0.1:15173",
 		EncryptionKey: base64.StdEncoding.EncodeToString([]byte(strings.Repeat("fixture-", 4))),
 		GitHubURL:     providerURL, GitHubAPIURL: providerURL, LinearURL: providerURL, LinearAPIURL: providerURL,
 	}

@@ -216,7 +216,8 @@ func (s *Service) processLinearSession(ctx context.Context, c webhookClaim) (str
 			source.ProjectID = issue.Project.ID
 		}
 		if source.Prompt == "" {
-			source.Prompt = issue.Title + "\n\n" + issue.Description
+			// Keep the same scope as manual import; the title is stored separately.
+			source.Prompt = issue.Description
 		}
 	}
 	if verified.Creator != nil && event.Session.Creator != nil && verified.Creator.ID == event.Session.Creator.ID && event.Session.CreatorID == verified.Creator.ID && validUUID(verified.Creator.ID) {

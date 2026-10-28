@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/ruohao1/circular/internal/integrations"
+	"github.com/ruohao1/circular/internal/postgres"
 	"github.com/ruohao1/circular/internal/prreviews"
 )
 
@@ -436,6 +437,11 @@ func (a *api) linearImport(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	id, created, err := a.integrations.ImportLinear(r.Context(), project, values["repository_id"].(string), values["issue_id"].(string))
+	var approval *postgres.TaskProposalNeeded
+	if errors.As(err, &approval) {
+		a.proposalResponse(w, 202, approval.Proposal)
+		return
+	}
 	if integrationError(w, err) {
 		return
 	}

@@ -16,6 +16,7 @@ import (
 const MaxLineBytes = 1024 * 1024
 
 type Input struct {
+	TaskApprovalContext     json.RawMessage
 	CompletionContract      *completion.Contract
 	DelegationContextSHA256 string
 	RunID                   uuid.UUID

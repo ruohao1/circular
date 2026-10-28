@@ -2574,7 +2574,7 @@
                 "type": "null"
               }
             ],
-            "description": "Optional planned calendar date in years 0001\u20139999. Finish is inclusive."
+            "description": "Optional planned calendar date in years 0001–9999. Finish is inclusive."
           },
           "planned_finish_date": {
             "anyOf": [
@@ -2587,7 +2587,7 @@
                 "type": "null"
               }
             ],
-            "description": "Optional planned calendar date in years 0001\u20139999. Finish is inclusive."
+            "description": "Optional planned calendar date in years 0001–9999. Finish is inclusive."
           },
           "parent_task_id": {
             "anyOf": [
@@ -2692,7 +2692,7 @@
                 "type": "null"
               }
             ],
-            "description": "Optional planned calendar date in years 0001\u20139999. Finish is inclusive."
+            "description": "Optional planned calendar date in years 0001–9999. Finish is inclusive."
           },
           "planned_finish_date": {
             "anyOf": [
@@ -2705,7 +2705,7 @@
                 "type": "null"
               }
             ],
-            "description": "Optional planned calendar date in years 0001\u20139999. Finish is inclusive."
+            "description": "Optional planned calendar date in years 0001–9999. Finish is inclusive."
           },
           "parent_task_id": {
             "anyOf": [
@@ -3534,7 +3534,7 @@
                 "type": "null"
               }
             ],
-            "description": "Optional planned calendar date in years 0001\u20139999. Finish is inclusive."
+            "description": "Optional planned calendar date in years 0001–9999. Finish is inclusive."
           },
           "planned_finish_date": {
             "anyOf": [
@@ -3547,7 +3547,7 @@
                 "type": "null"
               }
             ],
-            "description": "Optional planned calendar date in years 0001\u20139999. Finish is inclusive."
+            "description": "Optional planned calendar date in years 0001–9999. Finish is inclusive."
           },
           "parent_task_id": {
             "anyOf": [
@@ -3970,7 +3970,7 @@
                 "type": "null"
               }
             ],
-            "description": "Optional planned calendar date in years 0001\u20139999. Finish is inclusive."
+            "description": "Optional planned calendar date in years 0001–9999. Finish is inclusive."
           },
           "planned_finish_date": {
             "anyOf": [
@@ -3983,7 +3983,7 @@
                 "type": "null"
               }
             ],
-            "description": "Optional planned calendar date in years 0001\u20139999. Finish is inclusive."
+            "description": "Optional planned calendar date in years 0001–9999. Finish is inclusive."
           },
           "expected_board_revision": {
             "type": "integer",
@@ -4194,6 +4194,7 @@
           },
           "status": {
             "enum": [
+              "awaiting_approval",
               "waiting",
               "continuing",
               "completed",
@@ -4205,6 +4206,17 @@
           "target_agent_id": {
             "format": "uuid",
             "type": "string"
+          },
+          "proposal_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
@@ -4214,7 +4226,8 @@
           "child_task_id",
           "child_run_id",
           "request_key",
-          "status"
+          "status",
+          "proposal_id"
         ],
         "type": "object"
       },
@@ -5657,6 +5670,487 @@
           "action",
           "reload_path"
         ]
+      },
+      "TaskProposalDraft": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          },
+          "purpose": {
+            "type": "string",
+            "maxLength": 4000
+          },
+          "description": {
+            "type": "string",
+            "maxLength": 20000
+          },
+          "acceptance_criteria": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 2000
+            },
+            "maxItems": 20
+          },
+          "open_questions": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 2000
+            },
+            "maxItems": 20
+          },
+          "repository_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "parent_task_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "prerequisite_task_ids": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "maxItems": 100,
+            "uniqueItems": true
+          },
+          "completion_policy": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CompletionPolicy"
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "mode": {
+                    "const": "unresolved",
+                    "type": "string"
+                  },
+                  "requirements": {
+                    "type": "array",
+                    "items": {
+                      "$ref": "#/components/schemas/CompletionRequirement"
+                    },
+                    "maxItems": 0
+                  }
+                },
+                "required": [
+                  "mode",
+                  "requirements"
+                ],
+                "additionalProperties": false
+              }
+            ]
+          },
+          "sources": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "label": {
+                  "type": "string",
+                  "maxLength": 200
+                },
+                "url": {
+                  "type": "string",
+                  "format": "uri",
+                  "maxLength": 2048,
+                  "pattern": "^https://"
+                }
+              },
+              "required": [
+                "label",
+                "url"
+              ]
+            },
+            "maxItems": 20
+          },
+          "priority": {
+            "type": "string",
+            "enum": [
+              "none",
+              "low",
+              "normal",
+              "high",
+              "urgent"
+            ]
+          },
+          "preferred_agent_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "planned_start_date": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "planned_finish_date": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "title",
+          "purpose",
+          "description",
+          "acceptance_criteria",
+          "open_questions",
+          "repository_id",
+          "parent_task_id",
+          "prerequisite_task_ids",
+          "completion_policy",
+          "sources",
+          "priority",
+          "preferred_agent_id",
+          "planned_start_date",
+          "planned_finish_date"
+        ]
+      },
+      "TaskProposalCreate": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "project_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "request_key": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "target_task_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "expected_task_revision": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "proposer": {
+            "type": "string",
+            "maxLength": 200
+          },
+          "draft": {
+            "$ref": "#/components/schemas/TaskProposalDraft"
+          }
+        },
+        "required": [
+          "project_id",
+          "request_key",
+          "draft"
+        ]
+      },
+      "TaskProposalRevise": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "expected_revision": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          },
+          "expected_task_revision": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "draft": {
+            "$ref": "#/components/schemas/TaskProposalDraft"
+          }
+        },
+        "required": [
+          "expected_revision",
+          "draft"
+        ]
+      },
+      "TaskProposalDecisionInput": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "expected_revision": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          },
+          "decision": {
+            "type": "string",
+            "enum": [
+              "approved",
+              "rejected"
+            ]
+          },
+          "reason": {
+            "type": "string",
+            "maxLength": 4000
+          }
+        },
+        "required": [
+          "expected_revision",
+          "decision"
+        ]
+      },
+      "TaskProposalDecision": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "revision": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          },
+          "decision": {
+            "type": "string",
+            "enum": [
+              "approved",
+              "rejected"
+            ]
+          },
+          "approver_id": {
+            "type": "string"
+          },
+          "approver_login": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "revision",
+          "decision",
+          "approver_id",
+          "approver_login",
+          "reason",
+          "created_at"
+        ]
+      },
+      "TaskProposal": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "project_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "target_task_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "task_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "revision": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          },
+          "expected_task_revision": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "approved",
+              "rejected"
+            ]
+          },
+          "proposer": {
+            "type": "string"
+          },
+          "source": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "draft": {
+            "$ref": "#/components/schemas/TaskProposalDraft"
+          },
+          "decision": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TaskProposalDecision"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "review_url": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "project_id",
+          "target_task_id",
+          "task_id",
+          "revision",
+          "expected_task_revision",
+          "status",
+          "proposer",
+          "source",
+          "draft",
+          "decision",
+          "created_at",
+          "updated_at",
+          "review_url"
+        ]
+      },
+      "TaskApproval": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "approved": {
+            "type": "boolean"
+          },
+          "proposal": {
+            "$ref": "#/components/schemas/TaskProposalCreate"
+          }
+        },
+        "required": [
+          "approved",
+          "proposal"
+        ]
+      },
+      "ApprovalSession": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "configured": {
+            "type": "boolean"
+          },
+          "user": {
+            "anyOf": [
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "user_id": {
+                    "type": "string"
+                  },
+                  "login": {
+                    "type": "string"
+                  },
+                  "expires_at": {
+                    "type": "string",
+                    "format": "date-time"
+                  }
+                },
+                "required": [
+                  "user_id",
+                  "login",
+                  "expires_at"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "csrf_token": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "configured",
+          "user",
+          "csrf_token"
+        ]
+      },
+      "ApprovalLogin": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "return_path": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "return_path"
+        ]
       }
     }
   },
@@ -6444,6 +6938,16 @@
               }
             },
             "description": "Invalid request"
+          },
+          "202": {
+            "description": "Scope needs user approval; no Task scope was changed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProposal"
+                }
+              }
+            }
           }
         },
         "summary": "Prepare a repository discovery Task using the built-in Agent",
@@ -7954,6 +8458,16 @@
               }
             },
             "description": "Provider is not configured"
+          },
+          "202": {
+            "description": "Scope needs user approval; no Task scope was changed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProposal"
+                }
+              }
+            }
           }
         },
         "summary": "Import linear issue",
@@ -10299,6 +10813,16 @@
               }
             },
             "description": "Validation Error"
+          },
+          "202": {
+            "description": "Scope needs user approval; no Task scope was changed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProposal"
+                }
+              }
+            }
           }
         },
         "summary": "Create Task"
@@ -10430,6 +10954,16 @@
           },
           "413": {
             "description": "Body exceeds 128 KiB"
+          },
+          "202": {
+            "description": "Scope needs user approval; no Task scope was changed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProposal"
+                }
+              }
+            }
           }
         },
         "requestBody": {
@@ -11932,6 +12466,16 @@
           },
           "413": {
             "description": "Request exceeds 128 KiB"
+          },
+          "202": {
+            "description": "Scope needs user approval; no Task scope was changed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProposal"
+                }
+              }
+            }
           }
         },
         "requestBody": {
@@ -12665,6 +13209,465 @@
                 "$ref": "#/components/schemas/WorkReleaseRequest"
               }
             }
+          }
+        }
+      }
+    },
+    "/api/v1/task-proposals": {
+      "post": {
+        "operationId": "createTaskProposal",
+        "parameters": [],
+        "responses": {
+          "201": {
+            "description": "Result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProposal"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Separate browser sign-in required"
+          },
+          "403": {
+            "description": "Origin or CSRF check failed"
+          },
+          "404": {
+            "description": "Record not found"
+          },
+          "409": {
+            "description": "Revision or policy conflict"
+          },
+          "422": {
+            "description": "Invalid proposal"
+          },
+          "503": {
+            "description": "Approval sign-in is not configured"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TaskProposalCreate"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/projects/{project_id}/task-proposals": {
+      "get": {
+        "operationId": "listTaskProposals",
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/TaskProposal"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Separate browser sign-in required"
+          },
+          "403": {
+            "description": "Origin or CSRF check failed"
+          },
+          "404": {
+            "description": "Record not found"
+          },
+          "409": {
+            "description": "Revision or policy conflict"
+          },
+          "422": {
+            "description": "Invalid proposal"
+          },
+          "503": {
+            "description": "Approval sign-in is not configured"
+          }
+        }
+      }
+    },
+    "/api/v1/task-proposals/{proposal_id}": {
+      "get": {
+        "operationId": "getTaskProposal",
+        "parameters": [
+          {
+            "name": "proposal_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProposal"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Separate browser sign-in required"
+          },
+          "403": {
+            "description": "Origin or CSRF check failed"
+          },
+          "404": {
+            "description": "Record not found"
+          },
+          "409": {
+            "description": "Revision or policy conflict"
+          },
+          "422": {
+            "description": "Invalid proposal"
+          },
+          "503": {
+            "description": "Approval sign-in is not configured"
+          }
+        }
+      },
+      "patch": {
+        "operationId": "reviseTaskProposal",
+        "parameters": [
+          {
+            "name": "proposal_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProposal"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Separate browser sign-in required"
+          },
+          "403": {
+            "description": "Origin or CSRF check failed"
+          },
+          "404": {
+            "description": "Record not found"
+          },
+          "409": {
+            "description": "Revision or policy conflict"
+          },
+          "422": {
+            "description": "Invalid proposal"
+          },
+          "503": {
+            "description": "Approval sign-in is not configured"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TaskProposalRevise"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/task-proposals/{proposal_id}/decision": {
+      "post": {
+        "operationId": "decideTaskProposal",
+        "parameters": [
+          {
+            "name": "proposal_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProposal"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Separate browser sign-in required"
+          },
+          "403": {
+            "description": "Origin or CSRF check failed"
+          },
+          "404": {
+            "description": "Record not found"
+          },
+          "409": {
+            "description": "Revision or policy conflict"
+          },
+          "422": {
+            "description": "Invalid proposal"
+          },
+          "503": {
+            "description": "Approval sign-in is not configured"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TaskProposalDecisionInput"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/tasks/{task_id}/approval": {
+      "get": {
+        "operationId": "getTaskApproval",
+        "parameters": [
+          {
+            "name": "task_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskApproval"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Separate browser sign-in required"
+          },
+          "403": {
+            "description": "Origin or CSRF check failed"
+          },
+          "404": {
+            "description": "Record not found"
+          },
+          "409": {
+            "description": "Revision or policy conflict"
+          },
+          "422": {
+            "description": "Invalid proposal"
+          },
+          "503": {
+            "description": "Approval sign-in is not configured"
+          }
+        }
+      }
+    },
+    "/api/v1/approval-auth/session": {
+      "get": {
+        "operationId": "getApprovalSession",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApprovalSession"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Separate browser sign-in required"
+          },
+          "403": {
+            "description": "Origin or CSRF check failed"
+          },
+          "404": {
+            "description": "Record not found"
+          },
+          "409": {
+            "description": "Revision or policy conflict"
+          },
+          "422": {
+            "description": "Invalid proposal"
+          },
+          "503": {
+            "description": "Approval sign-in is not configured"
+          }
+        }
+      }
+    },
+    "/api/v1/approval-auth/github/start": {
+      "post": {
+        "operationId": "startApprovalLogin",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "url": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "url"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Separate browser sign-in required"
+          },
+          "403": {
+            "description": "Origin or CSRF check failed"
+          },
+          "404": {
+            "description": "Record not found"
+          },
+          "409": {
+            "description": "Revision or policy conflict"
+          },
+          "422": {
+            "description": "Invalid proposal"
+          },
+          "503": {
+            "description": "Approval sign-in is not configured"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApprovalLogin"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/approval-auth/logout": {
+      "post": {
+        "operationId": "endApprovalSession",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "signed_out": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "signed_out"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Separate browser sign-in required"
+          },
+          "403": {
+            "description": "Origin or CSRF check failed"
+          },
+          "404": {
+            "description": "Record not found"
+          },
+          "409": {
+            "description": "Revision or policy conflict"
+          },
+          "422": {
+            "description": "Invalid proposal"
+          },
+          "503": {
+            "description": "Approval sign-in is not configured"
+          }
+        }
+      }
+    },
+    "/api/v1/approval-auth/github/callback": {
+      "get": {
+        "operationId": "completeApprovalLogin",
+        "parameters": [
+          {
+            "name": "state",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "code",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "303": {
+            "description": "Return to the private review page"
           }
         }
       }

@@ -19,6 +19,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/ruohao1/circular/internal/integrations"
+	"github.com/ruohao1/circular/internal/postgres"
 	"github.com/ruohao1/circular/internal/testsupport"
 )
 
@@ -239,9 +240,11 @@ func TestImportsAreScopedIdempotentAndSupplyOnlyVerifiedGitCredentials(t *testin
 		}
 	}
 	task, created, err := f.service.ImportLinear(t.Context(), f.project, repository, testsupport.ProviderIssueID)
-	if err != nil || !created {
-		t.Fatal("issue import failed", err)
+	var needed *postgres.TaskProposalNeeded
+	if !errors.As(err, &needed) || created || task != "" {
+		t.Fatal("issue import bypassed approval", task, err)
 	}
+	task = testsupport.ApproveProposal(t, f.pool, needed.Proposal.ID).String()
 	again, created, err = f.service.ImportLinear(t.Context(), f.project, repository, testsupport.ProviderIssueID)
 	if err != nil || created || again != task {
 		t.Fatal("issue import duplicated", err)

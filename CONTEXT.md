@@ -16,8 +16,17 @@ A reusable, user-defined engineering specialization and backend configuration. I
 _Avoid_: Bot, worker, run
 
 **Task**:
-A durable unit of engineering work that may be attempted more than once.
+A durable unit of engineering work that may be attempted more than once. It can represent a linked issue or local work.
 _Avoid_: Job
+
+**Linked issue**:
+An issue in an external tracker that identifies the same work as a Circular Task. A Linear issue normally corresponds to one Task within a Project.
+
+**Task proposal**:
+Suggested new work or a change in scope that awaits the user's decision.
+
+**Task approval**:
+A user's recorded decision accepting a specific scope of work. Existing approval remains applicable when linked work enters Circular with that scope unchanged.
 
 **Subtask**:
 A Task linked to a parent Task, with its own ownership and outcome. Finishing a subtask does not finish its parent.

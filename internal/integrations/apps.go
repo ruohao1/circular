@@ -278,7 +278,7 @@ func (s *Service) BeginGitHubRegistration(ctx context.Context, project, organiza
 	manifest, _ := json.Marshal(map[string]any{
 		"name": "Circular " + state[:8], "url": s.WebURL(),
 		"description":  "Read selected repositories for Circular coding tasks.",
-		"redirect_url": s.RegistrationCallbackURL(), "callback_urls": []string{s.CallbackURL("github")},
+		"redirect_url": s.RegistrationCallbackURL(), "callback_urls": []string{s.CallbackURL("github"), s.ApprovalCallbackURL()},
 		"setup_url": s.WebURL() + "/setup?section=integrations",
 		"public":    false, "request_oauth_on_install": false, "default_permissions": map[string]string{"contents": "write", "metadata": "read", "administration": "write", "pull_requests": "write", "actions": "read", "checks": "read"}, "default_events": []string{},
 	})

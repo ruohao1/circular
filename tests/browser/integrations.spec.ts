@@ -1,9 +1,9 @@
+import { createResource, reviewCurrentProposal } from "./fixtures/approval";
 import { expect, test } from "@playwright/test";
 import { execFileSync } from "node:child_process";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { chooseDirectCompletion } from "./fixtures/plan-completion";
 
 const base = "http://127.0.0.1:18000/api/v1";
 test.skip(
@@ -24,11 +24,8 @@ test("connect providers, import resources, launch an existing Task, and reconnec
   writeFileSync(join(source, "README.md"), "Integration fixture\n");
   git("add", ".");
   git("commit", "-m", "initial");
-  const post = async (path: string, data: object) => {
-    const response = await request.post(`${base}/${path}`, { data });
-    expect(response.status()).toBe(201);
-    return response.json();
-  };
+  const post = (path: string, data: object) =>
+    createResource(request, path, data);
   try {
     const project = await post("projects", {
       name: `${process.env.CIRCULAR_E2E_PREFIX}integrations`,
@@ -264,25 +261,20 @@ test("connect providers, import resources, launch an existing Task, and reconnec
     await page
       .getByRole("button", { name: "Import TST-1", exact: true })
       .click();
-    await expect(page).toHaveURL(/\/\?taskId=[0-9a-f-]+$/);
+    await reviewCurrentProposal(page);
     const taskId = new URL(page.url()).searchParams.get("taskId")!;
-    await expect(
-      page.getByRole("heading", { name: "Imported Task", exact: true }),
-    ).toBeVisible();
-    await expect(page.getByLabel("Task title", { exact: true })).toHaveValue(
+    const dialog = page.getByRole("dialog");
+    await expect(dialog.getByLabel("Task title", { exact: true })).toHaveValue(
       "Imported integration task",
     );
     await expect(
-      page.getByRole("combobox", { name: "Repository", exact: true }),
-    ).toContainText("Local integration source");
-    await expect(
-      page.getByRole("combobox", { name: "Repository", exact: true }),
-    ).toBeDisabled();
-    await expect(page.getByLabel("Description", { exact: true })).toHaveValue(
+      dialog.getByLabel("Task title", { exact: true }),
+    ).toHaveAttribute("readonly", "");
+    await expect(dialog.getByLabel("Description", { exact: true })).toHaveValue(
       "Verify a task imported from Linear.",
     );
     await page.reload();
-    await chooseDirectCompletion(page);
+    await page.getByRole("link", { name: "Start Run", exact: true }).click();
     await page.getByRole("button", { name: "Start Run", exact: true }).click();
     await expect(page).toHaveURL(/\/runs\/[0-9a-f-]+$/);
     await expect(page.locator(".heading-actions .status")).toHaveText(
@@ -306,6 +298,12 @@ test("connect providers, import resources, launch an existing Task, and reconnec
       external_refs: { linear: { identifier: "TST-1" } },
     });
     await page.goto("/setup?section=integrations");
+    await page
+      .getByRole("combobox", { name: "Circular repository", exact: true })
+      .click();
+    await page
+      .getByRole("option", { name: "Local integration source", exact: true })
+      .click();
     await page
       .getByRole("button", { name: "Import TST-1", exact: true })
       .click();

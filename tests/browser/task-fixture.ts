@@ -93,6 +93,8 @@ export async function fixture(page: Page) {
       });
     if (["POST", "PATCH"].includes(req.method()))
       state.posts.push({ path, body: req.postDataJSON() });
+    if (/^\/tasks\/[^/]+\/approval$/.test(path))
+      return json({ approved: true });
     if (path === "/projects") return json(projects);
     if (path === "/repositories")
       return json(

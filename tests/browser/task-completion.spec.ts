@@ -1,3 +1,4 @@
+import { createResource, reviewCurrentProposal } from "./fixtures/approval";
 import { test, expect } from "@playwright/test";
 import { execFileSync } from "node:child_process";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
@@ -27,11 +28,8 @@ test("plan direct completion, run the native report tool, and retain the frozen 
   git("add", ".");
   git("commit", "-m", "initial");
   if (compose) git("bundle", "create", "fixture.bundle", "--all");
-  const post = async (path: string, data: object) => {
-    const r = await request.post(`${base}/${path}`, { data });
-    expect(r.status()).toBe(201);
-    return r.json();
-  };
+  const post = (path: string, data: object) =>
+    createResource(request, path, data);
   try {
     const project = await post("projects", {
       name: `${process.env.CIRCULAR_E2E_PREFIX}completion-direct`,
@@ -69,19 +67,8 @@ test("plan direct completion, run the native report tool, and retain the frozen 
       name: "Task completion",
       exact: true,
     });
-    await expect(
-      panel.getByText("Choose a completion policy before starting work.", {
-        exact: true,
-      }),
-    ).toBeVisible();
     await panel
-      .getByRole("button", { name: "Set completion policy", exact: true })
-      .click();
-    await panel
-      .getByRole("combobox", { name: "Completion policy", exact: true })
-      .click();
-    await page
-      .getByRole("option", { name: "Direct completion", exact: true })
+      .getByRole("button", { name: "Edit completion policy", exact: true })
       .click();
     await panel
       .getByRole("button", { name: "Add requirement", exact: true })
@@ -95,6 +82,7 @@ test("plan direct completion, run the native report tool, and retain the frozen 
     await panel
       .getByRole("button", { name: "Save completion policy", exact: true })
       .click();
+    await reviewCurrentProposal(page);
     await expect(
       panel.getByRole("button", {
         name: "Edit completion policy",

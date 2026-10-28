@@ -24,13 +24,13 @@ func TestTaskScheduleMCPPresenceAndConditionalRevision(t *testing.T) {
 	defer s.Close()
 	c := connect(t, controlmcp.Config{APIURL: s.URL})
 	project := call(t, c, "create_project", object{"name": "Schedule"})["project"].(object)["id"]
-	task := call(t, c, "create_task", object{"project_id": project, "title": "Schedule"})["task"].(object)
+	task := createApprovedTask(t, p, c, object{"project_id": project, "title": "Schedule"})
 	detail := call(t, c, "get_task_planning", object{"task_id": task["id"]})
 	out := call(t, c, "update_task", object{"task_id": task["id"], "expected_revision": 1, "expected_board_revision": detail["board_revision"], "planned_start_date": "2026-10-04", "planned_finish_date": "2026-10-06"})
 	if out["task"].(object)["planned_finish_date"] != "2026-10-06" {
 		t.Fatal(out)
 	}
-	out = call(t, c, "update_task", object{"task_id": task["id"], "expected_revision": 2, "title": "Renamed"})
+	out = approveTaskEdit(t, p, c, object{"task_id": task["id"], "expected_revision": 2, "title": "Renamed"})
 	if out["task"].(object)["planned_start_date"] != "2026-10-04" {
 		t.Fatal("omission cleared date", out)
 	}

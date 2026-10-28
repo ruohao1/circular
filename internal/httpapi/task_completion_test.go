@@ -31,11 +31,14 @@ func TestCompletionHTTPPolicyFreezeAndMoveParity(t *testing.T) {
 	repo := f.create(t, "repositories", map[string]any{"project_id": project, "name": "Docs", "clone_url": "/fixture"})["id"]
 	task := f.create(t, "tasks", map[string]any{"project_id": project, "title": "Document decision", "repository_id": repo, "description": "Record the decision and reasons", "status": "ready"})["id"].(string)
 	path := "/api/v1/tasks/" + task
+	if _, err := f.pool.Exec(t.Context(), `UPDATE tasks SET completion_policy=NULL WHERE id=$1`, task); err != nil {
+		t.Fatal(err)
+	}
 	var v completion.View
 	if err := json.Unmarshal(f.request(t, "GET", path+"/completion", "", 200), &v); err != nil || v.Policy != nil {
 		t.Fatal(v, err)
 	}
-	f.request(t, "PUT", path+"/completion-policy", `{"expected_revision":1,"policy":{"mode":"direct_completion","requirements":[{"key":"result","description":"Decision with reasons"}]}}`, 200)
+	f.approveMutation(t, "PUT", path+"/completion-policy", `{"expected_revision":1,"policy":{"mode":"direct_completion","requirements":[{"key":"result","description":"Decision with reasons"}]}}`)
 	for _, body := range []string{
 		`{"expected_revision":2,"policy":{"mode":"direct_completion","requirements":[],"force":true}}`,
 		`{"expected_revision":2,"policy":{"mode":"direct_completion","mode":"review_required"}}`,

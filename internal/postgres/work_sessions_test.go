@@ -15,6 +15,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/ruohao1/circular/internal/postgres"
+	"github.com/ruohao1/circular/internal/testsupport"
 )
 
 var workNow = time.Date(2026, 10, 20, 12, 0, 0, 0, time.UTC)
@@ -163,6 +164,7 @@ func TestExternalWorkReplayAfterRestart(t *testing.T) {
 		if _, err = f.p.Exec(t.Context(), `INSERT INTO tasks(id,project_id,repository_id,title,description,status,external_refs,completion_policy) VALUES($1,$2,$3,'Other','Ready work','ready','{}','{"mode":"direct_completion","requirements":[]}')`, secondTask, secondProject, repo); err != nil {
 			t.Fatal(err)
 		}
+		testsupport.ApproveTask(t, f.p, secondTask)
 		a := externalClaim(f.task(t, "First", "ready", "{}"))
 		b := a
 		b.TaskID = secondTask

@@ -7,7 +7,6 @@ import (
 	"errors"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
-	"github.com/ruohao1/circular/internal/completion"
 	"github.com/ruohao1/circular/internal/integrations"
 	"github.com/ruohao1/circular/internal/postgres"
 	"github.com/ruohao1/circular/internal/testsupport"
@@ -43,6 +42,7 @@ func requestTask(t *testing.T, f fixture, route integrations.RequestRoute, reque
 	if err != nil {
 		t.Fatal(err)
 	}
+	testsupport.ApproveTask(t, f.pool, id)
 	return id
 }
 
@@ -148,7 +148,7 @@ func TestExternalRequestIneligibleNeedsPreparation(t *testing.T) {
 				t.Fatal(worked, err)
 			}
 			got, err := f.service.ExternalRequest(t.Context(), request.ID)
-			if err != nil || got.Status != "awaiting_approval" || !strings.Contains(got.Reason, "/tasks?taskId="+task.String()) {
+			if err != nil || got.Status != "awaiting_approval" || !strings.Contains(got.Reason, "/proposals/") {
 				t.Fatal(got, err)
 			}
 			var runs int
@@ -361,6 +361,7 @@ func TestExternalInputCannotBeForgedThroughRunReferences(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
+	testsupport.ApproveTaskTx(t, tx, uuid.MustParse(task))
 	r, e := postgres.CreateRun(t.Context(), tx, postgres.RunLaunchInput{TaskID: uuid.MustParse(task), AgentID: uuid.MustParse(route.AgentID), ExternalRefs: refs})
 	if e != nil {
 		t.Fatal(e)
@@ -374,7 +375,7 @@ func TestExternalInputCannotBeForgedThroughRunReferences(t *testing.T) {
 	}
 }
 
-func TestExternalRequestWaitsForCompletionPolicy(t *testing.T) {
+func TestExternalRequestWaitsForTaskApproval(t *testing.T) {
 	f, route := agentRequestFixture(t)
 	if _, err := f.service.SaveRequestRoute(t.Context(), route); err != nil {
 		t.Fatal(err)
@@ -384,21 +385,77 @@ func TestExternalRequestWaitsForCompletionPolicy(t *testing.T) {
 		t.Fatal(worked, err)
 	}
 	waiting, err := f.service.ExternalRequest(t.Context(), id)
-	if err != nil || waiting.Status != "awaiting_approval" || waiting.RunID != "" || !strings.Contains(waiting.Reason, "completion policy") || !strings.Contains(waiting.Reason, "/tasks?taskId=") {
+	if err != nil || waiting.Status != "awaiting_approval" || waiting.RunID != "" || !strings.Contains(waiting.Reason, "/proposals/") {
 		t.Fatal(waiting, err)
 	}
 	if worked, err := f.service.ProcessExternalRequest(t.Context()); err != nil || worked {
 		t.Fatal("unplanned request retried automatically", worked, err)
 	}
-	var task uuid.UUID
-	if err = f.pool.QueryRow(t.Context(), `SELECT id FROM tasks WHERE external_refs->'linear'->>'issue_id'=$1`, waiting.IssueID).Scan(&task); err != nil {
+	var proposal uuid.UUID
+	if err = f.pool.QueryRow(t.Context(), `SELECT id FROM task_proposals WHERE source->'linear'->>'issue_id'=$1`, waiting.IssueID).Scan(&proposal); err != nil {
 		t.Fatal(err)
 	}
-	requestWorkTx(t, f, func(tx pgx.Tx) error {
-		return postgres.SetTaskCompletionPolicy(t.Context(), tx, task, 1, completion.Policy{Mode: "direct_completion"})
-	})
+	testsupport.ApproveProposal(t, f.pool, proposal)
 	got, err := f.service.StartExternalRequest(t.Context(), id, waiting.InputFingerprint)
 	if err != nil || got.Status != "queued" || got.RunID == "" {
 		t.Fatal("planned request did not reactivate", got, err)
+	}
+}
+
+func TestExternalRequestReusesUnchangedImportedScope(t *testing.T) {
+	for _, change := range []string{"unchanged", "description", "prompt"} {
+		t.Run(change, func(t *testing.T) {
+			f, route := agentRequestFixture(t)
+			if _, err := f.service.SaveRequestRoute(t.Context(), route); err != nil {
+				t.Fatal(err)
+			}
+			_, _, err := f.service.ImportLinear(t.Context(), f.project, route.RepositoryID, testsupport.ProviderIssueID)
+			var required *postgres.TaskProposalNeeded
+			if !errors.As(err, &required) {
+				t.Fatalf("expected proposal: %v", err)
+			}
+			task := testsupport.ApproveProposal(t, f.pool, required.Proposal.ID)
+			prompt := ""
+			if change == "prompt" {
+				prompt = "Implement a different request"
+			}
+			payload := testsupport.LinearAgentEvent(uuid.NewString(), "created", prompt)
+			issue := payload["agentSession"].(map[string]any)["issue"].(map[string]any)
+			issue["title"] = required.Proposal.Draft.Title
+			issue["description"] = required.Proposal.Draft.Description
+			if change == "description" {
+				issue["description"] = "Implement a changed issue scope"
+			}
+			issue["url"] = "https://linear.app/circular-fixture/issue/TST-1/imported-task"
+			id := requestEvent(t, f, payload)
+			request, err := f.service.ExternalRequest(t.Context(), id)
+			if err != nil {
+				t.Fatal(err)
+			}
+			result, err := f.service.StartExternalRequest(t.Context(), id, request.InputFingerprint)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var tasks, proposals int
+			if err = f.pool.QueryRow(t.Context(), `SELECT (SELECT count(*) FROM tasks),(SELECT count(*) FROM task_proposals)`).Scan(&tasks, &proposals); err != nil {
+				t.Fatal(err)
+			}
+			if tasks != 1 {
+				t.Fatalf("duplicate Task: %d", tasks)
+			}
+			if change != "unchanged" {
+				if result.Status != "awaiting_approval" || result.RunID != "" || proposals != 2 {
+					t.Fatal("changed scope reused approval", result, proposals)
+				}
+				return
+			}
+			if result.RunID == "" || proposals != 1 {
+				t.Fatal("unchanged issue asked for approval again", result, proposals)
+			}
+			var runTask uuid.UUID
+			if err = f.pool.QueryRow(t.Context(), `SELECT task_id FROM runs WHERE id=$1`, result.RunID).Scan(&runTask); err != nil || runTask != task {
+				t.Fatal("launch did not reuse approved Task", runTask, err)
+			}
+		})
 	}
 }

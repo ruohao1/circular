@@ -100,6 +100,14 @@ func TestDelegationAdmissionReplayAndConflict(t *testing.T) {
 		}
 	}
 
+	if first.Status != "awaiting_approval" || first.ChildRunID != nil {
+		t.Fatal(first)
+	}
+	approvePendingDelegation(t, f.supervisorFixture)
+	first, err := f.store.SuspendForDelegation(t.Context(), f.id, f.request, f.checkpoint)
+	if err != nil {
+		t.Fatal(err)
+	}
 	var childContract bool
 	if err := f.pool.QueryRow(t.Context(), `SELECT completion_contract->'policy'->>'mode'='direct_completion' AND completion_contract->'policy'->'requirements'->0->>'key'='handoff' FROM tasks WHERE id=$1`, first.ChildTaskID).Scan(&childContract); err != nil || !childContract {
 		t.Fatal("child completion contract missing", err)

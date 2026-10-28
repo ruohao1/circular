@@ -1,3 +1,4 @@
+import { createResource } from "./fixtures/approval";
 import { expect, test } from "@playwright/test";
 import { execFileSync } from "node:child_process";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
@@ -68,11 +69,8 @@ test("render a discovery report and review, edit, create and dismiss its agents"
   git("add", ".");
   git("commit", "-m", "fixture");
   if (compose) git("bundle", "create", "fixture.bundle", "--all");
-  const post = async (path: string, data: object) => {
-    const response = await request.post(`${base}/${path}`, { data });
-    expect(response.status()).toBe(201);
-    return response.json();
-  };
+  const post = (path: string, data: object) =>
+    createResource(request, path, data);
   try {
     const project = await post("projects", {
       name: `${process.env.CIRCULAR_E2E_PREFIX}report-review`,

@@ -52,10 +52,23 @@ func SeedPRReviewSourceContext(ctx context.Context, pool *pgxpool.Pool, project 
 	if err != nil {
 		return prreviews.LaunchSnapshot{}, err
 	}
-	refs := json.RawMessage(`{"linear":{"issue_id":"20000000-0000-4000-8000-000000000003","account_id":"linear-workspace","url":"https://linear.app/fixture/issue/T-1"}}`)
+	refs := json.RawMessage(`{"linear":{"issue_id":"20000000-0000-4000-8000-000000000003","account_id":"20000000-0000-4000-8000-000000000004","url":"https://linear.app/fixture/issue/T-1"}}`)
 	_, err = tx.Exec(ctx, `INSERT INTO tasks(id,project_id,repository_id,title,description,status,external_refs) VALUES($1,$2,$3,'Fix the boundary','Zero must be accepted.','open',$4)`, task, project, repository, refs)
 	if err != nil {
 		return prreviews.LaunchSnapshot{}, err
+	}
+	// Migration tests use this fixture against historical schemas as well.
+	var approvalSchema bool
+	if err = tx.QueryRow(ctx, `SELECT to_regclass(current_schema()||'.task_proposals') IS NOT NULL`).Scan(&approvalSchema); err != nil {
+		return prreviews.LaunchSnapshot{}, err
+	}
+	if approvalSchema {
+		if _, err = tx.Exec(ctx, `UPDATE tasks SET completion_policy='{"mode":"direct_completion","requirements":[]}' WHERE id=$1`, task); err != nil {
+			return prreviews.LaunchSnapshot{}, err
+		}
+		if err = ApproveTaskContext(ctx, tx, task); err != nil {
+			return prreviews.LaunchSnapshot{}, err
+		}
 	}
 	_, err = tx.Exec(ctx, `INSERT INTO runs(id,task_id,agent_id,backend,status,attempt,external_refs) VALUES($1,$2,$3,'codex','succeeded',1,'{}')`, run, task, coder)
 	if err != nil {

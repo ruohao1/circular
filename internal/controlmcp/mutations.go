@@ -141,7 +141,7 @@ func (c *client) addMutations(server *mcp.Server) {
 			}
 			return c.record(ctx, http.MethodPatch, "/agents/"+input.AgentID, "agent", object{"backend_config": settings})
 		})
-	add(server, "create_task", "Prepare a Task with an objective, requirements and optional repository. The repository must belong to the project. Does not start execution; use start_run separately. This is not idempotent; inspect list_tasks before retrying an uncertain response.", false, false, false,
+	add(server, "create_task", "Legacy shortcut that saves a pending task proposal. Prefer propose_task for a retained request key and complete review context. The user must decide in the returned private review page. No Task or Run is created by this tool.", false, false, false,
 		func(ctx context.Context, input taskCreate) (object, error) {
 			if err := textField("title", input.Title, 500); err != nil {
 				return nil, err
@@ -155,16 +155,16 @@ func (c *client) addMutations(server *mcp.Server) {
 					return nil, err
 				}
 			}
-			return c.record(ctx, http.MethodPost, "/tasks", "task", input)
+			return c.record(ctx, http.MethodPost, "/tasks", "proposal", input)
 		})
-	add(server, "prepare_discovery", "Prepare a repository exploration Task using the project's default discovery Agent. Returns its agent_id from the Task's Circular references. Does not start execution; choose settings and use start_run separately. This is not idempotent; inspect list_tasks before retrying an uncertain response.", false, false, false,
+	add(server, "prepare_discovery", "Propose repository exploration with the default discovery Agent. Returns a pending proposal and review URL. The user must approve it in Circular before a Task exists; approval does not start execution.", false, false, false,
 		func(ctx context.Context, input discoveryCreate) (object, error) {
-			result, err := c.record(ctx, http.MethodPost, "/projects/"+input.ProjectID+"/discovery", "task", object{"repository_id": input.RepositoryID})
+			result, err := c.record(ctx, http.MethodPost, "/projects/"+input.ProjectID+"/discovery", "proposal", object{"repository_id": input.RepositoryID})
 			if err != nil {
 				return nil, err
 			}
-			if task, ok := result["task"].(object); ok {
-				if refs, ok := task["external_refs"].(object); ok {
+			if task, ok := result["proposal"].(object); ok {
+				if refs, ok := task["source"].(object); ok {
 					if circular, ok := refs["circular"].(object); ok {
 						result["agent_id"] = circular["agent_id"]
 					}

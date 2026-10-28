@@ -364,6 +364,7 @@ func TestCompletionPublicationIsManual(t *testing.T) {
 	if err = postgres.SetTaskCompletionPolicy(t.Context(), tx, task, revision, completion.Policy{Mode: "direct_completion", Requirements: []completion.Requirement{}}); err != nil {
 		t.Fatal(err)
 	}
+	testsupport.ApproveTaskTx(t, tx, task)
 	launch, err := postgres.CreateRun(t.Context(), tx, postgres.RunLaunchInput{TaskID: task, AgentID: agent})
 	if err != nil {
 		t.Fatal(err)

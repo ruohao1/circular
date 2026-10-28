@@ -38,6 +38,9 @@ func (q *Queue) Acquire(ctx context.Context, workerID string) (*worker.Claim, er
 	if err := worker.ValidateID(workerID); err != nil {
 		return nil, err
 	}
+	if err := q.admitApprovedDelegation(ctx); err != nil {
+		return nil, err
+	}
 	tx, err := q.pool.BeginTx(ctx, pgx.TxOptions{})
 	if err != nil {
 		return nil, err

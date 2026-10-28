@@ -1,6 +1,10 @@
 package httpapi
 
 import (
+	"encoding/json"
+	"github.com/google/uuid"
+	"github.com/ruohao1/circular/internal/completion"
+	"github.com/ruohao1/circular/internal/postgres"
 	"net/http"
 
 	"github.com/ruohao1/circular/internal/agents"
@@ -40,17 +44,8 @@ func (a *api) createDiscoveryTask(w http.ResponseWriter, r *http.Request) {
 		problem(w, 409, "The repository discovery agent is disabled")
 		return
 	}
-	task, err := insert(ctx, tx, "tasks", "TaskRead", map[string]any{
-		"project_id": project, "repository_id": values["repository_id"],
-		"title": "Understand " + name, "description": agents.DiscoveryTaskDescription,
-		"completion_policy": map[string]any{"mode": "direct_completion", "requirements": []map[string]string{{"key": "discovery_report", "description": "Summarize the repository and proposed agent roles"}}},
-		"status":            "open", "external_refs": map[string]any{"circular": map[string]any{"kind": agents.DiscoveryPreset, "agent_id": id}},
-	})
-	if dbError(w, err, "discovery task") {
-		return
-	}
-	if dbError(w, tx.Commit(ctx), "discovery task") {
-		return
-	}
-	respond(w, 201, task)
+	repo := uuid.MustParse(values["repository_id"].(string))
+	agent := uuid.MustParse(id)
+	source, _ := json.Marshal(map[string]any{"circular": map[string]any{"kind": agents.DiscoveryPreset, "agent_id": id}})
+	a.proposeTask(w, r, tx, postgres.TaskProposalInput{ProjectID: uuid.MustParse(project), Proposer: "repository discovery", Draft: postgres.ProposalDraft{Title: "Understand " + name, Purpose: "Understand the repository before planning work", Description: agents.DiscoveryTaskDescription, AcceptanceCriteria: []string{"Summarize the repository and proposed agent roles"}, RepositoryID: &repo, PreferredAgentID: &agent, CompletionPolicy: completion.Policy{Mode: "direct_completion", Requirements: []completion.Requirement{{Key: "discovery_report", Description: "Summarize the repository and proposed agent roles"}}}}}, source)
 }

@@ -12,6 +12,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/ruohao1/circular/internal/postgres"
 )
 
 func positiveNumber(value string) bool {
@@ -99,15 +100,17 @@ func (s *Service) ImportLinear(ctx context.Context, project, repository, issueID
 		return "", false, ErrAccess
 	}
 	refs, _ := json.Marshal(map[string]any{"linear": map[string]string{"issue_id": issue.ID, "identifier": issue.Identifier, "url": issue.URL, "account_id": organization.ID}})
-	var id string
-	var inserted bool
-	err = tx.QueryRow(ctx, `INSERT INTO tasks(id,project_id,repository_id,title,description,status,external_refs) VALUES($1,$2,$3,$4,$5,'open',$6)
-        ON CONFLICT (project_id,(external_refs->'linear'->>'issue_id')) WHERE external_refs->'linear'->>'issue_id' IS NOT NULL
-        DO UPDATE SET external_refs=tasks.external_refs RETURNING id,(xmax=0)`, uuid.NewString(), project, repository, issue.Title, issue.Description, refs).Scan(&id, &inserted)
+	id, proposal, err := postgres.ProposeLinearTask(ctx, tx, uuid.MustParse(project), uuid.MustParse(repository), issue.Title, issue.Description, refs)
 	if err != nil {
 		return "", false, err
 	}
-	return id, inserted, tx.Commit(ctx)
+	if err = tx.Commit(ctx); err != nil {
+		return "", false, err
+	}
+	if proposal != nil {
+		return "", false, &postgres.TaskProposalNeeded{Proposal: *proposal}
+	}
+	return id.String(), false, nil
 }
 
 // GitCredential is called only by trusted clone/fetch operations. Repository

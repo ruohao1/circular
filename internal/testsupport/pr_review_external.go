@@ -42,6 +42,7 @@ func SeedExternalPRReviewSource(t *testing.T, pool *pgxpool.Pool, project uuid.U
 	if _, err = tx.Exec(t.Context(), `INSERT INTO tasks(id,project_id,repository_id,title,description,status,external_refs,completion_policy) VALUES($1,$2,$3,'External change','Verify the boundary','ready','{}','{"mode":"review_required","requirements":[]}')`, task, project, repo); err != nil {
 		t.Fatal(err)
 	}
+	ApproveTaskTx(t, tx, task)
 	now := time.Now().UTC()
 	secret := bytes.Repeat([]byte{19}, 32)
 	if _, err = postgres.ClaimExternalWork(t.Context(), tx, postgres.ExternalWorkClaim{TaskID: task, SessionID: session, ExpectedRevision: 1, Secret: secret, ClientName: "External fixture"}, now); err != nil {

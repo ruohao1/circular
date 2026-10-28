@@ -107,7 +107,7 @@ func readWorkSession(ctx context.Context, tx pgx.Tx, id uuid.UUID, lock bool, no
 		s.claimed_at,s.started_at,s.last_contact_at,s.finished_at,s.released_at,s.heartbeat_sequence,s.outcome,
 		s.release_reason,s.needs_user_resolution,s.secret_digest,s.admission_digest,
 		COALESCE(r.status,''),r.worker_id,r.lease_expires_at,r.claimed_at,
-		EXISTS(SELECT 1 FROM delegations d WHERE d.parent_run_id=r.id AND d.request_key IS NOT NULL AND d.status='waiting')
+		EXISTS(SELECT 1 FROM delegations d WHERE d.parent_run_id=r.id AND d.request_key IS NOT NULL AND d.status IN ('awaiting_approval','waiting'))
 		FROM work_sessions s LEFT JOIN runs r ON r.id=s.run_id WHERE s.id=$1`
 	if lock {
 		query += ` FOR UPDATE OF s`

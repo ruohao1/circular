@@ -9,7 +9,7 @@ import {
 } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useRouterState } from "@tanstack/react-router";
-import { api, type Task } from "@/api";
+import { api, TaskProposalRequired, type Task } from "@/api";
 import { scheduleError } from "@/lib/task-schedules";
 import { launchTask, LaunchError, validateTaskDraft } from "@/launch";
 import { useProject, useProjectSelectionLock } from "@/use-project";
@@ -302,6 +302,12 @@ export function TaskLauncherProvider({ children }: { children: ReactNode }) {
         });
         return { task, key, fromBoard: !!draft.boardStage };
       } catch (error) {
+        if (error instanceof TaskProposalRequired) {
+          setDrafts(current => {const next = {...current};delete next[key];return next;});
+          setOpenKey(undefined);
+          throw error;
+        }
+
         setDrafts((current) => ({
           ...current,
           [key]: {

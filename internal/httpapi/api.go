@@ -82,6 +82,7 @@ func New(pool *pgxpool.Pool, config Config) (http.Handler, error) {
 	mux.HandleFunc("GET /api/v1/tasks/{task_id}/planning", a.taskPlanningDetail)
 	mux.HandleFunc("PATCH /api/v1/tasks/{task_id}", a.updateTaskPlanning)
 	mux.HandleFunc("POST /api/v1/tasks/{task_id}/move", a.moveTask)
+	a.taskProposalRoutes(mux)
 	a.completionRoutes(mux)
 	a.workRoutes(mux)
 	mux.HandleFunc("GET /api/v1/projects/{project_id}/run-queue", a.runQueue)
@@ -272,6 +273,13 @@ func (a *api) create(w http.ResponseWriter, r *http.Request, table, schema strin
 				return
 			}
 		}
+	}
+	if table == "tasks" {
+		raw, _ := json.Marshal(values)
+		var draft postgres.ProposalDraft
+		_ = json.Unmarshal(raw, &draft)
+		a.proposeTask(w, r, tx, postgres.TaskProposalInput{ProjectID: uuid.MustParse(values["project_id"].(string)), Draft: draft, Proposer: "private API"}, nil)
+		return
 	}
 	result, err := insert(ctx, tx, table, schema+"Read", values)
 	if dbError(w, err, schema) {

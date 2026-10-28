@@ -7,6 +7,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/ruohao1/circular/internal/postgres"
+	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -156,15 +157,19 @@ func (s *Service) startExternalRequest(ctx context.Context, id, fingerprint stri
 		return out, e
 	}
 	refs, _ := json.Marshal(map[string]any{"linear": map[string]string{"issue_id": source.IssueID, "identifier": source.Identifier, "url": source.URL, "account_id": source.OrganizationID}})
-	taskID := uuid.NewString()
-	var repository, account string
-	e = tx.QueryRow(ctx, `INSERT INTO tasks(id,project_id,repository_id,title,description,status,external_refs) VALUES($1,$2,$3,$4,$5,'open',$6) ON CONFLICT(project_id,(external_refs->'linear'->>'issue_id')) WHERE external_refs->'linear'->>'issue_id' IS NOT NULL DO UPDATE SET external_refs=tasks.external_refs RETURNING id,COALESCE(repository_id::text,''),COALESCE(external_refs->'linear'->>'account_id','')`, taskID, in.ProjectID, in.RepositoryID, in.TaskTitle, in.TaskDescription, refs).Scan(&taskID, &repository, &account)
+	approvedTask, proposal, e := postgres.ProposeLinearTask(ctx, tx, uuid.MustParse(in.ProjectID), uuid.MustParse(in.RepositoryID), in.TaskTitle, in.TaskDescription, refs)
 	if e != nil {
 		return out, e
 	}
-	if repository != in.RepositoryID || account != source.OrganizationID {
-		return out, ErrRequestConflict
+	if proposal != nil {
+		out.Status = "awaiting_approval"
+		out.Reason = "Review the Task scope in Circular: " + s.config.WebURL + "/proposals/" + proposal.ID.String() + "?revision=" + strconv.FormatInt(proposal.Revision, 10)
+		if _, e = tx.Exec(ctx, `UPDATE external_requests SET status=$2,reason=$3,updated_at=now() WHERE id=$1`, id, out.Status, out.Reason); e != nil {
+			return out, e
+		}
+		return out, tx.Commit(ctx)
 	}
+	taskID := approvedTask.String()
 	result, e := postgres.CreateRun(ctx, tx, postgres.RunLaunchInput{TaskID: uuid.MustParse(taskID), AgentID: uuid.MustParse(in.AgentID), RequestKey: "linear-session:" + out.SessionID, ExternalRefs: json.RawMessage(`{}`)})
 	if e != nil {
 		var owned *postgres.WorkOwnershipConflict

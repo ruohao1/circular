@@ -83,7 +83,7 @@ func (p *ProviderFixture) serveGitHub(w http.ResponseWriter, r *http.Request, sl
 			w.WriteHeader(403)
 			return
 		}
-		fixtureJSON(w, map[string]any{"id": 101, "login": "circular-fixture"})
+		fixtureJSON(w, map[string]any{"id": 101, "login": "circular-fixture", "type": "User"})
 		return
 	case "/user/installations":
 		fixtureJSON(w, map[string]any{"total_count": 1, "installations": []any{map[string]any{"id": 101, "app_slug": slug, "account": map[string]string{"login": config.Account, "type": config.AccountType}, "permissions": map[string]string{"contents": config.Contents, "pull_requests": config.PullRequests, "metadata": "read", "administration": config.Administration}}}})

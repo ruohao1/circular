@@ -153,6 +153,7 @@ func TestCompletionDelegationUsesFinalInvocation(t *testing.T) {
 				}
 			}
 			setOutput(codexMessage + codexUsage)
+			approvePendingDelegation(t, f)
 			child := acquire(t, q, "completion-handoff")
 			if child.RunID == f.id {
 				t.Fatal("parent resumed before child")

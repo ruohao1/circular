@@ -27,7 +27,7 @@ func TestGitHubDeliveryHTTPGuardsAndProjectOptIn(t *testing.T) {
 	agent := f.create(t, "agents", map[string]any{"project_id": project["id"], "name": "Fixture"})
 	repository := f.create(t, "repositories", map[string]any{"project_id": project["id"], "name": "Source Not ready to publish" + uuid.NewString(), "clone_url": "/fixture"})
 	task := f.create(t, "tasks", map[string]any{"project_id": project["id"], "title": "Not ready to publish", "repository_id": repository["id"], "description": "Prepared requirements"})
-	f.request(t, "PUT", "/api/v1/tasks/"+task["id"].(string)+"/completion-policy", `{"expected_revision":1,"policy":{"mode":"direct_completion","requirements":[]}}`, 200)
+	f.approveMutation(t, "PUT", "/api/v1/tasks/"+task["id"].(string)+"/completion-policy", `{"expected_revision":1,"policy":{"mode":"direct_completion","requirements":[]}}`)
 	run := f.create(t, "runs", map[string]any{"task_id": task["id"], "agent_id": agent["id"]})
 	path := "/api/v1/runs/" + run["id"].(string) + "/github-delivery"
 	var delivery map[string]any

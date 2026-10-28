@@ -33,7 +33,7 @@ func TestProjectIncludesDiscoveryAndPreparesTaskWithoutStartingRun(t *testing.T)
 	repository := f.create(t, "repositories", map[string]any{"project_id": projectID, "name": "Project source", "clone_url": "/fixture/source"})
 	path := "/api/v1/projects/" + projectID + "/discovery"
 	body, _ := json.Marshal(map[string]any{"repository_id": repository["id"]})
-	task := decode(t, f.request(t, "POST", path, string(body), 201))
+	task := decode(t, f.approveMutation(t, "POST", path, string(body)))
 	if task["project_id"] != projectID || task["repository_id"] != repository["id"] || task["title"] != "Understand Project source" || task["description"] != agents.DiscoveryTaskDescription {
 		t.Fatal("discovery Task lost repository context", task)
 	}

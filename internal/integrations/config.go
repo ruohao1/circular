@@ -10,6 +10,7 @@ import (
 	"errors"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -39,6 +40,7 @@ type OAuthApp struct {
 // Endpoint overrides and HTTPClient are dependency-injection seams for owned
 // provider fixtures. They are never accepted through HTTP or environment settings.
 type Config struct {
+	ApproverGitHubIDs    []string
 	ArtifactRoot         string
 	RepositoryCacheRoot  string
 	APIURL               string
@@ -64,6 +66,7 @@ func LoadConfig(getenv func(string) string) Config {
 		return fallback
 	}
 	return Config{
+		ApproverGitHubIDs:    strings.FieldsFunc(getenv("CIRCULAR_APPROVER_GITHUB_IDS"), func(r rune) bool { return r == ',' || r == ' ' || r == '\n' }),
 		APIURL:               value("CIRCULAR_PUBLIC_API_URL", "http://localhost:8000"),
 		WebURL:               value("CIRCULAR_WEB_URL", "http://localhost:5173"),
 		EncryptionKey:        getenv("CIRCULAR_INTEGRATIONS_ENCRYPTION_KEY"),
@@ -102,6 +105,12 @@ func New(pool *pgxpool.Pool, config Config) (*Service, error) {
 		*entry.target = strings.TrimRight(*entry.target, "/")
 		u, err := url.Parse(*entry.target)
 		if err != nil || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || u.Path != "" || (u.Scheme != "https" && !(u.Scheme == "http" && (u.Hostname() == "localhost" || u.Hostname() == "127.0.0.1" || u.Hostname() == "::1"))) {
+			return nil, ErrConfiguration
+		}
+	}
+	for _, id := range config.ApproverGitHubIDs {
+		n, err := strconv.ParseUint(id, 10, 64)
+		if err != nil || n == 0 || strconv.FormatUint(n, 10) != id {
 			return nil, ErrConfiguration
 		}
 	}

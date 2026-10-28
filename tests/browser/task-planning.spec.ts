@@ -1,3 +1,8 @@
+import {
+  createResource,
+  approveResponse,
+  reviewCurrentProposal,
+} from "./fixtures/approval";
 import { test, expect } from "@playwright/test";
 import { execFileSync } from "node:child_process";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
@@ -30,11 +35,8 @@ test("save, edit, reload and launch the same Task through the real API", async (
   git("commit", "-m", "initial");
   // A bundle is readable across host/container UIDs without relaxing Git ownership checks.
   if (compose) git("bundle", "create", "fixture.bundle", "--all");
-  const post = async (path: string, data: object) => {
-    const r = await request.post(`${base}/${path}`, { data });
-    expect(r.status()).toBe(201);
-    return r.json();
-  };
+  const post = (path: string, data: object) =>
+    createResource(request, path, data);
   try {
     const project = await post("projects", {
       name: `${process.env.CIRCULAR_E2E_PREFIX}planning`,
@@ -61,6 +63,7 @@ test("save, edit, reload and launch the same Task through the real API", async (
     await dialog
       .getByRole("button", { name: "Save Task", exact: true })
       .click();
+    await reviewCurrentProposal(page);
     await expect(page).toHaveURL(/taskId=/);
     const id = new URL(page.url()).searchParams.get("taskId")!;
     expect(
@@ -83,6 +86,7 @@ test("save, edit, reload and launch the same Task through the real API", async (
     await dialog
       .getByRole("button", { name: "Save changes", exact: true })
       .click();
+    await reviewCurrentProposal(page);
     await expect(
       dialog.getByRole("button", { name: "Save changes", exact: true }),
     ).toBeDisabled();
@@ -96,24 +100,6 @@ test("save, edit, reload and launch the same Task through the real API", async (
     await expect(
       dialog.getByLabel("Planned finish", { exact: true }),
     ).toHaveValue("2099-01-03");
-    await dialog
-      .getByRole("button", { name: "Set completion policy", exact: true })
-      .click();
-    await dialog
-      .getByRole("combobox", { name: "Completion policy", exact: true })
-      .click();
-    await page
-      .getByRole("option", { name: "Direct completion", exact: true })
-      .click();
-    await dialog
-      .getByRole("button", { name: "Save completion policy", exact: true })
-      .click();
-    await expect(
-      dialog.getByRole("button", {
-        name: "Edit completion policy",
-        exact: true,
-      }),
-    ).toBeVisible();
     await dialog.getByRole("link", { name: "Start Run", exact: true }).click();
     await expect(page).toHaveURL(new RegExp(`\\/\\?taskId=${id}`));
     await expect(
@@ -168,7 +154,7 @@ test("save, edit, reload and launch the same Task through the real API", async (
   }
 });
 
-test("source-managed Task content stays readonly while planning metadata is editable", async ({
+test("caller-supplied source metadata does not establish trusted provenance", async ({
   page,
   request,
 }) => {
@@ -190,13 +176,13 @@ test("source-managed Task content stays readonly while planning metadata is edit
       },
     },
   });
-  expect(created.status()).toBe(201);
-  const task = await created.json();
+  const task = await approveResponse(request, created);
+  expect(task.external_refs).toEqual({});
   await page.goto(`/tasks?taskId=${task.id}`);
   const dialog = page.getByRole("dialog");
   await expect(
     dialog.getByLabel("Task title", { exact: true }),
-  ).toHaveAttribute("readonly", "");
+  ).not.toHaveAttribute("readonly", "");
   await dialog.getByRole("combobox", { name: "Priority", exact: true }).click();
   await page.getByRole("option", { name: "Urgent", exact: true }).click();
   await dialog.getByLabel("Planned start", { exact: true }).fill("2026-10-04");
@@ -223,7 +209,7 @@ test("source-managed Task content stays readonly while planning metadata is edit
         data: { expected_revision: 2, title: "Overwrite" },
       })
     ).status(),
-  ).toBe(409);
+  ).toBe(202);
 });
 
 test("filtered Kanban anchors preserve hidden neighbors and reject racing revisions", async ({
@@ -245,8 +231,7 @@ test("filtered Kanban anchors preserve hidden neighbors and reject racing revisi
     const response = await request.post(`${base}/tasks`, {
       data: { project_id: project.id, title },
     });
-    expect(response.status()).toBe(201);
-    tasks.push(await response.json());
+    tasks.push(await approveResponse(request, response));
   }
   const planning = async () =>
     await (

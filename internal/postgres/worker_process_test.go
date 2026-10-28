@@ -115,6 +115,7 @@ func TestDelegationFullWorkerLifecycle(t *testing.T) {
 			if err = f.pool.QueryRow(t.Context(), `SELECT count(*) FROM github_run_deliveries`).Scan(&deliveries); err != nil || deliveries != 0 {
 				t.Fatal("premature publication", deliveries, err)
 			}
+			approvePendingDelegation(t, f)
 			var child uuid.UUID
 			if err = f.pool.QueryRow(t.Context(), `SELECT child_run_id FROM delegations WHERE parent_run_id=$1`, f.id).Scan(&child); err != nil {
 				t.Fatal(err)
@@ -592,6 +593,7 @@ func TestRealWorkersKeepCancellationAndContainerAuthorityRunScoped(t *testing.T)
 	if err = tx.QueryRow(t.Context(), `SELECT agent_id FROM runs WHERE id=$1`, f.id).Scan(&agent); err != nil {
 		t.Fatal(err)
 	}
+	testsupport.ApproveTaskTx(t, tx, secondTask)
 	launched, err := postgres.CreateRun(t.Context(), tx, postgres.RunLaunchInput{TaskID: secondTask, AgentID: agent})
 	if err != nil {
 		t.Fatal(err)

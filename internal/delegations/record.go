@@ -3,6 +3,7 @@ package delegations
 import "github.com/google/uuid"
 
 type Record struct {
+	ProposalID    *uuid.UUID `json:"proposal_id"`
 	ID            uuid.UUID  `json:"id"`
 	ParentRunID   uuid.UUID  `json:"parent_run_id"`
 	TargetAgentID uuid.UUID  `json:"target_agent_id"`
