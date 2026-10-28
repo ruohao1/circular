@@ -304,7 +304,7 @@ func TestCancelledCreateRetainsCleanupFailureAndCancellation(t *testing.T) {
 }
 
 func TestRetainedCreateBlocksRetryUntilReconciled(t *testing.T) {
-	d, spec, state := simulatedDocker(t, map[string]any{"create_delay": 0.6, "create_hangs_after_creation": true, "reconciliation_unavailable": true, "remove_delay": 0.05}, func(c *runtimes.DockerConfig) { c.OperationTimeout = 150 * time.Millisecond })
+	d, spec, state := simulatedDocker(t, map[string]any{"create_delay": 5, "create_hangs_after_creation": true, "reconciliation_unavailable": true, "remove_delay": 0.05})
 	if _, err := d.Start(t.Context(), spec); !errors.Is(err, runtimes.ErrOperation) {
 		t.Fatalf("ambiguous create not retained: %v", err)
 	}
@@ -332,13 +332,13 @@ func TestRetainedCreateBlocksRetryUntilReconciled(t *testing.T) {
 }
 
 func TestBlockedStdinHasABoundedFailureAndCompensation(t *testing.T) {
-	d, spec, state := simulatedDocker(t, map[string]any{"start_delay": 5}, func(c *runtimes.DockerConfig) { c.OperationTimeout = 200 * time.Millisecond })
+	d, spec, state := simulatedDocker(t, map[string]any{"start_delay": 5})
 	spec.Stdin = bytes.Repeat([]byte("x"), 4*1024*1024)
 	start := time.Now()
 	if _, err := d.Start(t.Context(), spec); !errors.Is(err, runtimes.ErrStart) {
 		t.Fatalf("blocked input was accepted: %v", err)
 	}
-	if time.Since(start) > 3*time.Second || exists(filepath.Join(state, "created")) {
+	if time.Since(start) > 5*time.Second || exists(filepath.Join(state, "created")) {
 		t.Fatal("blocked input escaped its time or cleanup bound")
 	}
 }
@@ -585,7 +585,7 @@ func TestTimeoutWithoutCommitCanBeRetriedAfterConfirmedAbsence(t *testing.T) {
 }
 
 func TestAmbiguousCreateRemovesOwnedNonceBeforeCheckingForeignName(t *testing.T) {
-	d, spec, state := simulatedDocker(t, map[string]any{"create_delay": 0.6, "create_hangs_after_creation": true, "owned_nonce_with_foreign_name": true}, func(c *runtimes.DockerConfig) { c.OperationTimeout = 150 * time.Millisecond })
+	d, spec, state := simulatedDocker(t, map[string]any{"create_delay": 5, "create_hangs_after_creation": true, "owned_nonce_with_foreign_name": true})
 	if _, err := d.Start(t.Context(), spec); !errors.Is(err, runtimes.ErrOperation) {
 		t.Fatalf("creation did not time out: %v", err)
 	}
@@ -644,11 +644,11 @@ func TestFailedCreateReconcilesOwnedResourcesBeforeReturning(t *testing.T) {
 	}{
 		{"invalid-identity", map[string]any{"invalid_create_id": true}, runtimes.ErrStart},
 		{"nonzero-after-commit", map[string]any{"create_returns_failure": true}, runtimes.ErrStart},
-		{"timeout-after-commit", map[string]any{"create_delay": 0.6, "create_hangs_after_creation": true}, runtimes.ErrOperation},
-		{"late-daemon-commit", map[string]any{"create_delay": 0.6, "create_late_commit_delay": 0.25}, runtimes.ErrOperation},
+		{"timeout-after-commit", map[string]any{"create_delay": 5, "create_hangs_after_creation": true}, runtimes.ErrOperation},
+		{"late-daemon-commit", map[string]any{"create_delay": 5, "create_late_commit_delay": 2.25}, runtimes.ErrOperation},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			d, spec, state := simulatedDocker(t, test.options, func(config *runtimes.DockerConfig) { config.OperationTimeout = 150 * time.Millisecond })
+			d, spec, state := simulatedDocker(t, test.options)
 			_, err := d.Start(t.Context(), spec)
 			if !errors.Is(err, test.failure) {
 				t.Fatalf("unexpected creation error: %v", err)

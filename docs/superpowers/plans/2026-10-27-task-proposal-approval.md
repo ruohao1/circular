@@ -132,10 +132,12 @@ existing checkpoint and continuation. Decision handler never launches a Run.
 - Approval and PR-review Go regressions passed again after the provider fixture
   correction. The production approver allowlist was not relaxed.
 - Hosted frontend checks and both complete browser runs (local and Compose)
-  passed. The first hosted Go job failed in an existing Docker retry fixture.
-  Its 150 ms CLI deadline also failed with controlled 200 ms startup latency.
-  The fixture now uses its standard two-second CLI deadline and a five-second
-  first-create delay, preserving the timeout and exactly-one-retry assertions.
-  The delayed scenario passed three repetitions after this correction. The full
-  runtime package then passed with race detection and real Docker enabled.
+  passed. Hosted Go jobs exposed 150–200 ms CLI deadlines in existing timeout
+  fixtures. Controlled startup and cleanup latency reproduced the failures.
+  These fixtures now use the standard two-second CLI budget and five-second
+  create delays. The late-commit fixture still commits after the CLI timeout.
+  Timeout, cancellation, ownership, cleanup, and exactly-one-retry assertions
+  remain. The delayed startup case passed three repetitions; all delayed cleanup
+  cases passed twice. The full runtime package also passed with race detection
+  and real Docker enabled after the complete fixture correction.
 - No live GitHub sign-in or deployment was performed.
