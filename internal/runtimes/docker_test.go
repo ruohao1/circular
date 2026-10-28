@@ -566,7 +566,8 @@ func TestEmptyInputRepresentationsHaveTheSameLaunchIdentity(t *testing.T) {
 }
 
 func TestTimeoutWithoutCommitCanBeRetriedAfterConfirmedAbsence(t *testing.T) {
-	d, spec, state := simulatedDocker(t, map[string]any{"create_delay": 0.6, "create_hangs_without_commit_once": true}, func(c *runtimes.DockerConfig) { c.OperationTimeout = 150 * time.Millisecond })
+	// Keep the normal CLI budget for a successful retry under race instrumentation.
+	d, spec, state := simulatedDocker(t, map[string]any{"create_delay": 5, "create_hangs_without_commit_once": true})
 	if _, err := d.Start(t.Context(), spec); !errors.Is(err, runtimes.ErrOperation) {
 		t.Fatalf("initial creation did not time out: %v", err)
 	}

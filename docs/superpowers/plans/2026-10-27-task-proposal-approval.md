@@ -114,8 +114,8 @@ existing checkpoint and continuation. Decision handler never launches a Run.
   fixed GitHub callback registration and the Task detail navigation blocker.
 - Proposals use the existing Project collection pattern without pagination.
   External claims retain their existing Ready-stage requirement.
-- This branch starts from `feat/agent-work-mcp`. Its implementation PR targets
-  that branch while the preceding MCP PR remains open. No deployment is included.
+- This branch started from `feat/agent-work-mcp`. After PR #10 merged on
+  2026-10-28, the approval PR was retargeted to `main`. No deployment is included.
 
 ## Verification results
 
@@ -131,5 +131,11 @@ existing checkpoint and continuation. Decision handler never launches a Run.
   proposal handoff suite also passed.
 - Approval and PR-review Go regressions passed again after the provider fixture
   correction. The production approver allowlist was not relaxed.
-- No live GitHub sign-in or deployment was performed. Compose configuration was
-  checked; the full Compose browser run remains for hosted CI.
+- Hosted frontend checks and both complete browser runs (local and Compose)
+  passed. The first hosted Go job failed in an existing Docker retry fixture.
+  Its 150 ms CLI deadline also failed with controlled 200 ms startup latency.
+  The fixture now uses its standard two-second CLI deadline and a five-second
+  first-create delay, preserving the timeout and exactly-one-retry assertions.
+  The delayed scenario passed three repetitions after this correction. The full
+  runtime package then passed with race detection and real Docker enabled.
+- No live GitHub sign-in or deployment was performed.
