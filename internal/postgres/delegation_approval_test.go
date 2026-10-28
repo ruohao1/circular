@@ -8,50 +8,77 @@ import (
 )
 
 func TestDelegationApprovalWaitAndRefusalResume(t *testing.T) {
-	f := delegationAdmissionFixture(t)
-	record, err := f.store.SuspendForDelegation(t.Context(), f.id, f.request, f.checkpoint)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if record.Status != "awaiting_approval" || record.ChildTaskID != nil || record.ChildRunID != nil || record.ProposalID == nil {
-		t.Fatal(record)
-	}
-	q := postgres.NewQueue(f.pool)
-	if claim, err := q.Acquire(t.Context(), "idle-worker"); err != nil || claim != nil {
-		t.Fatal("pending approval executed", claim, err)
-	}
-	tx, err := f.pool.Begin(t.Context())
-	if err != nil {
-		t.Fatal(err)
-	}
-	p, err := postgres.ReadTaskProposal(t.Context(), tx, *record.ProposalID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err = postgres.DecideTaskProposal(t.Context(), tx, p.ID, p.Revision, "rejected", postgres.TaskApprover{ID: "101", Login: "reviewer"}, "Continue the original task"); err != nil {
-		t.Fatal(err)
-	}
-	if err = tx.Commit(t.Context()); err != nil {
-		t.Fatal(err)
-	}
-	claim, err := q.Acquire(t.Context(), "resume-worker")
-	if err != nil || claim == nil || claim.RunID != f.id || !claim.Continuation {
-		t.Fatal(claim, err)
-	}
-	store, _ := postgres.NewResources(f.pool, "resume-worker")
-	store, _ = store.ForInvocation(2)
-	if err = store.WithRun(t.Context(), f.id, func(r *postgres.RunResources) error {
-		_, checkpoint, result, err := r.ContinuationContext()
-		if err == nil && (result.Outcome != "approval_rejected" || result.ChildRunID != uuid.Nil || checkpoint.SourceCommit != f.checkpoint.SourceCommit) {
-			t.Fatal(result, checkpoint)
-		}
-		return err
-	}); err != nil {
-		t.Fatal(err)
-	}
-	var tasks, runs int
-	if err = f.pool.QueryRow(t.Context(), `SELECT (SELECT count(*) FROM tasks),(SELECT count(*) FROM runs)`).Scan(&tasks, &runs); err != nil || tasks != 1 || runs != 1 {
-		t.Fatal(tasks, runs, err)
+	for _, revision := range []string{"rejected", "pending", "approved"} {
+		t.Run(revision, func(t *testing.T) {
+			f := delegationAdmissionFixture(t)
+			record, err := f.store.SuspendForDelegation(t.Context(), f.id, f.request, f.checkpoint)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if record.Status != "awaiting_approval" || record.ChildTaskID != nil || record.ChildRunID != nil || record.ProposalID == nil {
+				t.Fatal(record)
+			}
+			q := postgres.NewQueue(f.pool)
+			if claim, err := q.Acquire(t.Context(), "idle-worker"); err != nil || claim != nil {
+				t.Fatal("pending approval executed", claim, err)
+			}
+			tx, err := f.pool.Begin(t.Context())
+			if err != nil {
+				t.Fatal(err)
+			}
+			p, err := postgres.ReadTaskProposal(t.Context(), tx, *record.ProposalID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err = postgres.DecideTaskProposal(t.Context(), tx, p.ID, p.Revision, "rejected", postgres.TaskApprover{ID: "101", Login: "reviewer"}, "Continue the original task"); err != nil {
+				t.Fatal(err)
+			}
+			if err = tx.Commit(t.Context()); err != nil {
+				t.Fatal(err)
+			}
+			if revision != "rejected" {
+				tx, err = f.pool.Begin(t.Context())
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer tx.Rollback(t.Context())
+				p, err = postgres.ReviseTaskProposal(t.Context(), tx, p.ID, p.Revision, p.ExpectedTaskRevision, p.Draft)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if revision == "approved" {
+					if _, err = postgres.DecideTaskProposal(t.Context(), tx, p.ID, p.Revision, "approved", postgres.TaskApprover{ID: "101", Login: "reviewer"}, ""); err != nil {
+						t.Fatal(err)
+					}
+				}
+				if err = tx.Commit(t.Context()); err != nil {
+					t.Fatal(err)
+				}
+			}
+			claim, err := q.Acquire(t.Context(), "resume-worker")
+			if err != nil || claim == nil || claim.RunID != f.id || !claim.Continuation {
+				t.Fatal(claim, err)
+			}
+			store, _ := postgres.NewResources(f.pool, "resume-worker")
+			store, _ = store.ForInvocation(2)
+			if err = store.WithRun(t.Context(), f.id, func(r *postgres.RunResources) error {
+				_, checkpoint, result, err := r.ContinuationContext()
+				if err == nil && (result.Outcome != "approval_rejected" || result.ChildRunID != uuid.Nil || checkpoint.SourceCommit != f.checkpoint.SourceCommit) {
+					t.Fatal(result, checkpoint)
+				}
+				return err
+			}); err != nil {
+				t.Fatal(err)
+			}
+			wantTasks := 1
+			if revision == "approved" {
+				wantTasks = 2
+			}
+			var tasks, runs int
+			if err = f.pool.QueryRow(t.Context(), `SELECT (SELECT count(*) FROM tasks),(SELECT count(*) FROM runs)`).Scan(&tasks, &runs); err != nil || tasks != wantTasks || runs != 1 {
+				t.Fatal(tasks, runs, err)
+			}
+		})
 	}
 }
 func TestDelegationApprovalDoesNotLaunchUntilWorkerAdmission(t *testing.T) {

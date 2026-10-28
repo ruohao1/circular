@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { fixture as taskFixture, A, T } from "./task-fixture";
+import { fixture as taskFixture, A, B, T } from "./task-fixture";
 const project = "10000000-0000-4000-8000-000000000001",
   id = "10000000-0000-4000-8000-000000000002";
 const proposal = {
@@ -198,4 +198,59 @@ test("a saved scope proposal leaves Task details without discarding its changes"
     page.getByText("Reviewed scope change", { exact: true }),
   ).toBeVisible();
   expect(saves).toBe(1);
+});
+
+test("new proposal holds its Project through editing and submission", async ({
+  page,
+}) => {
+  await taskFixture(page);
+  const posts: { project_id: string; draft: { title: string } }[] = [];
+  let releaseSave!: () => void;
+  const saveGate = new Promise<void>((resolve) => {
+    releaseSave = resolve;
+  });
+  const saved = {
+    ...proposal,
+    project_id: B,
+    draft: { ...proposal.draft, title: "Work for B" },
+  };
+  await page.route("**/api/v1/task-proposals", async (route) => {
+    posts.push(route.request().postDataJSON());
+    await saveGate;
+    await route.fulfill({ status: 201, json: saved });
+  });
+  await page.route(`**/api/v1/task-proposals/${id}`, (route) =>
+    route.fulfill({ json: saved }),
+  );
+  await page.goto("/proposals");
+  const picker = page.getByRole("combobox", { name: "Project", exact: true });
+  await expect(picker).toContainText("Project A");
+  await page.getByRole("button", { name: "New proposal", exact: true }).click();
+  await page.getByLabel("Title", { exact: true }).fill("Work for A");
+  await expect(picker).toBeDisabled();
+  await page.getByRole("button", { name: "Cancel", exact: true }).click();
+  await expect(picker).toBeEnabled();
+  await picker.click();
+  await page.getByRole("option", { name: "Project B", exact: true }).click();
+  await page.getByRole("button", { name: "New proposal", exact: true }).click();
+  await expect(page.getByLabel("Title", { exact: true })).toHaveValue("");
+  await page.getByLabel("Title", { exact: true }).fill("Work for B");
+  try {
+    await page.getByRole("button", { name: "Save proposal", exact: true }).click();
+    await expect.poll(() => posts.length).toBe(1);
+    await expect(picker).toBeDisabled();
+    await expect(
+      page.getByRole("button", { name: "Cancel", exact: true }),
+    ).toBeDisabled();
+    expect(posts[0]).toMatchObject({
+      project_id: B,
+      draft: { title: "Work for B" },
+    });
+  } finally {
+    releaseSave();
+  }
+  await expect(page).toHaveURL(new RegExp(`/proposals/${id}`));
+  await page.getByRole("link", { name: "All proposals" }).click();
+  await expect(picker).toBeEnabled();
+  await expect(picker).toContainText("Project B");
 });

@@ -14,7 +14,7 @@ import (
 // scope; this worker step checks the saved execution intent against current policy.
 func (q *Queue) admitApprovedDelegation(ctx context.Context) error {
 	var parent, project, task uuid.UUID
-	err := q.pool.QueryRow(ctx, `SELECT r.id,t.project_id,t.id FROM delegations d JOIN task_proposals p ON p.id=d.proposal_id JOIN runs r ON r.id=d.parent_run_id JOIN tasks t ON t.id=r.task_id WHERE d.status='awaiting_approval' AND p.status IN ('approved','rejected') AND r.status='waiting_for_input' AND r.worker_id IS NULL ORDER BY d.created_at,d.id LIMIT 1`).Scan(&parent, &project, &task)
+	err := q.pool.QueryRow(ctx, `SELECT r.id,t.project_id,t.id FROM delegations d JOIN task_proposals p ON p.id=d.proposal_id JOIN runs r ON r.id=d.parent_run_id JOIN tasks t ON t.id=r.task_id WHERE d.status='awaiting_approval' AND (p.status='approved' OR EXISTS(SELECT 1 FROM task_proposal_decisions decision WHERE decision.proposal_id=p.id AND decision.decision='rejected')) AND r.status='waiting_for_input' AND r.worker_id IS NULL ORDER BY d.created_at,d.id LIMIT 1`).Scan(&parent, &project, &task)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil
 	}
@@ -38,7 +38,8 @@ func (q *Queue) admitApprovedDelegation(ctx context.Context) error {
 	}
 	var id, target, proposalID uuid.UUID
 	var raw []byte
-	err = tx.QueryRow(ctx, `SELECT id,target_agent_id,proposal_id,execution_intent FROM delegations WHERE parent_run_id=$1 AND status='awaiting_approval' FOR UPDATE`, parent).Scan(&id, &target, &proposalID, &raw)
+	var rejected bool
+	err = tx.QueryRow(ctx, `SELECT id,target_agent_id,proposal_id,execution_intent,EXISTS(SELECT 1 FROM task_proposal_decisions decision WHERE decision.proposal_id=delegations.proposal_id AND decision.decision='rejected') FROM delegations WHERE parent_run_id=$1 AND status='awaiting_approval' FOR UPDATE`, parent).Scan(&id, &target, &proposalID, &raw, &rejected)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil
 	}
@@ -52,7 +53,7 @@ func (q *Queue) admitApprovedDelegation(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	if p.Status == "pending" {
+	if p.Status == "pending" && !rejected {
 		return nil
 	}
 	refuse := func(outcome, reason string) error {
@@ -62,7 +63,8 @@ func (q *Queue) admitApprovedDelegation(ctx context.Context) error {
 		}
 		return tx.Commit(ctx)
 	}
-	if p.Status == "rejected" {
+	// Revising the proposal cannot undo refusal of this saved execution intent.
+	if rejected {
 		return refuse("approval_rejected", "The user rejected the proposed child work. Continue the original parent scope without creating this child again.")
 	}
 	var intent ProvisioningContext

@@ -12,7 +12,7 @@ import {
   useQueryClient,
 } from "@tanstack/react-query";
 import { api, type TaskProposal, type TaskProposalDraft } from "@/api";
-import { useProject } from "@/use-project";
+import { useProject, useProjectSelectionLock } from "@/use-project";
 import { Markdown } from "@/components/markdown";
 import { ErrorAlert } from "@/components/error-alert";
 import { Button } from "@/components/ui/button";
@@ -372,7 +372,7 @@ export function ProposalsPage() {
   const { selectedProject, project } = useProject();
   const navigate = useNavigate();
   const search = useSearch({ strict: false });
-  const [creating, setCreating] = useState(false);
+  const [draftProject, setDraftProject] = useState("");
   const [key, setKey] = useState(() => crypto.randomUUID());
   const list = useQuery({
     queryKey: ["task-proposals", selectedProject],
@@ -382,7 +382,7 @@ export function ProposalsPage() {
   const create = useMutation({
     mutationFn: (draft: TaskProposalDraft) =>
       api.proposeTask({
-        project_id: selectedProject,
+        project_id: draftProject,
         request_key: key,
         proposer: "Circular console",
         draft,
@@ -396,6 +396,7 @@ export function ProposalsPage() {
       });
     },
   });
+  useProjectSelectionLock(!!draftProject || create.isPending);
   return (
     <main className="mx-auto max-w-4xl space-y-6 p-6">
       <div className="flex items-center justify-between gap-4">
@@ -405,7 +406,10 @@ export function ProposalsPage() {
             {project?.name ?? "Choose a Project"}
           </p>
         </div>
-        <Button disabled={!selectedProject} onClick={() => setCreating(true)}>
+        <Button
+          disabled={!selectedProject || !!draftProject}
+          onClick={() => setDraftProject(selectedProject)}
+        >
           New proposal
         </Button>
       </div>
@@ -416,18 +420,19 @@ export function ProposalsPage() {
         </ErrorAlert>
       )}
       <SignIn returnPath="/proposals" />
-      {creating ? (
+      {draftProject ? (
         <Card>
           <CardHeader>
             <CardTitle>Propose work</CardTitle>
           </CardHeader>
           <CardContent>
             <DraftForm
+              key={draftProject}
               initial={emptyDraft}
-              project={selectedProject}
+              project={draftProject}
               pending={create.isPending}
               onSave={(draft) => create.mutate(draft)}
-              onCancel={() => setCreating(false)}
+              onCancel={() => setDraftProject("")}
             />
             {create.error && <ErrorAlert>{create.error.message}</ErrorAlert>}
           </CardContent>
